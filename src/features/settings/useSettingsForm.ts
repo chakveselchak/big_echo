@@ -16,6 +16,8 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
   const [nexaraSecretState, setNexaraSecretState] = useState<SecretSaveState>("unknown");
   const [openaiSecretState, setOpenaiSecretState] = useState<SecretSaveState>("unknown");
   const [audioDevices, setAudioDevices] = useState<string[]>([]);
+  const [textEditorApps, setTextEditorApps] = useState<string[]>([]);
+  const [textEditorAppsLoaded, setTextEditorAppsLoaded] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("audiototext");
 
   const settingsErrors = useMemo(() => validateSettings(settings), [settings]);
@@ -110,6 +112,25 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     void loadAudioDevices().catch(() => undefined);
   }, [audioDevices.length, isTrayWindow, settingsTab]);
 
+  useEffect(() => {
+    if (isTrayWindow) return;
+    if (settingsTab !== "generals" || textEditorAppsLoaded) return;
+    let active = true;
+    tauriInvoke<unknown>("list_text_editor_apps")
+      .then((result) => {
+        if (!active) return;
+        const list = Array.isArray(result) ? result.filter((v): v is string => typeof v === "string") : [];
+        setTextEditorApps(list);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setTextEditorAppsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isTrayWindow, settingsTab, textEditorAppsLoaded]);
+
   return {
     audioDevices,
     autoDetectSystemSource,
@@ -133,5 +154,6 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     settings,
     settingsErrors,
     settingsTab,
+    textEditorApps,
   };
 }

@@ -20,8 +20,8 @@ use commands::sessions::{
     open_session_artifact, open_session_folder, set_ui_sync_state, update_session_details,
 };
 use commands::settings::{
-    detect_system_source_device, get_settings, list_audio_input_devices, open_settings_window,
-    open_tray_window, save_public_settings,
+    detect_system_source_device, get_settings, list_audio_input_devices, list_text_editor_apps,
+    open_settings_window, open_tray_window, save_public_settings,
 };
 use chrono::{DateTime, Local};
 use command_core::{
@@ -831,6 +831,7 @@ mod ipc_runtime_tests {
             .invoke_handler(tauri::generate_handler![
                 get_settings,
                 save_public_settings,
+                list_text_editor_apps,
                 list_sessions,
                 get_live_input_levels,
                 open_session_folder,
@@ -1623,6 +1624,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_public_settings,
+            list_text_editor_apps,
             list_audio_input_devices,
             detect_system_source_device,
             open_settings_window,

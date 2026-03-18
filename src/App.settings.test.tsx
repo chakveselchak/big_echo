@@ -27,6 +27,9 @@ const { invokeMock } = vi.hoisted(() => ({
     if (cmd === "list_audio_input_devices") {
       return ["Built-in Microphone", "BlackHole 2ch"];
     }
+    if (cmd === "list_text_editor_apps") {
+      return ["Notepad", "Visual Studio Code", "Notepad++"];
+    }
     return null;
   }),
 }));
@@ -191,7 +194,7 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Generals" }));
-    await user.type(screen.getByLabelText("Artifact opener app (optional)"), "Visual Studio Code");
+    await user.selectOptions(screen.getByLabelText("Artifact opener app (optional)"), "Visual Studio Code");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => {

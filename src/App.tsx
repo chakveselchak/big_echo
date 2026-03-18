@@ -47,6 +47,7 @@ export function App() {
     settings,
     settingsErrors,
     settingsTab,
+    textEditorApps,
   } = useSettingsForm({ isTrayWindow, setStatus });
   const {
     confirmDeleteSession,
@@ -253,10 +254,17 @@ export function App() {
               </label>
               <label className="field">
                 Artifact opener app (optional)
-                <input
+                <select
                   value={settings.artifact_open_app ?? ""}
                   onChange={(e) => setSettings({ ...settings, artifact_open_app: e.target.value })}
-                />
+                >
+                  <option value="">System default</option>
+                  {textEditorApps.map((editor) => (
+                    <option key={editor} value={editor}>
+                      {editor}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span>Auto-run pipeline on Stop</span>
