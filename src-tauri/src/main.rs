@@ -202,6 +202,10 @@ fn should_hide_tray_popover_on_focus_lost(platform: &str, focused: bool) -> bool
     platform == "macos" && !focused
 }
 
+fn should_probe_idle_levels(recording_active: bool, tray_visible: bool) -> bool {
+    !recording_active && tray_visible
+}
+
 fn position_tray_popover(
     window: &tauri::WebviewWindow,
     anchor: PhysicalPosition<f64>,
@@ -642,7 +646,12 @@ fn spawn_live_levels_worker(app: AppHandle, dirs: AppDirs) {
                 let state = app.state::<AppState>();
                 is_recording_active(state.inner())
             };
-            if !recording_active {
+            let tray_visible = app
+                .get_webview_window("tray")
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false);
+
+            if should_probe_idle_levels(recording_active, tray_visible) {
                 let settings = get_settings_from_dirs(&dirs).ok();
                 let (mic_name, system_name) = if let Some(settings) = settings {
                     let mic = settings.mic_device_name.trim().to_string();
@@ -672,6 +681,9 @@ fn spawn_live_levels_worker(app: AppHandle, dirs: AppDirs) {
                 } else {
                     state.live_levels.reset();
                 }
+            } else if !recording_active {
+                let state = app.state::<AppState>();
+                state.live_levels.reset();
             }
             tokio::time::sleep(std::time::Duration::from_millis(LIVE_LEVELS_IDLE_POLL_MS)).await;
         }
@@ -785,6 +797,13 @@ mod ipc_runtime_tests {
         assert!(should_toggle_tray_popover_on_left_click("macos"));
         assert!(!should_toggle_tray_popover_on_left_click("windows"));
         assert!(!should_toggle_tray_popover_on_left_click("linux"));
+    }
+
+    #[test]
+    fn idle_levels_probe_requires_visible_tray_window() {
+        assert!(should_probe_idle_levels(false, true));
+        assert!(!should_probe_idle_levels(false, false));
+        assert!(!should_probe_idle_levels(true, true));
     }
 
     #[test]
