@@ -101,7 +101,6 @@ describe("App main window", () => {
         "settings-layout"
       );
     });
-    expect(screen.getByText("BigEcho")).toBeInTheDocument();
     expect(screen.queryByText("Recording")).not.toBeInTheDocument();
     expect(screen.queryByText("При закрытии окно сворачивается в трей")).not.toBeInTheDocument();
 
@@ -736,6 +735,7 @@ describe("App main window", () => {
 
     await user.click(screen.getByRole("button", { name: "Get text" }));
     expect(screen.getByRole("button", { name: "Getting text..." })).toBeDisabled();
+    expect(screen.getByRole("status", { name: "Loading text" })).toBeInTheDocument();
 
     act(() => {
       resolveText?.();
@@ -744,6 +744,69 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(screen.getByText("Text fetched successfully")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Get text" })).toBeEnabled();
+    });
+  });
+
+  it("shows summary loader while fetching summary", async () => {
+    const user = userEvent.setup();
+    let resolveSummary: (() => void) | null = null;
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s9",
+            status: "recorded",
+            primary_tag: "slack",
+            topic: "Summary loading",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T13:20:00+03:00",
+            session_dir: "/tmp/s9",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s9",
+          source: "slack",
+          custom_tag: "",
+          topic: "Summary loading",
+          participants: [],
+        };
+      }
+      if (cmd === "run_summary") {
+        return new Promise<string>((resolve) => {
+          resolveSummary = () => resolve("summary complete");
+        });
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_session_meta", { sessionId: "s9" });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Get Summary" }));
+    expect(screen.getByRole("button", { name: "Getting summary..." })).toBeDisabled();
+    expect(screen.getByRole("status", { name: "Loading summary" })).toBeInTheDocument();
+
+    act(() => {
+      resolveSummary?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Summary fetched successfully")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Get Summary" })).toBeEnabled();
     });
   });
 

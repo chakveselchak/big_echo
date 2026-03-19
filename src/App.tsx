@@ -567,10 +567,6 @@ export function App() {
   if (isSettingsWindow) {
     return (
       <main className="app-shell settings-shell mac-window settings-layout">
-        <header className="hero mac-titlebar">
-          <h1 className="mac-title">BigEcho Settings</h1>
-          <p className="status-line">Статус: {formatAppStatus(status)}</p>
-        </header>
         <section className="panel">
           {renderSettingsFields()}
         </section>
@@ -580,13 +576,6 @@ export function App() {
 
   return (
     <main className="app-shell mac-window mac-content">
-      <header className="hero mac-titlebar">
-        <div>
-          <h1 className="mac-title">BigEcho</h1>
-          <p className="status-line">Status: {formatAppStatus(status)}</p>
-        </div>
-      </header>
-
       <section className="panel">
         <h2>Settings</h2>
         {renderSettingsFields()}
@@ -756,28 +745,38 @@ export function App() {
                     disabled={item.status === "recording" || textPending || summaryPending}
                   >
                     {textPending ? (
-                      <>
+                      <span className="button-loading-content">
                         <span className="inline-loader" aria-hidden="true" />
                         Getting text...
-                      </>
+                      </span>
                     ) : (
                       "Get text"
                     )}
                   </button>
+                  {textPending && (
+                    <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
+                      Loading text
+                    </span>
+                  )}
                   <button
                     className="secondary-button"
                     onClick={() => getSummary(item.session_id)}
                     disabled={item.status === "recording" || !item.has_transcript_text || summaryPending || textPending}
                   >
                     {summaryPending ? (
-                      <>
+                      <span className="button-loading-content">
                         <span className="inline-loader" aria-hidden="true" />
                         Getting summary...
-                      </>
+                      </span>
                     ) : (
                       "Get Summary"
                     )}
                   </button>
+                  {summaryPending && (
+                    <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading summary">
+                      Loading summary
+                    </span>
+                  )}
                   {pipelineState && (
                     <span
                       className={

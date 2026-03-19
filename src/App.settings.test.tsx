@@ -66,7 +66,6 @@ describe("App settings window", () => {
 
     expect(screen.getByRole("main")).toHaveClass("mac-window");
     expect(screen.getByRole("main")).toHaveClass("settings-layout");
-    expect(screen.getByText("BigEcho Settings")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("get_settings");
@@ -157,7 +156,6 @@ describe("App settings window", () => {
       });
     });
 
-    expect(screen.getByText("Статус: настройки сохранены")).toBeInTheDocument();
     expect(screen.getByText("Nexara API key: обновлён")).toBeInTheDocument();
     expect(screen.getByText("OpenAI API key: обновлён")).toBeInTheDocument();
   });
@@ -253,7 +251,6 @@ describe("App settings window", () => {
       });
     });
 
-    expect(screen.getByText("Статус: ключи сохранены")).toBeInTheDocument();
     expect(screen.getByText("Nexara API key: обновлён")).toBeInTheDocument();
   });
 });
