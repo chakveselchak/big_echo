@@ -39,11 +39,11 @@ jobs:
         include:
           - runner: windows-latest
             target: ''
-            args: ''
+            args: '--config src-tauri/tauri.windows.conf.json'
           - runner: macos-latest
             target: aarch64-apple-darwin
             args: '--target aarch64-apple-darwin'
-          - runner: macos-13
+          - runner: macos-15-intel
             target: x86_64-apple-darwin
             args: '--target x86_64-apple-darwin'
     runs-on: ${{ matrix.runner }}
