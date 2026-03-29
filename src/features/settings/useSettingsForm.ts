@@ -21,8 +21,10 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<PublicSettings | null>(null);
   const [nexaraKey, setNexaraKey] = useState("");
+  const [salutSpeechAuthKey, setSalutSpeechAuthKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
   const [nexaraSecretState, setNexaraSecretState] = useState<SecretSaveState>("unknown");
+  const [salutSpeechSecretState, setSalutSpeechSecretState] = useState<SecretSaveState>("unknown");
   const [openaiSecretState, setOpenaiSecretState] = useState<SecretSaveState>("unknown");
   const [audioDevices, setAudioDevices] = useState<string[]>([]);
   const [textEditorApps, setTextEditorApps] = useState<TextEditorAppOption[]>([]);
@@ -56,6 +58,7 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
   async function saveApiKeys() {
     let hasSecretError = false;
     let nextNexaraState: SecretSaveState = "unchanged";
+    let nextSalutSpeechState: SecretSaveState = "unchanged";
     let nextOpenAiState: SecretSaveState = "unchanged";
 
     if (nexaraKey.trim()) {
@@ -64,6 +67,19 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
         nextNexaraState = "updated";
       } catch {
         nextNexaraState = "error";
+        hasSecretError = true;
+      }
+    }
+
+    if (salutSpeechAuthKey.trim()) {
+      try {
+        await tauriInvoke("set_api_secret", {
+          name: "SALUTE_SPEECH_AUTH_KEY",
+          value: salutSpeechAuthKey.trim(),
+        });
+        nextSalutSpeechState = "updated";
+      } catch {
+        nextSalutSpeechState = "error";
         hasSecretError = true;
       }
     }
@@ -79,6 +95,7 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     }
 
     setNexaraSecretState(nextNexaraState);
+    setSalutSpeechSecretState(nextSalutSpeechState);
     setOpenaiSecretState(nextOpenAiState);
 
     if (hasSecretError) {
@@ -87,6 +104,7 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     }
 
     if (nextNexaraState === "updated") setNexaraKey("");
+    if (nextSalutSpeechState === "updated") setSalutSpeechAuthKey("");
     if (nextOpenAiState === "updated") setOpenaiKey("");
     setStatus("keys_saved");
   }
@@ -168,6 +186,8 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     nexaraSecretState,
     openaiKey,
     openaiSecretState,
+    salutSpeechAuthKey,
+    salutSpeechSecretState,
     saveApiKeys,
     saveSettings,
     saveSettingsPatch,
@@ -176,6 +196,8 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     setNexaraSecretState,
     setOpenaiKey,
     setOpenaiSecretState,
+    setSalutSpeechAuthKey,
+    setSalutSpeechSecretState,
     setSettings,
     setSettingsTab,
     settings,

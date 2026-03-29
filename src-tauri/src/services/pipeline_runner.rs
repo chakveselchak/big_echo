@@ -17,6 +17,8 @@ use std::path::Path;
 
 const MAX_PIPELINE_RETRY_ATTEMPTS: i64 = 4;
 const RETRY_WORKER_POLL_SECONDS: u64 = 20;
+const SALUTE_SPEECH_DEFAULT_AUTH_URL: &str = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
+const SALUTE_SPEECH_DEFAULT_API_BASE_URL: &str = "https://smartspeech.sber.ru";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PipelineMode {
@@ -35,6 +37,41 @@ fn append_api_call_log_line(session_dir: &Path, event_type: &str, detail: &str) 
     let timestamp = chrono::Local::now().to_rfc3339();
     writeln!(file, "{timestamp} | {event_type} | {detail}").map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn salute_speech_auth_url_for_logging() -> String {
+    std::env::var("BIGECHO_SALUTE_SPEECH_AUTH_URL")
+        .unwrap_or_else(|_| SALUTE_SPEECH_DEFAULT_AUTH_URL.to_string())
+}
+
+fn salute_speech_api_base_url_for_logging() -> String {
+    std::env::var("BIGECHO_SALUTE_SPEECH_API_URL")
+        .unwrap_or_else(|_| SALUTE_SPEECH_DEFAULT_API_BASE_URL.to_string())
+}
+
+fn transcription_request_log_detail(settings: &crate::settings::public_settings::PublicSettings) -> String {
+    if settings.transcription_provider == "salute_speech" {
+        return format!(
+            "provider={} auth_url={} api_base_url={} task={} diarization_setting={} salute_scope={} salute_model={}",
+            settings.transcription_provider.trim(),
+            salute_speech_auth_url_for_logging(),
+            salute_speech_api_base_url_for_logging(),
+            settings.transcription_task.trim(),
+            settings.transcription_diarization_setting.trim(),
+            settings.salute_speech_scope.trim(),
+            settings.salute_speech_model.trim()
+        );
+    }
+
+    format!(
+        "provider={} url={} task={} diarization_setting={} salute_scope={} salute_model={}",
+        settings.transcription_provider.trim(),
+        settings.transcription_url.trim(),
+        settings.transcription_task.trim(),
+        settings.transcription_diarization_setting.trim(),
+        settings.salute_speech_scope.trim(),
+        settings.salute_speech_model.trim()
+    )
 }
 
 pub(crate) fn schedule_retry_for_session(data_dir: &Path, session_id: &str, error: &str) -> Result<(), String> {
@@ -94,7 +131,13 @@ pub async fn run_pipeline_core(
         return Err(detail);
     }
 
-    let (nexara_key, nexara_key_lookup_err) = match get_secret(&dirs.app_data_dir, "NEXARA_API_KEY") {
+    let transcription_secret_name = if settings.transcription_provider == "salute_speech" {
+        "SALUTE_SPEECH_AUTH_KEY"
+    } else {
+        "NEXARA_API_KEY"
+    };
+    let (transcription_secret, transcription_secret_lookup_err) =
+        match get_secret(&dirs.app_data_dir, transcription_secret_name) {
         Ok(value) => (value, None),
         Err(err) => (String::new(), Some(err)),
     };
@@ -105,27 +148,25 @@ pub async fn run_pipeline_core(
 
     let mut transcript: Option<String> = None;
     if needs_transcription {
-        log_api_call(
-            "api_transcription_request",
-            format!(
-                "url={} task={} diarization_setting={}",
-                settings.transcription_url.trim(),
-                settings.transcription_task.trim(),
-                settings.transcription_diarization_setting.trim()
-            ),
-        );
-        let transcribed = match pipeline::transcribe_audio(&settings, &nexara_key, &audio_path).await {
+        log_api_call("api_transcription_request", transcription_request_log_detail(&settings));
+        let transcribed = match pipeline::transcribe_audio(&settings, &transcription_secret, &audio_path).await {
             Ok(text) => text,
             Err(err) => {
                 log_api_call("api_transcription_error", format!("error={err}"));
                 let err = if err.contains("No token specified") {
-                    if let Some(keyring_err) = nexara_key_lookup_err.as_ref() {
-                        format!("{err}. keyring lookup error for NEXARA_API_KEY: {keyring_err}")
-                    } else if nexara_key.trim().is_empty() {
-                        format!("{err}. NEXARA_API_KEY is empty")
+                    if let Some(keyring_err) = transcription_secret_lookup_err.as_ref() {
+                        format!(
+                            "{err}. keyring lookup error for {transcription_secret_name}: {keyring_err}"
+                        )
+                    } else if transcription_secret.trim().is_empty() {
+                        format!("{err}. {transcription_secret_name} is empty")
                     } else {
                         err
                     }
+                } else if settings.transcription_provider == "salute_speech"
+                    && transcription_secret.trim().is_empty()
+                {
+                    format!("{err}. {transcription_secret_name} is empty")
                 } else {
                     err
                 };
@@ -243,4 +284,49 @@ pub fn spawn_retry_worker(dirs: AppDirs) {
             let _ = process_retry_jobs_once(&dirs, now, 10).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::public_settings::PublicSettings;
+
+    fn sample_settings() -> PublicSettings {
+        PublicSettings {
+            recording_root: "./recordings".to_string(),
+            artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
+            transcription_url: "https://api.nexara.ru/api/v1/audio/transcriptions".to_string(),
+            transcription_task: "diarize".to_string(),
+            transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_PERS".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
+            summary_url: "https://example.com/summary".to_string(),
+            summary_prompt: String::new(),
+            openai_model: "gpt-4.1-mini".to_string(),
+            audio_format: "opus".to_string(),
+            opus_bitrate_kbps: 24,
+            mic_device_name: String::new(),
+            system_device_name: String::new(),
+            artifact_opener_app: String::new(),
+            auto_run_pipeline_on_stop: false,
+            api_call_logging_enabled: false,
+        }
+    }
+
+    #[test]
+    fn transcription_request_log_for_salutespeech_uses_salute_endpoints() {
+        let mut settings = sample_settings();
+        settings.transcription_provider = "salute_speech".to_string();
+
+        let detail = transcription_request_log_detail(&settings);
+
+        assert!(detail.contains("provider=salute_speech"));
+        assert!(detail.contains("auth_url="));
+        assert!(detail.contains("api_base_url="));
+        assert!(!detail.contains("url=https://api.nexara.ru/api/v1/audio/transcriptions"));
+    }
 }

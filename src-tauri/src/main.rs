@@ -91,8 +91,13 @@ pub(crate) fn get_settings_from_dirs(dirs: &AppDirs) -> Result<PublicSettings, S
 }
 
 fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
+    let transcription_ready = if settings.transcription_provider == "salute_speech" {
+        true
+    } else {
+        !settings.transcription_url.trim().is_empty()
+    };
     settings.auto_run_pipeline_on_stop
-        && !settings.transcription_url.trim().is_empty()
+        && transcription_ready
         && !settings.summary_url.trim().is_empty()
 }
 
@@ -992,9 +997,15 @@ mod ipc_runtime_tests {
                 .to_string_lossy()
                 .to_string(),
             artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
             transcription_url: format!("{base_url}/transcribe"),
             transcription_task: "transcribe".to_string(),
             transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
             summary_url: format!("{base_url}/summary"),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1036,9 +1047,15 @@ mod ipc_runtime_tests {
                 .to_string_lossy()
                 .to_string(),
             artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
             transcription_url: format!("{base_url}/transcribe"),
             transcription_task: "transcribe".to_string(),
             transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
             summary_url: format!("{base_url}/summary"),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
