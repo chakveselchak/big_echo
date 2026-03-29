@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 const SALUTE_SPEECH_DEFAULT_AUTH_URL: &str = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
 const SALUTE_SPEECH_DEFAULT_API_BASE_URL: &str = "https://smartspeech.sber.ru";
-const SALUTE_SPEECH_STATUS_POLL_ATTEMPTS: usize = 60;
-const SALUTE_SPEECH_STATUS_POLL_DELAY_MS: u64 = 250;
+const SALUTE_SPEECH_STATUS_POLL_ATTEMPTS: usize = 300;
+const SALUTE_SPEECH_STATUS_POLL_DELAY_MS: u64 = 1000;
 const SALUTE_SPEECH_BUNDLED_ROOT_CERT_PEM: &[u8] =
     include_bytes!("../../certs/russian_trusted_root_ca.cer");
 
@@ -262,7 +262,8 @@ async fn poll_salute_speech_task(
     access_token: &str,
     task_id: &str,
 ) -> Result<String, String> {
-    for _ in 0..SALUTE_SPEECH_STATUS_POLL_ATTEMPTS {
+    let mut last_status = String::new();
+    for _ in 0..salute_speech_status_poll_attempts() {
         let headers = salute_speech_bearer_headers(access_token)?;
         let res = client
             .get(format!("{}/rest/v1/task:get", salute_speech_api_base_url()))
@@ -278,6 +279,7 @@ async fn poll_salute_speech_task(
             .and_then(|v| v.as_str())
             .or_else(|| body.get("result").and_then(|v| v.get("status")).and_then(|v| v.as_str()))
             .unwrap_or_default();
+        last_status = status.to_string();
 
         if status == "DONE" {
             return body
@@ -304,12 +306,35 @@ async fn poll_salute_speech_task(
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(
-            SALUTE_SPEECH_STATUS_POLL_DELAY_MS,
+            salute_speech_status_poll_delay_ms(),
         ))
         .await;
     }
 
-    Err("SalutSpeech task polling timed out".to_string())
+    if last_status.is_empty() {
+        Err("SalutSpeech task polling timed out".to_string())
+    } else {
+        Err(format!(
+            "SalutSpeech task polling timed out after {} attempts; last status: {}",
+            salute_speech_status_poll_attempts(),
+            last_status
+        ))
+    }
+}
+
+fn salute_speech_status_poll_attempts() -> usize {
+    std::env::var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_ATTEMPTS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(SALUTE_SPEECH_STATUS_POLL_ATTEMPTS)
+}
+
+fn salute_speech_status_poll_delay_ms() -> u64 {
+    std::env::var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(SALUTE_SPEECH_STATUS_POLL_DELAY_MS)
 }
 
 fn salute_speech_task_error_detail(body: &serde_json::Value) -> String {
@@ -554,6 +579,12 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    fn lock_salute_speech_env() -> std::sync::MutexGuard<'static, ()> {
+        salute_speech_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
         let mut data = Vec::new();
         let mut buf = [0_u8; 4096];
@@ -718,7 +749,7 @@ mod tests {
 
     #[test]
     fn transcribe_audio_runs_salutespeech_async_flow() {
-        let _env_guard = salute_speech_env_lock().lock().expect("env lock");
+        let _env_guard = lock_salute_speech_env();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         let requests: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -851,7 +882,7 @@ mod tests {
 
     #[test]
     fn transcribe_audio_reports_salutespeech_task_error_detail() {
-        let _env_guard = salute_speech_env_lock().lock().expect("env lock");
+        let _env_guard = lock_salute_speech_env();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         let server = thread::spawn(move || {
@@ -939,7 +970,7 @@ mod tests {
 
     #[test]
     fn transcribe_audio_uses_actual_recorded_file_format_for_salutespeech() {
-        let _env_guard = salute_speech_env_lock().lock().expect("env lock");
+        let _env_guard = lock_salute_speech_env();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         let requests: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -1043,6 +1074,111 @@ mod tests {
             .expect("http request body should exist");
         let payload: serde_json::Value = serde_json::from_str(recognize_body).expect("valid json payload");
         assert_eq!(payload["options"]["audio_encoding"].as_str(), Some("MP3"));
+    }
+
+    #[test]
+    fn transcribe_audio_allows_longer_salutespeech_polling_via_override() {
+        let _env_guard = lock_salute_speech_env();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = thread::spawn(move || {
+            let mut poll_count = 0usize;
+            for _ in 0..70 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let req = read_http_request(&mut stream);
+                let req_str = String::from_utf8_lossy(&req).to_string();
+
+                let (content_type, body) = if req_str.starts_with("POST /api/v2/oauth ") {
+                    (
+                        "application/json",
+                        r#"{"access_token":"salute-token","expires_at":1893456000000}"#.to_string(),
+                    )
+                } else if req_str.starts_with("POST /rest/v1/data:upload ") {
+                    (
+                        "application/json",
+                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#.to_string(),
+                    )
+                } else if req_str.starts_with("POST /rest/v1/speech:async_recognize ") {
+                    (
+                        "application/json",
+                        r#"{"status":200,"result":{"id":"task-1","status":"NEW"}}"#.to_string(),
+                    )
+                } else if req_str.starts_with("GET /rest/v1/task:get?id=task-1 ") {
+                    poll_count += 1;
+                    if poll_count < 66 {
+                        (
+                            "application/json",
+                            r#"{"status":"NEW"}"#.to_string(),
+                        )
+                    } else {
+                        (
+                            "application/json",
+                            r#"{"status":"DONE","response_file_id":"response-file-1"}"#.to_string(),
+                        )
+                    }
+                } else if req_str.starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ") {
+                    (
+                        "application/json",
+                        r#"{"text":"salute transcript"}"#.to_string(),
+                    )
+                } else {
+                    ("text/plain", format!("unexpected request: {req_str}"))
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).expect("write");
+            }
+        });
+
+        let auth_url = format!("http://{addr}/api/v2/oauth");
+        let api_base_url = format!("http://{addr}");
+        std::env::set_var("BIGECHO_SALUTE_SPEECH_AUTH_URL", &auth_url);
+        std::env::set_var("BIGECHO_SALUTE_SPEECH_API_URL", &api_base_url);
+        std::env::set_var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_ATTEMPTS", "70");
+        std::env::set_var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_DELAY_MS", "0");
+
+        let tmp_path =
+            std::env::temp_dir().join(format!("bigecho_pipeline_{}.opus", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp_path, b"fake-opus").expect("write temp opus");
+        let settings = PublicSettings {
+            recording_root: "./recordings".to_string(),
+            artifact_open_app: String::new(),
+            transcription_provider: "salute_speech".to_string(),
+            transcription_url: String::new(),
+            transcription_task: "transcribe".to_string(),
+            transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_B2B".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
+            summary_url: "https://example.com/summary".to_string(),
+            summary_prompt: String::new(),
+            openai_model: "gpt-4.1-mini".to_string(),
+            audio_format: "opus".to_string(),
+            opus_bitrate_kbps: 24,
+            mic_device_name: String::new(),
+            system_device_name: String::new(),
+            artifact_opener_app: String::new(),
+            auto_run_pipeline_on_stop: false,
+            api_call_logging_enabled: false,
+        };
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let out = rt
+            .block_on(transcribe_audio(&settings, "salute-auth-key", &tmp_path))
+            .expect("transcribe ok");
+        assert_eq!(out, "salute transcript");
+
+        std::env::remove_var("BIGECHO_SALUTE_SPEECH_AUTH_URL");
+        std::env::remove_var("BIGECHO_SALUTE_SPEECH_API_URL");
+        std::env::remove_var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_ATTEMPTS");
+        std::env::remove_var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_DELAY_MS");
+        server.join().expect("join");
     }
 
     #[test]
