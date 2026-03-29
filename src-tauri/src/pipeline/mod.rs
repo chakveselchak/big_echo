@@ -500,11 +500,65 @@ fn extract_transcript_text(body: &serde_json::Value) -> Result<String, String> {
     {
         return Ok(text.to_string());
     }
-    Ok(body
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string())
+    if let Some(text) = extract_salute_results_text(body) {
+        return Ok(text);
+    }
+    Ok(String::new())
+}
+
+fn extract_salute_results_text(body: &serde_json::Value) -> Option<String> {
+    match body {
+        serde_json::Value::Array(items) => {
+            let chunks: Vec<String> = items
+                .iter()
+                .filter_map(extract_salute_chunk_text)
+                .collect();
+            if chunks.is_empty() {
+                None
+            } else {
+                Some(chunks.join("\n\n"))
+            }
+        }
+        serde_json::Value::Object(_) => {
+            if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
+                let parts: Vec<&str> = results
+                    .iter()
+                    .filter_map(|item| item.get("text").and_then(|v| v.as_str()).map(str::trim))
+                    .filter(|text| !text.is_empty())
+                    .collect();
+                if !parts.is_empty() {
+                    return Some(parts.join(" "));
+                }
+            }
+
+            if let Some(result) = body.get("result") {
+                return extract_salute_results_text(result);
+            }
+
+            None
+        }
+        _ => None,
+    }
+}
+
+fn extract_salute_chunk_text(item: &serde_json::Value) -> Option<String> {
+    if let Some(text) = item.get("text").and_then(|v| v.as_str()).map(str::trim) {
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+
+    let results = item.get("results").and_then(|v| v.as_array())?;
+    let parts: Vec<&str> = results
+        .iter()
+        .filter_map(|result| result.get("text").and_then(|v| v.as_str()).map(str::trim))
+        .filter(|text| !text.is_empty())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
 }
 
 pub async fn summarize_text(
@@ -1179,6 +1233,28 @@ mod tests {
         std::env::remove_var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_ATTEMPTS");
         std::env::remove_var("BIGECHO_SALUTE_SPEECH_STATUS_POLL_DELAY_MS");
         server.join().expect("join");
+    }
+
+    #[test]
+    fn extract_transcript_text_reads_salutespeech_results_array() {
+        let body = serde_json::json!([
+            {
+                "results": [
+                    {"text": "привет"},
+                    {"text": "мир"}
+                ],
+                "eou": true
+            },
+            {
+                "results": [
+                    {"text": "как дела"}
+                ],
+                "eou": true
+            }
+        ]);
+
+        let text = extract_transcript_text(&body).expect("text");
+        assert_eq!(text, "привет мир\n\nкак дела");
     }
 
     #[test]
