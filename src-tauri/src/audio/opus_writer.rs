@@ -38,11 +38,21 @@ pub fn write_pcm_opus(
         resample_i16(pcm_mono_i16, sample_rate, sr)
     };
 
+    let frame_size = (sr as usize) / 50; // 20ms
+    let mut encoder = Encoder::new(sr, Channels::Mono, Application::Voip)
+        .map_err(|e| format!("failed to create opus encoder: {e}"))?;
+    encoder
+        .set_bitrate(Bitrate::Bits((bitrate_kbps.clamp(12, 128) * 1000) as i32))
+        .map_err(|e| format!("failed to set bitrate: {e}"))?;
+    let pre_skip = encoder
+        .get_lookahead()
+        .map_err(|e| format!("failed to get opus lookahead: {e}"))? as u16;
+
     let file = File::create(path).map_err(|e| e.to_string())?;
     let mut writer = PacketWriter::new(BufWriter::new(file));
     let serial = 1;
 
-    let head = opus_head_packet();
+    let head = opus_head_packet(sr, pre_skip);
     writer
         .write_packet(head, serial, PacketWriteEndInfo::EndPage, 0)
         .map_err(|e| e.to_string())?;
@@ -51,13 +61,6 @@ pub fn write_pcm_opus(
     writer
         .write_packet(tags, serial, PacketWriteEndInfo::EndPage, 0)
         .map_err(|e| e.to_string())?;
-
-    let frame_size = (sr as usize) / 50; // 20ms
-    let mut encoder = Encoder::new(sr, Channels::Mono, Application::Voip)
-        .map_err(|e| format!("failed to create opus encoder: {e}"))?;
-    encoder
-        .set_bitrate(Bitrate::Bits((bitrate_kbps.clamp(12, 128) * 1000) as i32))
-        .map_err(|e| format!("failed to set bitrate: {e}"))?;
 
     let mut packet_buf = vec![0u8; 4000];
     let mut granule: u64 = 0;
@@ -110,18 +113,31 @@ pub fn write_mixed_raw_i16_to_opus(
     let mut writer = PacketWriter::new(BufWriter::new(file));
     let serial = 1;
 
-    writer
-        .write_packet(opus_head_packet(), serial, PacketWriteEndInfo::EndPage, 0)
-        .map_err(|e| e.to_string())?;
-    writer
-        .write_packet(opus_tags_packet("BigEcho"), serial, PacketWriteEndInfo::EndPage, 0)
-        .map_err(|e| e.to_string())?;
-
     let mut encoder = Encoder::new(SAMPLE_RATE, Channels::Mono, Application::Voip)
         .map_err(|e| format!("failed to create opus encoder: {e}"))?;
     encoder
         .set_bitrate(Bitrate::Bits((bitrate_kbps.clamp(12, 128) * 1000) as i32))
         .map_err(|e| format!("failed to set bitrate: {e}"))?;
+    let pre_skip = encoder
+        .get_lookahead()
+        .map_err(|e| format!("failed to get opus lookahead: {e}"))? as u16;
+
+    writer
+        .write_packet(
+            opus_head_packet(SAMPLE_RATE, pre_skip),
+            serial,
+            PacketWriteEndInfo::EndPage,
+            0,
+        )
+        .map_err(|e| e.to_string())?;
+    writer
+        .write_packet(
+            opus_tags_packet("BigEcho"),
+            serial,
+            PacketWriteEndInfo::EndPage,
+            0,
+        )
+        .map_err(|e| e.to_string())?;
 
     let mut mic_resampler = StreamResampler::new(mic_raw_path, mic_rate, SAMPLE_RATE)?;
     let mut system_resampler = match system_raw_path {
@@ -134,9 +150,13 @@ pub fn write_mixed_raw_i16_to_opus(
     let mut emitted_any = false;
 
     loop {
-        let mic_frame = mic_resampler.read_frame(FRAME_SIZE).map_err(|e| e.to_string())?;
+        let mic_frame = mic_resampler
+            .read_frame(FRAME_SIZE)
+            .map_err(|e| e.to_string())?;
         let system_frame = if let Some(resampler) = system_resampler.as_mut() {
-            resampler.read_frame(FRAME_SIZE).map_err(|e| e.to_string())?
+            resampler
+                .read_frame(FRAME_SIZE)
+                .map_err(|e| e.to_string())?
         } else {
             Vec::new()
         };
@@ -252,7 +272,9 @@ impl StreamResampler {
         self.src_pos += step;
         self.compact_buffer();
 
-        Ok(Some(v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16))
+        Ok(Some(
+            v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
+        ))
     }
 
     fn sample_at(&mut self, idx: usize) -> std::io::Result<Option<i16>> {
@@ -316,13 +338,13 @@ fn resample_i16(input: &[i16], src_rate: u32, dst_rate: u32) -> Vec<i16> {
     out
 }
 
-fn opus_head_packet() -> Vec<u8> {
+fn opus_head_packet(sample_rate: u32, pre_skip: u16) -> Vec<u8> {
     let mut out = Vec::with_capacity(19);
     out.extend_from_slice(b"OpusHead");
     out.push(1); // version
     out.push(CHANNELS);
-    out.extend_from_slice(&0u16.to_le_bytes()); // pre-skip
-    out.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+    out.extend_from_slice(&pre_skip.to_le_bytes());
+    out.extend_from_slice(&sample_rate.to_le_bytes());
     out.extend_from_slice(&0i16.to_le_bytes()); // output gain
     out.push(0); // channel mapping family
     out
@@ -368,6 +390,22 @@ mod tests {
         let bytes = std::fs::read(&path).expect("read file");
         assert!(bytes.len() > 128);
         assert_eq!(&bytes[..4], b"OggS");
+    }
+
+    #[test]
+    fn writes_opus_with_non_zero_pre_skip() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("audio_preskip.opus");
+        write_silence_opus(&path, 200, 24).expect("write opus");
+
+        let bytes = std::fs::read(&path).expect("read file");
+        let opus_head_offset = bytes
+            .windows(b"OpusHead".len())
+            .position(|window| window == b"OpusHead")
+            .expect("OpusHead should be present");
+        let pre_skip_offset = opus_head_offset + 10;
+        let pre_skip = u16::from_le_bytes([bytes[pre_skip_offset], bytes[pre_skip_offset + 1]]);
+        assert!(pre_skip > 0, "pre_skip must be non-zero for valid Ogg Opus");
     }
 
     #[test]

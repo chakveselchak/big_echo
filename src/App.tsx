@@ -4,9 +4,12 @@ import {
   fixedSources,
   diarizationSettingOptions,
   PublicSettings,
+  saluteSpeechRecognitionModelOptions,
+  saluteSpeechScopeOptions,
   SessionMetaView,
   SettingsTab,
   StartResponse,
+  transcriptionProviderOptions,
   transcriptionTaskOptions,
 } from "./appTypes";
 import { useRecordingController } from "./features/recording/useRecordingController";
@@ -75,6 +78,8 @@ export function App() {
     nexaraSecretState,
     openaiKey,
     openaiSecretState,
+    salutSpeechAuthKey,
+    salutSpeechSecretState,
     saveApiKeys,
     saveSettings,
     saveSettingsPatch,
@@ -83,6 +88,8 @@ export function App() {
     setNexaraSecretState,
     setOpenaiKey,
     setOpenaiSecretState,
+    setSalutSpeechAuthKey,
+    setSalutSpeechSecretState,
     setSettings,
     setSettingsTab,
     settings,
@@ -178,19 +185,27 @@ export function App() {
   function renderSettingsFields() {
     if (!settings) return null;
     const isOpusFormat = settings.audio_format === "opus";
+    const isNexaraProvider = settings.transcription_provider === "nexara";
     const openerOptions = textEditorApps.length > 0 ? textEditorApps : openerUiFallback;
     const selectedOpenerApp = openerOptions.find((app) => app.id === settings.artifact_open_app) ?? null;
     const snapshot = savedSettingsSnapshot;
     const isDirty = (field: keyof PublicSettings) => Boolean(snapshot && settings[field] !== snapshot[field]);
     const dirtyByTab: Record<SettingsTab, boolean> = {
       audiototext:
+        isDirty("transcription_provider") ||
         isDirty("transcription_url") ||
         isDirty("transcription_task") ||
         isDirty("transcription_diarization_setting") ||
+        isDirty("salute_speech_scope") ||
+        isDirty("salute_speech_model") ||
+        isDirty("salute_speech_language") ||
+        isDirty("salute_speech_sample_rate") ||
+        isDirty("salute_speech_channels_count") ||
         isDirty("summary_url") ||
         isDirty("summary_prompt") ||
         isDirty("openai_model") ||
         nexaraKey.trim().length > 0 ||
+        salutSpeechAuthKey.trim().length > 0 ||
         openaiKey.trim().length > 0,
       generals:
         isDirty("recording_root") ||
@@ -234,52 +249,140 @@ export function App() {
                 <h3>Транскрибация</h3>
                 <div className="settings-tab-grid">
                   <label className="field">
-                    Transcription URL
-                    <input
-                      value={settings.transcription_url}
-                      onChange={(e) => setSettings({ ...settings, transcription_url: e.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    Task
+                    Transcription provider
                     <select
-                      value={settings.transcription_task}
-                      onChange={(e) => setSettings({ ...settings, transcription_task: e.target.value })}
+                      value={settings.transcription_provider}
+                      onChange={(e) => setSettings({ ...settings, transcription_provider: e.target.value })}
                     >
-                      {transcriptionTaskOptions.map((value) => (
+                      {transcriptionProviderOptions.map((value) => (
                         <option key={value} value={value}>
-                          {value}
+                          {value === "nexara" ? "nexara" : "SalutSpeechAPI"}
                         </option>
                       ))}
                     </select>
                   </label>
-                  <label className="field">
-                    Diarization setting
-                    <select
-                      value={settings.transcription_diarization_setting}
-                      onChange={(e) =>
-                        setSettings({ ...settings, transcription_diarization_setting: e.target.value })
-                      }
-                    >
-                      {diarizationSettingOptions.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    Nexara API key
-                    <input
-                      type="password"
-                      value={nexaraKey}
-                      onChange={(e) => {
-                        setNexaraKey(e.target.value);
-                        setNexaraSecretState("unknown");
-                      }}
-                      placeholder="Stored in OS secure storage"
-                    />
-                  </label>
+                  {isNexaraProvider ? (
+                    <>
+                      <label className="field">
+                        Transcription URL
+                        <input
+                          value={settings.transcription_url}
+                          onChange={(e) => setSettings({ ...settings, transcription_url: e.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        Task
+                        <select
+                          value={settings.transcription_task}
+                          onChange={(e) => setSettings({ ...settings, transcription_task: e.target.value })}
+                        >
+                          {transcriptionTaskOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        Diarization setting
+                        <select
+                          value={settings.transcription_diarization_setting}
+                          onChange={(e) =>
+                            setSettings({ ...settings, transcription_diarization_setting: e.target.value })
+                          }
+                        >
+                          {diarizationSettingOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        Nexara API key
+                        <input
+                          type="password"
+                          value={nexaraKey}
+                          onChange={(e) => {
+                            setNexaraKey(e.target.value);
+                            setNexaraSecretState("unknown");
+                          }}
+                          placeholder="Stored in OS secure storage"
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label className="field">
+                        Scope
+                        <select
+                          value={settings.salute_speech_scope}
+                          onChange={(e) => setSettings({ ...settings, salute_speech_scope: e.target.value })}
+                        >
+                          {saluteSpeechScopeOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        Recognition model
+                        <select
+                          value={settings.salute_speech_model}
+                          onChange={(e) => setSettings({ ...settings, salute_speech_model: e.target.value })}
+                        >
+                          {saluteSpeechRecognitionModelOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        Language
+                        <input
+                          value={settings.salute_speech_language}
+                          onChange={(e) => setSettings({ ...settings, salute_speech_language: e.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        Sample rate
+                        <input
+                          type="number"
+                          value={settings.salute_speech_sample_rate}
+                          onChange={(e) =>
+                            setSettings({ ...settings, salute_speech_sample_rate: Number(e.target.value) || 0 })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        Channels count
+                        <input
+                          type="number"
+                          value={settings.salute_speech_channels_count}
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              salute_speech_channels_count: Number(e.target.value) || 0,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        SalutSpeech authorization key
+                        <input
+                          type="password"
+                          value={salutSpeechAuthKey}
+                          onChange={(e) => {
+                            setSalutSpeechAuthKey(e.target.value);
+                            setSalutSpeechSecretState("unknown");
+                          }}
+                          placeholder="Stored in OS secure storage"
+                        />
+                      </label>
+                    </>
+                  )}
                 </div>
               </section>
 
@@ -501,6 +604,9 @@ export function App() {
         </div>
 
         {nexaraSecretState !== "unknown" && <div>Nexara API key: {formatSecretSaveState(nexaraSecretState)}</div>}
+        {salutSpeechSecretState !== "unknown" && (
+          <div>SalutSpeech authorization key: {formatSecretSaveState(salutSpeechSecretState)}</div>
+        )}
         {openaiSecretState !== "unknown" && <div>OpenAI API key: {formatSecretSaveState(openaiSecretState)}</div>}
         {settingsErrors.length > 0 && (
           <div className="error-list">
@@ -675,7 +781,7 @@ export function App() {
                     <div className="session-title-line">
                       <strong>{detail.topic || "Без темы"}</strong>
                       <span className="session-title-meta">
-                        ({detail.source}) - {item.display_date_ru}
+                        ({item.audio_format}) - {item.display_date_ru}
                       </span>
                       <span className="session-duration-label">{item.audio_duration_hms}</span>
                     </div>

@@ -48,7 +48,12 @@ pub struct SessionMeta {
 }
 
 impl SessionMeta {
-    pub fn new(session_id: String, tags: Vec<String>, topic: String, participants: Vec<String>) -> Self {
+    pub fn new(
+        session_id: String,
+        tags: Vec<String>,
+        topic: String,
+        participants: Vec<String>,
+    ) -> Self {
         let now = Local::now();
         let primary_tag = tags
             .first()

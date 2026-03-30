@@ -8,9 +8,15 @@ const { invokeMock } = vi.hoisted(() => ({
       return {
         recording_root: "./recordings",
         artifact_open_app: "",
+        transcription_provider: "nexara",
         transcription_url: "",
         transcription_task: "transcribe",
         transcription_diarization_setting: "general",
+        salute_speech_scope: "SALUTE_SPEECH_CORP",
+        salute_speech_model: "general",
+        salute_speech_language: "ru-RU",
+        salute_speech_sample_rate: 48000,
+        salute_speech_channels_count: 1,
         summary_url: "",
         summary_prompt: "",
         openai_model: "gpt-4.1-mini",
@@ -159,6 +165,71 @@ describe("App settings window", () => {
 
     expect(screen.getByText("Nexara API key: обновлён")).toBeInTheDocument();
     expect(screen.getByText("OpenAI API key: обновлён")).toBeInTheDocument();
+  });
+
+  it("switches to SalutSpeechAPI fields and saves SalutSpeech auth key", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await user.selectOptions(screen.getByLabelText("Transcription provider"), "salute_speech");
+    await user.selectOptions(screen.getByLabelText("Scope"), "SALUTE_SPEECH_B2B");
+    await user.selectOptions(screen.getByLabelText("Recognition model"), "general");
+    await user.clear(screen.getByLabelText("Language"));
+    await user.type(screen.getByLabelText("Language"), "ru-RU");
+    await user.clear(screen.getByLabelText("Sample rate"));
+    await user.type(screen.getByLabelText("Sample rate"), "48000");
+    await user.clear(screen.getByLabelText("Channels count"));
+    await user.type(screen.getByLabelText("Channels count"), "1");
+    await user.type(screen.getByLabelText("SalutSpeech authorization key"), "salute-auth-key");
+
+    expect(screen.queryByLabelText("Nexara API key")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
+        payload: expect.objectContaining({
+          transcription_provider: "salute_speech",
+          salute_speech_scope: "SALUTE_SPEECH_B2B",
+          salute_speech_model: "general",
+          salute_speech_language: "ru-RU",
+          salute_speech_sample_rate: 48000,
+          salute_speech_channels_count: 1,
+        }),
+      });
+      expect(invokeMock).toHaveBeenCalledWith("set_api_secret", {
+        name: "SALUTE_SPEECH_AUTH_KEY",
+        value: "salute-auth-key",
+      });
+    });
+
+    expect(screen.getByText("SalutSpeech authorization key: обновлён")).toBeInTheDocument();
+  });
+
+  it("renders SalutSpeech scope and model as selects with documented options", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await user.selectOptions(screen.getByLabelText("Transcription provider"), "salute_speech");
+
+    const scopeSelect = screen.getByLabelText("Scope");
+    const modelSelect = screen.getByLabelText("Recognition model");
+    expect(scopeSelect.tagName).toBe("SELECT");
+    expect(modelSelect.tagName).toBe("SELECT");
+
+    expect(screen.getByRole("option", { name: "SALUTE_SPEECH_PERS" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "SALUTE_SPEECH_CORP" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "SALUTE_SPEECH_B2B" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "SBER_SPEECH" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "general" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "callcenter" })).toBeInTheDocument();
   });
 
   it("saves auto pipeline setting", async () => {

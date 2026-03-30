@@ -24,9 +24,15 @@ const { listeners, invokeMock } = vi.hoisted(() => ({
       return {
         recording_root: "./recordings",
         artifact_open_app: "",
+        transcription_provider: "nexara",
         transcription_url: "",
         transcription_task: "transcribe",
         transcription_diarization_setting: "general",
+        salute_speech_scope: "SALUTE_SPEECH_CORP",
+        salute_speech_model: "general",
+        salute_speech_language: "ru-RU",
+        salute_speech_sample_rate: 48000,
+        salute_speech_channels_count: 1,
         summary_url: "",
         summary_prompt: "",
         openai_model: "gpt-4.1-mini",
@@ -208,6 +214,46 @@ describe("App main window", () => {
         },
       });
     }, { timeout: 3000 });
+  });
+
+  it("shows audio format in session title meta instead of source", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-format",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Format demo",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T10:00:00+03:00",
+            session_dir: "/tmp/s-format",
+            audio_format: "wav",
+            audio_duration_hms: "00:00:10",
+            has_transcript_text: false,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-format",
+          source: "zoom",
+          custom_tag: "",
+          topic: "Format demo",
+          participants: [],
+        };
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await waitFor(() => {
+      expect(screen.getByText("(wav) - 11.03.2026")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("(zoom) - 11.03.2026")).not.toBeInTheDocument();
   });
 
   it("calls transcription command from Get text and keeps Get Summary disabled without text", async () => {

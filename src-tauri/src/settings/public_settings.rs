@@ -4,14 +4,28 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use url::Url;
 
+const SALUTE_SPEECH_ALLOWED_SCOPES: &[&str] = &[
+    "SALUTE_SPEECH_PERS",
+    "SALUTE_SPEECH_CORP",
+    "SALUTE_SPEECH_B2B",
+    "SBER_SPEECH",
+];
+const SALUTE_SPEECH_ALLOWED_MODELS: &[&str] = &["general", "callcenter"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PublicSettings {
     pub recording_root: String,
     pub artifact_open_app: String,
+    pub transcription_provider: String,
     pub transcription_url: String,
     pub transcription_task: String,
     pub transcription_diarization_setting: String,
+    pub salute_speech_scope: String,
+    pub salute_speech_model: String,
+    pub salute_speech_language: String,
+    pub salute_speech_sample_rate: u32,
+    pub salute_speech_channels_count: u32,
     pub summary_url: String,
     pub summary_prompt: String,
     pub openai_model: String,
@@ -29,9 +43,15 @@ impl Default for PublicSettings {
         Self {
             recording_root: "./recordings".to_string(),
             artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
             transcription_url: String::new(),
             transcription_task: "transcribe".to_string(),
             transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
             summary_url: String::new(),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -62,7 +82,11 @@ impl PublicSettings {
         ) {
             return Err("Invalid audio format".to_string());
         }
-        if !self.transcription_url.is_empty() {
+        if self.transcription_provider != "nexara" && self.transcription_provider != "salute_speech"
+        {
+            return Err("Invalid transcription provider".to_string());
+        }
+        if self.transcription_provider == "nexara" && !self.transcription_url.is_empty() {
             Self::parse_http_url(&self.transcription_url, "transcription")?;
         }
         if !self.summary_url.is_empty() {
@@ -79,6 +103,23 @@ impl PublicSettings {
         }
         if self.opus_bitrate_kbps < 12 || self.opus_bitrate_kbps > 128 {
             return Err("Opus bitrate must be between 12 and 128 kbps".to_string());
+        }
+        if self.transcription_provider == "salute_speech" {
+            if !SALUTE_SPEECH_ALLOWED_SCOPES.contains(&self.salute_speech_scope.as_str()) {
+                return Err("Invalid SalutSpeech scope".to_string());
+            }
+            if !SALUTE_SPEECH_ALLOWED_MODELS.contains(&self.salute_speech_model.as_str()) {
+                return Err("Invalid SalutSpeech recognition model".to_string());
+            }
+            if !matches!(self.audio_format.as_str(), "opus" | "mp3" | "wav") {
+                return Err("SalutSpeech supports only opus, mp3, or wav audio".to_string());
+            }
+            if self.salute_speech_sample_rate == 0 {
+                return Err("SalutSpeech sample rate must be > 0".to_string());
+            }
+            if self.salute_speech_channels_count == 0 {
+                return Err("SalutSpeech channels count must be > 0".to_string());
+            }
         }
         Ok(())
     }
@@ -152,9 +193,15 @@ mod tests {
         let body = r#"{
             "recording_root":"./recordings",
             "artifact_open_app":"",
+            "transcription_provider":"nexara",
             "transcription_url":"",
             "transcription_task":"transcribe",
             "transcription_diarization_setting":"general",
+            "salute_speech_scope":"SALUTE_SPEECH_CORP",
+            "salute_speech_model":"general",
+            "salute_speech_language":"ru-RU",
+            "salute_speech_sample_rate":48000,
+            "salute_speech_channels_count":1,
             "summary_url":"",
             "summary_prompt":"Есть стенограмма встречи. Подготовь краткое саммари.",
             "openai_model":"gpt-4.1-mini",
@@ -177,6 +224,7 @@ mod tests {
         let body = r#"{
             "recording_root":"./recordings",
             "artifact_open_app":"",
+            "transcription_provider":"nexara",
             "transcription_url":"",
             "summary_url":"",
             "openai_model":"gpt-4.1-mini",
@@ -186,8 +234,37 @@ mod tests {
             "system_device_name":""
         }"#;
         let parsed: PublicSettings = serde_json::from_str(body).expect("settings should parse");
+        assert_eq!(parsed.transcription_provider, "nexara");
         assert_eq!(parsed.transcription_task, "transcribe");
         assert_eq!(parsed.transcription_diarization_setting, "general");
+        assert_eq!(parsed.salute_speech_scope, "SALUTE_SPEECH_CORP");
+        assert_eq!(parsed.salute_speech_model, "general");
+        assert_eq!(parsed.salute_speech_language, "ru-RU");
+        assert_eq!(parsed.salute_speech_sample_rate, 48_000);
+        assert_eq!(parsed.salute_speech_channels_count, 1);
+    }
+
+    #[test]
+    fn rejects_invalid_salutespeech_scope() {
+        let s = PublicSettings {
+            transcription_provider: "salute_speech".to_string(),
+            salute_speech_scope: "invalid".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(s.validate(), Err("Invalid SalutSpeech scope".to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_salutespeech_model() {
+        let s = PublicSettings {
+            transcription_provider: "salute_speech".to_string(),
+            salute_speech_model: "invalid".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            s.validate(),
+            Err("Invalid SalutSpeech recognition model".to_string())
+        );
     }
 
     #[test]
@@ -195,9 +272,15 @@ mod tests {
         let body = r#"{
             "recording_root":"./recordings",
             "artifact_open_app":"",
+            "transcription_provider":"nexara",
             "transcription_url":"",
             "transcription_task":"transcribe",
             "transcription_diarization_setting":"general",
+            "salute_speech_scope":"SALUTE_SPEECH_CORP",
+            "salute_speech_model":"general",
+            "salute_speech_language":"ru-RU",
+            "salute_speech_sample_rate":48000,
+            "salute_speech_channels_count":1,
             "summary_url":"",
             "openai_model":"gpt-4.1-mini",
             "audio_format":"opus",
@@ -216,9 +299,15 @@ mod tests {
     fn missing_artifact_open_app_uses_default() {
         let body = r#"{
             "recording_root":"./recordings",
+            "transcription_provider":"nexara",
             "transcription_url":"",
             "transcription_task":"transcribe",
             "transcription_diarization_setting":"general",
+            "salute_speech_scope":"SALUTE_SPEECH_CORP",
+            "salute_speech_model":"general",
+            "salute_speech_language":"ru-RU",
+            "salute_speech_sample_rate":48000,
+            "salute_speech_channels_count":1,
             "summary_url":"",
             "summary_prompt":"Есть стенограмма встречи. Подготовь краткое саммари.",
             "openai_model":"gpt-4.1-mini",
@@ -238,9 +327,15 @@ mod tests {
         let body = r#"{
             "recording_root":"./recordings",
             "artifact_open_app":"",
+            "transcription_provider":"nexara",
             "transcription_url":"",
             "transcription_task":"transcribe",
             "transcription_diarization_setting":"general",
+            "salute_speech_scope":"SALUTE_SPEECH_CORP",
+            "salute_speech_model":"general",
+            "salute_speech_language":"ru-RU",
+            "salute_speech_sample_rate":48000,
+            "salute_speech_channels_count":1,
             "summary_url":"",
             "summary_prompt":"Есть стенограмма встречи. Подготовь краткое саммари.",
             "openai_model":"gpt-4.1-mini",
@@ -261,5 +356,30 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(s.validate(), Err("Invalid audio format".to_string()));
+    }
+
+    #[test]
+    fn rejects_unknown_transcription_provider() {
+        let s = PublicSettings {
+            transcription_provider: "other".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            s.validate(),
+            Err("Invalid transcription provider".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_audio_format_for_salutespeech() {
+        let s = PublicSettings {
+            transcription_provider: "salute_speech".to_string(),
+            audio_format: "m4a".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            s.validate(),
+            Err("SalutSpeech supports only opus, mp3, or wav audio".to_string())
+        );
     }
 }

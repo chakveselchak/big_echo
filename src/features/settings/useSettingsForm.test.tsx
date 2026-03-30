@@ -7,9 +7,15 @@ const { invokeMock } = vi.hoisted(() => ({
       return {
         recording_root: "./recordings",
         artifact_open_app: "",
+        transcription_provider: "nexara",
         transcription_url: "",
         transcription_task: "transcribe",
         transcription_diarization_setting: "general",
+        salute_speech_scope: "SALUTE_SPEECH_CORP",
+        salute_speech_model: "general",
+        salute_speech_language: "ru-RU",
+        salute_speech_sample_rate: 48000,
+        salute_speech_channels_count: 1,
         summary_url: "",
         summary_prompt: "",
         openai_model: "gpt-4.1-mini",
@@ -66,6 +72,30 @@ describe("useSettingsForm", () => {
     expect(invokeMock).toHaveBeenCalledWith("set_api_secret", {
       name: "NEXARA_API_KEY",
       value: "nexara-secret",
+    });
+  });
+
+  it("saves SalutSpeech authorization key through the tauri adapter", async () => {
+    const setStatus = vi.fn();
+    const { result } = renderHook(() =>
+      useSettingsForm({ isTrayWindow: false, setStatus })
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    act(() => {
+      result.current.setSalutSpeechAuthKey("salute-auth-key");
+    });
+
+    await act(async () => {
+      await result.current.saveApiKeys();
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_api_secret", {
+      name: "SALUTE_SPEECH_AUTH_KEY",
+      value: "salute-auth-key",
     });
   });
 });

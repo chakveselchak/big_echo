@@ -14,6 +14,7 @@ pub struct SessionListItem {
     pub display_date_ru: String,
     pub started_at_iso: String,
     pub session_dir: String,
+    pub audio_format: String,
     pub audio_duration_hms: String,
     pub has_transcript_text: bool,
     pub has_summary_text: bool,
@@ -47,6 +48,15 @@ fn file_has_non_empty_text(path: &Path) -> bool {
         Err(_) => return false,
     };
     !content.trim().is_empty()
+}
+
+fn audio_format_from_file_name(file_name: &str) -> String {
+    Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn format_hms(total_seconds: i64) -> String {
@@ -149,7 +159,12 @@ pub fn upsert_session(
     Ok(())
 }
 
-pub fn add_event(app_data_dir: &Path, session_id: &str, event_type: &str, detail: &str) -> Result<(), String> {
+pub fn add_event(
+    app_data_dir: &Path,
+    session_id: &str,
+    event_type: &str,
+    detail: &str,
+) -> Result<(), String> {
     let conn = open(app_data_dir)?;
     conn.execute(
         "INSERT INTO session_events(session_id, at_iso, event_type, detail) VALUES (?1, ?2, ?3, ?4)",
@@ -160,7 +175,10 @@ pub fn add_event(app_data_dir: &Path, session_id: &str, event_type: &str, detail
 }
 
 #[cfg(test)]
-pub fn list_session_events(app_data_dir: &Path, session_id: &str) -> Result<Vec<SessionEvent>, String> {
+pub fn list_session_events(
+    app_data_dir: &Path,
+    session_id: &str,
+) -> Result<Vec<SessionEvent>, String> {
     let conn = open(app_data_dir)?;
     let mut stmt = conn
         .prepare(
@@ -214,6 +232,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                 display_date_ru: row.get(4)?,
                 started_at_iso: row.get(5)?,
                 session_dir: row.get(6)?,
+                audio_format: "unknown".to_string(),
                 audio_duration_hms: "00:00:00".to_string(),
                 has_transcript_text: false,
                 has_summary_text: false,
@@ -231,11 +250,15 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     file_has_non_empty_text(&session_dir.join(&meta.artifacts.transcript_file));
                 let summary_ok =
                     file_has_non_empty_text(&session_dir.join(&meta.artifacts.summary_file));
+                item.audio_format = audio_format_from_file_name(&meta.artifacts.audio_file);
                 item.audio_duration_hms = audio_duration_hms(&meta);
-                item.has_transcript_text =
-                    transcript_ok && !matches!(meta.status, SessionStatus::Recording | SessionStatus::Recorded);
-                item.has_summary_text =
-                    summary_ok && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
+                item.has_transcript_text = transcript_ok
+                    && !matches!(
+                        meta.status,
+                        SessionStatus::Recording | SessionStatus::Recorded
+                    );
+                item.has_summary_text = summary_ok
+                    && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
             }
         }
         out.push(item);
@@ -278,10 +301,16 @@ pub fn delete_session(app_data_dir: &Path, session_id: &str) -> Result<bool, Str
         params![session_id],
     )
     .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM session_events WHERE session_id=?1", params![session_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM session_events WHERE session_id=?1",
+        params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
     let deleted = conn
-        .execute("DELETE FROM sessions WHERE session_id=?1", params![session_id])
+        .execute(
+            "DELETE FROM sessions WHERE session_id=?1",
+            params![session_id],
+        )
         .map_err(|e| e.to_string())?;
     Ok(deleted > 0)
 }
@@ -412,16 +441,19 @@ mod tests {
         meta.started_at_iso = started.to_rfc3339();
         meta.ended_at_iso = Some(ended.to_rfc3339());
         meta.status = SessionStatus::Done;
+        meta.artifacts.audio_file = "audio.mp3".to_string();
         meta.artifacts.transcript_file = "transcript.txt".to_string();
         meta.artifacts.summary_file = "summary.txt".to_string();
 
         save_meta(&meta_path, &meta).expect("save meta");
-        std::fs::write(session_dir.join("transcript.txt"), "mock transcript").expect("write transcript");
+        std::fs::write(session_dir.join("transcript.txt"), "mock transcript")
+            .expect("write transcript");
         std::fs::write(session_dir.join("summary.txt"), "mock summary").expect("write summary");
         upsert_session(dir.path(), &meta, &session_dir, &meta_path).expect("upsert session");
 
         let sessions = list_sessions(dir.path()).expect("list sessions");
         assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].audio_format, "mp3");
         assert_eq!(sessions[0].audio_duration_hms, "00:01:30");
         assert!(sessions[0].has_transcript_text);
         assert!(sessions[0].has_summary_text);
@@ -469,9 +501,8 @@ mod tests {
         assert_eq!(r2, Some(2));
         assert_eq!(r3, None);
 
-        let due =
-            fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
-                .expect("fetch due");
+        let due = fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
+            .expect("fetch due");
         assert!(due.iter().all(|j| j.session_id != session_id));
     }
 
@@ -483,9 +514,8 @@ mod tests {
         let _ = schedule_retry_job(dir.path(), session_id, "e1", 4).expect("schedule");
         clear_retry_job(dir.path(), session_id).expect("clear");
 
-        let due =
-            fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
-                .expect("fetch due");
+        let due = fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
+            .expect("fetch due");
         assert!(due.iter().all(|j| j.session_id != session_id));
     }
 }

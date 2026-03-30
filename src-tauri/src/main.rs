@@ -21,8 +21,7 @@ use commands::recording::{
 use commands::sessions::{
     delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state, list_sessions,
     open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
-    set_ui_sync_state,
-    update_session_details,
+    set_ui_sync_state, update_session_details,
 };
 use commands::settings::{
     detect_system_source_device, get_settings, list_audio_input_devices, list_text_editor_apps,
@@ -91,8 +90,13 @@ pub(crate) fn get_settings_from_dirs(dirs: &AppDirs) -> Result<PublicSettings, S
 }
 
 fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
+    let transcription_ready = if settings.transcription_provider == "salute_speech" {
+        true
+    } else {
+        !settings.transcription_url.trim().is_empty()
+    };
     settings.auto_run_pipeline_on_stop
-        && !settings.transcription_url.trim().is_empty()
+        && transcription_ready
         && !settings.summary_url.trim().is_empty()
 }
 
@@ -992,9 +996,15 @@ mod ipc_runtime_tests {
                 .to_string_lossy()
                 .to_string(),
             artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
             transcription_url: format!("{base_url}/transcribe"),
             transcription_task: "transcribe".to_string(),
             transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
             summary_url: format!("{base_url}/summary"),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1017,11 +1027,13 @@ mod ipc_runtime_tests {
             "Weekly sync".to_string(),
             vec!["Alice".to_string()],
         );
-        meta.artifacts.audio_file = crate::audio::file_writer::audio_file_name(&settings.audio_format);
+        meta.artifacts.audio_file =
+            crate::audio::file_writer::audio_file_name(&settings.audio_format);
         meta.artifacts.transcript_file = "transcript.txt".to_string();
         meta.artifacts.summary_file = "summary.txt".to_string();
         save_meta(&meta_path, &meta).expect("save meta");
-        std::fs::write(session_dir.join(&meta.artifacts.audio_file), b"OggS").expect("write audio fixture");
+        std::fs::write(session_dir.join(&meta.artifacts.audio_file), b"OggS")
+            .expect("write audio fixture");
         upsert_session(app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
     }
 
@@ -1036,9 +1048,15 @@ mod ipc_runtime_tests {
                 .to_string_lossy()
                 .to_string(),
             artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
             transcription_url: format!("{base_url}/transcribe"),
             transcription_task: "transcribe".to_string(),
             transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
             summary_url: format!("{base_url}/summary"),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1195,6 +1213,14 @@ mod ipc_runtime_tests {
         assert!(api_log.contains("api_transcription_success"));
         assert!(api_log.contains("api_summary_request"));
         assert!(api_log.contains("api_summary_success"));
+        assert!(api_log.contains("api_http_request"));
+        assert!(api_log.contains("api_http_response"));
+        assert!(api_log.contains("method: POST"));
+        assert!(api_log.contains(&format!("url: {base_url}/transcribe")));
+        assert!(api_log.contains(&format!("url: {base_url}/summary")));
+        assert!(api_log.contains("status: 200 OK"));
+        assert!(api_log.contains("\"text\": \"mock transcript\""));
+        assert!(api_log.contains("\"content\": \"mock summary\""));
 
         let meta = load_meta(&session_dir.join("meta.json")).expect("load meta");
         assert_eq!(meta.status, SessionStatus::Done);

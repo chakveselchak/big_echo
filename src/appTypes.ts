@@ -1,9 +1,15 @@
 export type PublicSettings = {
   recording_root: string;
   artifact_open_app: string;
+  transcription_provider: string;
   transcription_url: string;
   transcription_task: string;
   transcription_diarization_setting: string;
+  salute_speech_scope: string;
+  salute_speech_model: string;
+  salute_speech_language: string;
+  salute_speech_sample_rate: number;
+  salute_speech_channels_count: number;
   summary_url: string;
   summary_prompt: string;
   openai_model: string;
@@ -29,6 +35,7 @@ export type SessionListItem = {
   display_date_ru: string;
   started_at_iso: string;
   session_dir: string;
+  audio_format: string;
   audio_duration_hms: string;
   has_transcript_text: boolean;
   has_summary_text: boolean;
@@ -76,6 +83,14 @@ export type SessionArtifactPreview = {
 };
 
 export const fixedSources = ["slack", "zoom", "telemost", "telegram", "browser", "facetime"];
+export const transcriptionProviderOptions = ["nexara", "salute_speech"];
 export const transcriptionTaskOptions = ["transcribe", "diarize"];
 export const diarizationSettingOptions = ["general", "meeting", "telephonic"];
 export const audioFormatOptions = ["opus", "mp3", "m4a", "ogg", "wav"];
+export const saluteSpeechScopeOptions = [
+  "SALUTE_SPEECH_PERS",
+  "SALUTE_SPEECH_CORP",
+  "SALUTE_SPEECH_B2B",
+  "SBER_SPEECH",
+];
+export const saluteSpeechRecognitionModelOptions = ["general", "callcenter"];
