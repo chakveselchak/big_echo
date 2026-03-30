@@ -23,6 +23,7 @@ opus = "0.3"
 cpal = "0.16"
 tauri-plugin-global-shortcut = "2"
 base64 = "0.22"
+sha2 = "0.10"
 
 [features]
 default = []

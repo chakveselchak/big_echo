@@ -1,8 +1,10 @@
 use crate::settings::public_settings::PublicSettings;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::error::Error as StdError;
 use std::path::Path;
+use std::sync::Arc;
 use uuid::Uuid;
 
 const SALUTE_SPEECH_DEFAULT_AUTH_URL: &str = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
@@ -11,6 +13,204 @@ const SALUTE_SPEECH_STATUS_POLL_ATTEMPTS: usize = 300;
 const SALUTE_SPEECH_STATUS_POLL_DELAY_MS: u64 = 1000;
 const SALUTE_SPEECH_BUNDLED_ROOT_CERT_PEM: &[u8] =
     include_bytes!("../../certs/russian_trusted_root_ca.cer");
+
+type ExternalApiLogCallback = dyn Fn(&str, String) + Send + Sync;
+
+#[derive(Clone, Default)]
+pub struct ExternalApiLogger {
+    callback: Option<Arc<ExternalApiLogCallback>>,
+}
+
+#[derive(Clone, Debug)]
+enum HttpLogBody {
+    Empty,
+    Json(serde_json::Value),
+    Text(String),
+    Lines(Vec<String>),
+    Binary {
+        content_type: Option<String>,
+        bytes: usize,
+        sha256: String,
+    },
+}
+
+impl ExternalApiLogger {
+    pub fn disabled() -> Self {
+        Self { callback: None }
+    }
+
+    pub fn new<F>(callback: F) -> Self
+    where
+        F: Fn(&str, String) + Send + Sync + 'static,
+    {
+        Self {
+            callback: Some(Arc::new(callback)),
+        }
+    }
+
+    fn log(&self, event_type: &str, detail: String) {
+        if let Some(callback) = &self.callback {
+            callback(event_type, detail);
+        }
+    }
+
+    fn log_http_request(
+        &self,
+        service: &str,
+        operation: &str,
+        method: &str,
+        url: &str,
+        headers: &HeaderMap,
+        body: &HttpLogBody,
+    ) {
+        let mut lines = vec![
+            format!("service: {service}"),
+            format!("operation: {operation}"),
+            format!("method: {method}"),
+            format!("url: {url}"),
+            "headers:".to_string(),
+        ];
+        lines.extend(format_headers(headers).into_iter().map(|line| format!("  {line}")));
+        lines.push("body:".to_string());
+        lines.extend(format_http_body(body).into_iter().map(|line| format!("  {line}")));
+        self.log("api_http_request", lines.join("\n"));
+    }
+
+    fn log_http_response(
+        &self,
+        service: &str,
+        operation: &str,
+        status: &reqwest::StatusCode,
+        headers: &HeaderMap,
+        body_text: &str,
+    ) {
+        let mut lines = vec![
+            format!("service: {service}"),
+            format!("operation: {operation}"),
+            format!("status: {status}"),
+            "headers:".to_string(),
+        ];
+        lines.extend(format_headers(headers).into_iter().map(|line| format!("  {line}")));
+        lines.push("body:".to_string());
+        lines.extend(format_response_body(body_text).into_iter().map(|line| format!("  {line}")));
+        self.log("api_http_response", lines.join("\n"));
+    }
+
+    fn log_http_error(
+        &self,
+        service: &str,
+        operation: &str,
+        method: &str,
+        url: &str,
+        error: &str,
+    ) {
+        let lines = [
+            format!("service: {service}"),
+            format!("operation: {operation}"),
+            format!("method: {method}"),
+            format!("url: {url}"),
+            format!("error: {error}"),
+        ];
+        self.log("api_http_error", lines.join("\n"));
+    }
+}
+
+fn format_headers(headers: &HeaderMap) -> Vec<String> {
+    let mut pairs: Vec<(String, String)> = headers
+        .iter()
+        .map(|(name, value)| {
+            let raw = value.to_str().unwrap_or("<non-utf8>");
+            (name.as_str().to_string(), mask_header_value(name.as_str(), raw))
+        })
+        .collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    if pairs.is_empty() {
+        return vec!["<none>".to_string()];
+    }
+    pairs
+        .into_iter()
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect()
+}
+
+fn mask_header_value(name: &str, value: &str) -> String {
+    if !name.eq_ignore_ascii_case("authorization") {
+        return value.to_string();
+    }
+    if let Some(rest) = value.strip_prefix("Bearer ") {
+        return format!("Bearer {}", mask_secret(rest));
+    }
+    if let Some(rest) = value.strip_prefix("Basic ") {
+        return format!("Basic {}", mask_secret(rest));
+    }
+    mask_secret(value)
+}
+
+fn mask_secret(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= 8 {
+        return "***".to_string();
+    }
+    let suffix = &trimmed[trimmed.len().saturating_sub(4)..];
+    format!("***{suffix}")
+}
+
+fn format_http_body(body: &HttpLogBody) -> Vec<String> {
+    match body {
+        HttpLogBody::Empty => vec!["<empty>".to_string()],
+        HttpLogBody::Json(value) => format_multiline_block(&pretty_json(value)),
+        HttpLogBody::Text(text) => format_multiline_block(text),
+        HttpLogBody::Lines(lines) => {
+            if lines.is_empty() {
+                vec!["<empty>".to_string()]
+            } else {
+                lines.clone()
+            }
+        }
+        HttpLogBody::Binary {
+            content_type,
+            bytes,
+            sha256,
+        } => {
+            let mut lines = Vec::new();
+            if let Some(content_type) = content_type {
+                lines.push(format!("content_type: {content_type}"));
+            }
+            lines.push(format!("bytes: {bytes}"));
+            lines.push(format!("sha256: {sha256}"));
+            lines.push("content: <binary omitted>".to_string());
+            lines
+        }
+    }
+}
+
+fn format_response_body(body_text: &str) -> Vec<String> {
+    if body_text.trim().is_empty() {
+        return vec!["<empty>".to_string()];
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body_text) {
+        return format_multiline_block(&pretty_json(&value));
+    }
+    format_multiline_block(body_text)
+}
+
+fn format_multiline_block(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        return vec!["<empty>".to_string()];
+    }
+    text.lines().map(|line| line.to_string()).collect()
+}
+
+fn pretty_json(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
 
 fn format_diarize_segments(body: &serde_json::Value) -> Option<String> {
     let task = body
@@ -46,21 +246,32 @@ fn format_diarize_segments(body: &serde_json::Value) -> Option<String> {
     }
 }
 
+#[allow(dead_code)]
 pub async fn transcribe_audio(
     settings: &PublicSettings,
     api_key: &str,
     audio_path: &Path,
 ) -> Result<String, String> {
+    transcribe_audio_logged(settings, api_key, audio_path, &ExternalApiLogger::disabled()).await
+}
+
+pub async fn transcribe_audio_logged(
+    settings: &PublicSettings,
+    api_key: &str,
+    audio_path: &Path,
+    logger: &ExternalApiLogger,
+) -> Result<String, String> {
     if settings.transcription_provider == "salute_speech" {
-        return transcribe_audio_with_salutespeech(settings, api_key, audio_path).await;
+        return transcribe_audio_with_salutespeech(settings, api_key, audio_path, logger).await;
     }
-    transcribe_audio_with_nexara(settings, api_key, audio_path).await
+    transcribe_audio_with_nexara(settings, api_key, audio_path, logger).await
 }
 
 async fn transcribe_audio_with_nexara(
     settings: &PublicSettings,
     api_key: &str,
     audio_path: &Path,
+    logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     if settings.transcription_url.trim().is_empty() {
         return Err("Transcription URL is not configured".to_string());
@@ -73,6 +284,9 @@ async fn transcribe_audio_with_nexara(
         .unwrap_or("audio.opus")
         .to_string();
     let mime = crate::audio::file_writer::mime_type_for_audio_path(audio_path);
+    let data_len = data.len();
+    let data_sha256 = sha256_hex(&data);
+    let request_file_name = file_name.clone();
 
     let part = reqwest::multipart::Part::bytes(data)
         .file_name(file_name)
@@ -99,6 +313,29 @@ async fn transcribe_audio_with_nexara(
         HeaderValue::from_str(&bearer).map_err(|e| e.to_string())?,
     );
 
+    let request_body = HttpLogBody::Lines(vec![
+        format!("content_type: multipart/form-data"),
+        format!("field task: {}", settings.transcription_task.trim()),
+        format!(
+            "field diarization_setting: {}",
+            settings.transcription_diarization_setting.trim()
+        ),
+        "field model: whisper-1".to_string(),
+        "field response_format: json".to_string(),
+        format!("file field: file ({request_file_name})"),
+        format!("file content_type: {mime}"),
+        format!("file bytes: {data_len}"),
+        format!("file sha256: {data_sha256}"),
+    ]);
+    logger.log_http_request(
+        "nexara",
+        "transcription",
+        "POST",
+        &settings.transcription_url,
+        &headers,
+        &request_body,
+    );
+
     let client = reqwest::Client::new();
     let res = client
         .post(&settings.transcription_url)
@@ -106,22 +343,13 @@ async fn transcribe_audio_with_nexara(
         .multipart(form)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let message = e.to_string();
+            logger.log_http_error("nexara", "transcription", "POST", &settings.transcription_url, &message);
+            message
+        })?;
 
-    if !res.status().is_success() {
-        let status = res.status();
-        let body = res.text().await.unwrap_or_default();
-        let detail = body.trim();
-        if detail.is_empty() {
-            return Err(format!("transcription failed with status {status}"));
-        }
-        return Err(format!(
-            "transcription failed with status {status}: {}",
-            detail.chars().take(280).collect::<String>()
-        ));
-    }
-
-    let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    let body = parse_json_response(res, "transcription", logger, "nexara", "transcription").await?;
     if let Some(formatted) = format_diarize_segments(&body) {
         return Ok(formatted);
     }
@@ -132,19 +360,21 @@ async fn transcribe_audio_with_salutespeech(
     settings: &PublicSettings,
     auth_key: &str,
     audio_path: &Path,
+    logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     if auth_key.trim().is_empty() {
         return Err("SalutSpeech authorization key is empty".to_string());
     }
 
     let client = salute_speech_client()?;
-    let access_token = request_salute_speech_access_token(&client, auth_key, &settings.salute_speech_scope).await?;
-    let request_file_id = upload_salute_speech_audio(&client, &access_token, audio_path).await?;
+    let access_token =
+        request_salute_speech_access_token(&client, auth_key, &settings.salute_speech_scope, logger).await?;
+    let request_file_id = upload_salute_speech_audio(&client, &access_token, audio_path, logger).await?;
     let task_id =
-        create_salute_speech_recognition_task(&client, &access_token, settings, audio_path, &request_file_id)
+        create_salute_speech_recognition_task(&client, &access_token, settings, audio_path, &request_file_id, logger)
             .await?;
-    let response_file_id = poll_salute_speech_task(&client, &access_token, &task_id).await?;
-    let payload = download_salute_speech_result(&client, &access_token, &response_file_id).await?;
+    let response_file_id = poll_salute_speech_task(&client, &access_token, &task_id, logger).await?;
+    let payload = download_salute_speech_result(&client, &access_token, &response_file_id, logger).await?;
     if let Some(formatted) = format_diarize_segments(&payload) {
         return Ok(formatted);
     }
@@ -155,6 +385,7 @@ async fn request_salute_speech_access_token(
     client: &reqwest::Client,
     auth_key: &str,
     scope: &str,
+    logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -170,16 +401,30 @@ async fn request_salute_speech_access_token(
         "RqUID",
         HeaderValue::from_str(&Uuid::new_v4().to_string()).map_err(|e| e.to_string())?,
     );
+    let url = salute_speech_auth_url();
+    logger.log_http_request(
+        "salute_speech",
+        "token request",
+        "POST",
+        &url,
+        &headers,
+        &HttpLogBody::Text(format!("scope={}", scope.trim())),
+    );
 
     let res = client
-        .post(salute_speech_auth_url())
+        .post(&url)
         .headers(headers)
         .form(&[("scope", scope.trim())])
         .send()
         .await
-        .map_err(|e| format_salute_speech_network_error("token request", &e))?;
+        .map_err(|e| {
+            let formatted = format_salute_speech_network_error("token request", &e);
+            logger.log_http_error("salute_speech", "token request", "POST", &url, &formatted);
+            formatted
+        })?;
 
-    let body = parse_json_response(res, "salutespeech token request").await?;
+    let body = parse_json_response(res, "salutespeech token request", logger, "salute_speech", "token request")
+        .await?;
     body.get("access_token")
         .and_then(|v| v.as_str())
         .map(ToString::to_string)
@@ -191,23 +436,42 @@ async fn upload_salute_speech_audio(
     client: &reqwest::Client,
     access_token: &str,
     audio_path: &Path,
+    logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     let data = std::fs::read(audio_path).map_err(|e| e.to_string())?;
     let mut headers = salute_speech_bearer_headers(access_token)?;
+    let content_type = salute_speech_upload_content_type(audio_path)?;
     headers.insert(
         CONTENT_TYPE,
-        HeaderValue::from_str(&salute_speech_upload_content_type(audio_path)?).map_err(|e| e.to_string())?,
+        HeaderValue::from_str(&content_type).map_err(|e| e.to_string())?,
+    );
+    let url = format!("{}/rest/v1/data:upload", salute_speech_api_base_url());
+    logger.log_http_request(
+        "salute_speech",
+        "audio upload",
+        "POST",
+        &url,
+        &headers,
+        &HttpLogBody::Binary {
+            content_type: Some(content_type.clone()),
+            bytes: data.len(),
+            sha256: sha256_hex(&data),
+        },
     );
 
     let res = client
-        .post(format!("{}/rest/v1/data:upload", salute_speech_api_base_url()))
+        .post(&url)
         .headers(headers)
         .body(data)
         .send()
         .await
-        .map_err(|e| format_salute_speech_network_error("audio upload", &e))?;
+        .map_err(|e| {
+            let formatted = format_salute_speech_network_error("audio upload", &e);
+            logger.log_http_error("salute_speech", "audio upload", "POST", &url, &formatted);
+            formatted
+        })?;
 
-    let body = parse_json_response(res, "salutespeech upload").await?;
+    let body = parse_json_response(res, "salutespeech upload", logger, "salute_speech", "audio upload").await?;
     body.get("result")
         .and_then(|v| v.get("request_file_id"))
         .and_then(|v| v.as_str())
@@ -222,6 +486,7 @@ async fn create_salute_speech_recognition_task(
     settings: &PublicSettings,
     audio_path: &Path,
     request_file_id: &str,
+    logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     let payload = json!({
       "options": {
@@ -236,19 +501,30 @@ async fn create_salute_speech_recognition_task(
 
     let mut headers = salute_speech_bearer_headers(access_token)?;
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    let url = format!("{}/rest/v1/speech:async_recognize", salute_speech_api_base_url());
+    logger.log_http_request(
+        "salute_speech",
+        "recognition task",
+        "POST",
+        &url,
+        &headers,
+        &HttpLogBody::Json(payload.clone()),
+    );
 
     let res = client
-        .post(format!(
-            "{}/rest/v1/speech:async_recognize",
-            salute_speech_api_base_url()
-        ))
+        .post(&url)
         .headers(headers)
         .json(&payload)
         .send()
         .await
-        .map_err(|e| format_salute_speech_network_error("recognition task", &e))?;
+        .map_err(|e| {
+            let formatted = format_salute_speech_network_error("recognition task", &e);
+            logger.log_http_error("salute_speech", "recognition task", "POST", &url, &formatted);
+            formatted
+        })?;
 
-    let body = parse_json_response(res, "salutespeech recognize").await?;
+    let body =
+        parse_json_response(res, "salutespeech recognize", logger, "salute_speech", "recognition task").await?;
     body.get("result")
         .and_then(|v| v.get("id"))
         .and_then(|v| v.as_str())
@@ -261,19 +537,34 @@ async fn poll_salute_speech_task(
     client: &reqwest::Client,
     access_token: &str,
     task_id: &str,
+    logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     let mut last_status = String::new();
     for _ in 0..salute_speech_status_poll_attempts() {
         let headers = salute_speech_bearer_headers(access_token)?;
+        let url = format!("{}/rest/v1/task:get?id={task_id}", salute_speech_api_base_url());
+        logger.log_http_request(
+            "salute_speech",
+            "task status",
+            "GET",
+            &url,
+            &headers,
+            &HttpLogBody::Empty,
+        );
         let res = client
             .get(format!("{}/rest/v1/task:get", salute_speech_api_base_url()))
             .headers(headers)
             .query(&[("id", task_id)])
             .send()
             .await
-            .map_err(|e| format_salute_speech_network_error("task status", &e))?;
+            .map_err(|e| {
+                let formatted = format_salute_speech_network_error("task status", &e);
+                logger.log_http_error("salute_speech", "task status", "GET", &url, &formatted);
+                formatted
+            })?;
 
-        let body = parse_json_response(res, "salutespeech task status").await?;
+        let body = parse_json_response(res, "salutespeech task status", logger, "salute_speech", "task status")
+            .await?;
         let status = body
             .get("status")
             .and_then(|v| v.as_str())
@@ -372,9 +663,22 @@ async fn download_salute_speech_result(
     client: &reqwest::Client,
     access_token: &str,
     response_file_id: &str,
+    logger: &ExternalApiLogger,
 ) -> Result<serde_json::Value, String> {
     let mut headers = salute_speech_bearer_headers(access_token)?;
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    let url = format!(
+        "{}/rest/v1/data:download?response_file_id={response_file_id}",
+        salute_speech_api_base_url()
+    );
+    logger.log_http_request(
+        "salute_speech",
+        "result download",
+        "GET",
+        &url,
+        &headers,
+        &HttpLogBody::Empty,
+    );
 
     let res = client
         .get(format!(
@@ -385,9 +689,13 @@ async fn download_salute_speech_result(
         .query(&[("response_file_id", response_file_id)])
         .send()
         .await
-        .map_err(|e| format_salute_speech_network_error("result download", &e))?;
+        .map_err(|e| {
+            let formatted = format_salute_speech_network_error("result download", &e);
+            logger.log_http_error("salute_speech", "result download", "GET", &url, &formatted);
+            formatted
+        })?;
 
-    parse_json_response(res, "salutespeech download").await
+    parse_json_response(res, "salutespeech download", logger, "salute_speech", "result download").await
 }
 
 fn salute_speech_auth_url() -> String {
@@ -449,21 +757,27 @@ fn salute_speech_upload_content_type(audio_path: &Path) -> Result<String, String
     }
 }
 
-async fn parse_json_response(res: reqwest::Response, context: &str) -> Result<serde_json::Value, String> {
-    if !res.status().is_success() {
-        let status = res.status();
-        let body = res.text().await.unwrap_or_default();
-        let detail = body.trim();
+async fn parse_json_response(
+    res: reqwest::Response,
+    context: &str,
+    logger: &ExternalApiLogger,
+    service: &str,
+    operation: &str,
+) -> Result<serde_json::Value, String> {
+    let status = res.status();
+    let headers = res.headers().clone();
+    let body_text = res.text().await.unwrap_or_default();
+    logger.log_http_response(service, operation, &status, &headers, &body_text);
+
+    if !status.is_success() {
+        let detail = body_text.trim();
         if detail.is_empty() {
             return Err(format!("{context} failed with status {status}"));
         }
-        return Err(format!(
-            "{context} failed with status {status}: {}",
-            detail.chars().take(280).collect::<String>()
-        ));
+        return Err(format!("{context} failed with status {status}: {detail}"));
     }
 
-    res.json().await.map_err(|e| e.to_string())
+    serde_json::from_str(&body_text).map_err(|e| format!("{context} returned invalid JSON: {e}"))
 }
 
 fn format_reqwest_error(error: &reqwest::Error) -> String {
@@ -561,10 +875,20 @@ fn extract_salute_chunk_text(item: &serde_json::Value) -> Option<String> {
     }
 }
 
+#[allow(dead_code)]
 pub async fn summarize_text(
     settings: &PublicSettings,
     api_key: &str,
     transcript: &str,
+) -> Result<String, String> {
+    summarize_text_logged(settings, api_key, transcript, &ExternalApiLogger::disabled()).await
+}
+
+pub async fn summarize_text_logged(
+    settings: &PublicSettings,
+    api_key: &str,
+    transcript: &str,
+    logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     if settings.summary_url.trim().is_empty() {
         return Err("Summary URL is not configured".to_string());
@@ -594,6 +918,14 @@ pub async fn summarize_text(
             HeaderValue::from_str(&bearer).map_err(|e| e.to_string())?,
         );
     }
+    logger.log_http_request(
+        "summary",
+        "chat completions",
+        "POST",
+        &settings.summary_url,
+        &headers,
+        &HttpLogBody::Json(payload.clone()),
+    );
 
     let client = reqwest::Client::new();
     let res = client
@@ -602,13 +934,13 @@ pub async fn summarize_text(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let message = e.to_string();
+            logger.log_http_error("summary", "chat completions", "POST", &settings.summary_url, &message);
+            message
+        })?;
 
-    if !res.status().is_success() {
-        return Err(format!("summary failed with status {}", res.status()));
-    }
-
-    let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    let body = parse_json_response(res, "summary", logger, "summary", "chat completions").await?;
     Ok(body
         .get("choices")
         .and_then(|c| c.get(0))

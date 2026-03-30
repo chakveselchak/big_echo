@@ -1212,6 +1212,14 @@ mod ipc_runtime_tests {
         assert!(api_log.contains("api_transcription_success"));
         assert!(api_log.contains("api_summary_request"));
         assert!(api_log.contains("api_summary_success"));
+        assert!(api_log.contains("api_http_request"));
+        assert!(api_log.contains("api_http_response"));
+        assert!(api_log.contains("method: POST"));
+        assert!(api_log.contains(&format!("url: {base_url}/transcribe")));
+        assert!(api_log.contains(&format!("url: {base_url}/summary")));
+        assert!(api_log.contains("status: 200 OK"));
+        assert!(api_log.contains("\"text\": \"mock transcript\""));
+        assert!(api_log.contains("\"content\": \"mock summary\""));
 
         let meta = load_meta(&session_dir.join("meta.json")).expect("load meta");
         assert_eq!(meta.status, SessionStatus::Done);

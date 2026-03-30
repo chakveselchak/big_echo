@@ -767,7 +767,7 @@ export function App() {
                     <div className="session-title-line">
                       <strong>{detail.topic || "Без темы"}</strong>
                       <span className="session-title-meta">
-                        ({detail.source}) - {item.display_date_ru}
+                        ({item.audio_format}) - {item.display_date_ru}
                       </span>
                       <span className="session-duration-label">{item.audio_duration_hms}</span>
                     </div>

@@ -35,6 +35,7 @@ export type SessionListItem = {
   display_date_ru: string;
   started_at_iso: string;
   session_dir: string;
+  audio_format: string;
   audio_duration_hms: string;
   has_transcript_text: boolean;
   has_summary_text: boolean;

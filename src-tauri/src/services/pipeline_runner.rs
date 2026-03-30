@@ -35,7 +35,14 @@ fn append_api_call_log_line(session_dir: &Path, event_type: &str, detail: &str) 
         .open(&log_path)
         .map_err(|e| e.to_string())?;
     let timestamp = chrono::Local::now().to_rfc3339();
-    writeln!(file, "{timestamp} | {event_type} | {detail}").map_err(|e| e.to_string())?;
+    if detail.contains('\n') {
+        writeln!(file, "{timestamp} | {event_type}").map_err(|e| e.to_string())?;
+        for line in detail.lines() {
+            writeln!(file, "  {line}").map_err(|e| e.to_string())?;
+        }
+    } else {
+        writeln!(file, "{timestamp} | {event_type} | {detail}").map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -118,6 +125,17 @@ pub async fn run_pipeline_core(
             let _ = append_api_call_log_line(&log_session_dir, event_type, &detail);
         }
     };
+    let external_api_logger = if api_logging_enabled {
+        let data_dir = data_dir.clone();
+        let log_session_id = log_session_id.clone();
+        let log_session_dir = log_session_dir.clone();
+        pipeline::ExternalApiLogger::new(move |event_type, detail| {
+            let _ = add_event(&data_dir, &log_session_id, event_type, &detail);
+            let _ = append_api_call_log_line(&log_session_dir, event_type, &detail);
+        })
+    } else {
+        pipeline::ExternalApiLogger::disabled()
+    };
 
     let audio_path = session_dir.join(&meta.artifacts.audio_file);
     if !audio_path.exists() {
@@ -149,7 +167,14 @@ pub async fn run_pipeline_core(
     let mut transcript: Option<String> = None;
     if needs_transcription {
         log_api_call("api_transcription_request", transcription_request_log_detail(&settings));
-        let transcribed = match pipeline::transcribe_audio(&settings, &transcription_secret, &audio_path).await {
+        let transcribed = match pipeline::transcribe_audio_logged(
+            &settings,
+            &transcription_secret,
+            &audio_path,
+            &external_api_logger,
+        )
+        .await
+        {
             Ok(text) => text,
             Err(err) => {
                 log_api_call("api_transcription_error", format!("error={err}"));
@@ -214,7 +239,14 @@ pub async fn run_pipeline_core(
                 settings.summary_prompt.trim().chars().count()
             ),
         );
-        let summary = match pipeline::summarize_text(&settings, &openai_key, &transcript_for_summary).await {
+        let summary = match pipeline::summarize_text_logged(
+            &settings,
+            &openai_key,
+            &transcript_for_summary,
+            &external_api_logger,
+        )
+        .await
+        {
             Ok(text) => text,
             Err(err) => {
                 log_api_call("api_summary_error", format!("error={err}"));
