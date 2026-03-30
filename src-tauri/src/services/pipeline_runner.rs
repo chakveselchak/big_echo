@@ -9,7 +9,8 @@ use crate::settings::public_settings::load_settings;
 use crate::settings::secret_store::get_secret;
 use crate::storage::session_store::{load_meta, save_meta};
 use crate::storage::sqlite_repo::{
-    add_event, clear_retry_job, fetch_due_retry_jobs, get_meta_path, schedule_retry_job, upsert_session,
+    add_event, clear_retry_job, fetch_due_retry_jobs, get_meta_path, schedule_retry_job,
+    upsert_session,
 };
 use std::fs;
 use std::io::Write;
@@ -27,7 +28,11 @@ pub enum PipelineMode {
     SummaryOnly,
 }
 
-fn append_api_call_log_line(session_dir: &Path, event_type: &str, detail: &str) -> Result<(), String> {
+fn append_api_call_log_line(
+    session_dir: &Path,
+    event_type: &str,
+    detail: &str,
+) -> Result<(), String> {
     let log_path = session_dir.join("api_calls.txt");
     let mut file = fs::OpenOptions::new()
         .create(true)
@@ -56,7 +61,9 @@ fn salute_speech_api_base_url_for_logging() -> String {
         .unwrap_or_else(|_| SALUTE_SPEECH_DEFAULT_API_BASE_URL.to_string())
 }
 
-fn transcription_request_log_detail(settings: &crate::settings::public_settings::PublicSettings) -> String {
+fn transcription_request_log_detail(
+    settings: &crate::settings::public_settings::PublicSettings,
+) -> String {
     if settings.transcription_provider == "salute_speech" {
         return format!(
             "provider={} auth_url={} api_base_url={} task={} diarization_setting={} salute_scope={} salute_model={}",
@@ -81,7 +88,11 @@ fn transcription_request_log_detail(settings: &crate::settings::public_settings:
     )
 }
 
-pub(crate) fn schedule_retry_for_session(data_dir: &Path, session_id: &str, error: &str) -> Result<(), String> {
+pub(crate) fn schedule_retry_for_session(
+    data_dir: &Path,
+    session_id: &str,
+    error: &str,
+) -> Result<(), String> {
     match schedule_retry_job(data_dir, session_id, error, MAX_PIPELINE_RETRY_ATTEMPTS)? {
         Some(attempt) => {
             add_event(
@@ -111,7 +122,8 @@ pub async fn run_pipeline_core(
 ) -> Result<String, String> {
     let settings = load_settings(&dirs.app_data_dir)?;
     let data_dir = dirs.app_data_dir.clone();
-    let meta_path = get_meta_path(&data_dir, session_id)?.ok_or_else(|| "Session not found".to_string())?;
+    let meta_path =
+        get_meta_path(&data_dir, session_id)?.ok_or_else(|| "Session not found".to_string())?;
     let mut meta = load_meta(&meta_path)?;
     let session_dir = meta_path
         .parent()
@@ -156,9 +168,9 @@ pub async fn run_pipeline_core(
     };
     let (transcription_secret, transcription_secret_lookup_err) =
         match get_secret(&dirs.app_data_dir, transcription_secret_name) {
-        Ok(value) => (value, None),
-        Err(err) => (String::new(), Some(err)),
-    };
+            Ok(value) => (value, None),
+            Err(err) => (String::new(), Some(err)),
+        };
     let openai_key = get_secret(&dirs.app_data_dir, "OPENAI_API_KEY").unwrap_or_default();
 
     let needs_transcription = matches!(mode, PipelineMode::Full | PipelineMode::TranscriptionOnly);
@@ -166,7 +178,10 @@ pub async fn run_pipeline_core(
 
     let mut transcript: Option<String> = None;
     if needs_transcription {
-        log_api_call("api_transcription_request", transcription_request_log_detail(&settings));
+        log_api_call(
+            "api_transcription_request",
+            transcription_request_log_detail(&settings),
+        );
         let transcribed = match pipeline::transcribe_audio_logged(
             &settings,
             &transcription_secret,
@@ -209,11 +224,20 @@ pub async fn run_pipeline_core(
             "api_transcription_success",
             format!("transcript_chars={}", transcribed.chars().count()),
         );
-        fs::write(session_dir.join(&meta.artifacts.transcript_file), &transcribed).map_err(|e| e.to_string())?;
+        fs::write(
+            session_dir.join(&meta.artifacts.transcript_file),
+            &transcribed,
+        )
+        .map_err(|e| e.to_string())?;
         mark_pipeline_transcribed(&mut meta);
         save_meta(&meta_path, &meta)?;
         upsert_session(&data_dir, &meta, session_dir, &meta_path)?;
-        add_event(&data_dir, &meta.session_id, "transcribed", "Transcript created")?;
+        add_event(
+            &data_dir,
+            &meta.session_id,
+            "transcribed",
+            "Transcript created",
+        )?;
         transcript = Some(transcribed);
     }
 
@@ -222,7 +246,8 @@ pub async fn run_pipeline_core(
             text
         } else {
             let transcript_path = session_dir.join(&meta.artifacts.transcript_file);
-            let text = fs::read_to_string(&transcript_path).map_err(|_| "Transcript file is missing".to_string())?;
+            let text = fs::read_to_string(&transcript_path)
+                .map_err(|_| "Transcript file is missing".to_string())?;
             let trimmed = text.trim();
             if trimmed.is_empty() {
                 return Err("Transcript file is empty".to_string());
@@ -264,11 +289,17 @@ pub async fn run_pipeline_core(
             "api_summary_success",
             format!("summary_chars={}", summary.chars().count()),
         );
-        fs::write(session_dir.join(&meta.artifacts.summary_file), &summary).map_err(|e| e.to_string())?;
+        fs::write(session_dir.join(&meta.artifacts.summary_file), &summary)
+            .map_err(|e| e.to_string())?;
         mark_pipeline_done(&mut meta);
         save_meta(&meta_path, &meta)?;
         upsert_session(&data_dir, &meta, session_dir, &meta_path)?;
-        add_event(&data_dir, &meta.session_id, "pipeline_done", "Summary created")?;
+        add_event(
+            &data_dir,
+            &meta.session_id,
+            "pipeline_done",
+            "Summary created",
+        )?;
     }
 
     if matches!(mode, PipelineMode::Full) {
@@ -281,7 +312,11 @@ pub async fn run_pipeline_core(
     Ok("done".to_string())
 }
 
-pub async fn process_retry_jobs_once(dirs: &AppDirs, now_epoch: i64, limit: usize) -> Result<(), String> {
+pub async fn process_retry_jobs_once(
+    dirs: &AppDirs,
+    now_epoch: i64,
+    limit: usize,
+) -> Result<(), String> {
     let data_dir = dirs.app_data_dir.clone();
     let jobs = fetch_due_retry_jobs(&data_dir, now_epoch, limit)?;
     for job in jobs {

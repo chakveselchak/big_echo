@@ -176,10 +176,8 @@ describe("App settings window", () => {
     });
 
     await user.selectOptions(screen.getByLabelText("Transcription provider"), "salute_speech");
-    await user.clear(screen.getByLabelText("Scope"));
-    await user.type(screen.getByLabelText("Scope"), "SALUTE_SPEECH_B2B");
-    await user.clear(screen.getByLabelText("Recognition model"));
-    await user.type(screen.getByLabelText("Recognition model"), "general");
+    await user.selectOptions(screen.getByLabelText("Scope"), "SALUTE_SPEECH_B2B");
+    await user.selectOptions(screen.getByLabelText("Recognition model"), "general");
     await user.clear(screen.getByLabelText("Language"));
     await user.type(screen.getByLabelText("Language"), "ru-RU");
     await user.clear(screen.getByLabelText("Sample rate"));
@@ -209,6 +207,29 @@ describe("App settings window", () => {
     });
 
     expect(screen.getByText("SalutSpeech authorization key: обновлён")).toBeInTheDocument();
+  });
+
+  it("renders SalutSpeech scope and model as selects with documented options", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await user.selectOptions(screen.getByLabelText("Transcription provider"), "salute_speech");
+
+    const scopeSelect = screen.getByLabelText("Scope");
+    const modelSelect = screen.getByLabelText("Recognition model");
+    expect(scopeSelect.tagName).toBe("SELECT");
+    expect(modelSelect.tagName).toBe("SELECT");
+
+    expect(screen.getByRole("option", { name: "SALUTE_SPEECH_PERS" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "SALUTE_SPEECH_CORP" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "SALUTE_SPEECH_B2B" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "SBER_SPEECH" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "general" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "callcenter" })).toBeInTheDocument();
   });
 
   it("saves auto pipeline setting", async () => {

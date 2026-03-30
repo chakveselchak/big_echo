@@ -21,8 +21,7 @@ use commands::recording::{
 use commands::sessions::{
     delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state, list_sessions,
     open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
-    set_ui_sync_state,
-    update_session_details,
+    set_ui_sync_state, update_session_details,
 };
 use commands::settings::{
     detect_system_source_device, get_settings, list_audio_input_devices, list_text_editor_apps,
@@ -1028,11 +1027,13 @@ mod ipc_runtime_tests {
             "Weekly sync".to_string(),
             vec!["Alice".to_string()],
         );
-        meta.artifacts.audio_file = crate::audio::file_writer::audio_file_name(&settings.audio_format);
+        meta.artifacts.audio_file =
+            crate::audio::file_writer::audio_file_name(&settings.audio_format);
         meta.artifacts.transcript_file = "transcript.txt".to_string();
         meta.artifacts.summary_file = "summary.txt".to_string();
         save_meta(&meta_path, &meta).expect("save meta");
-        std::fs::write(session_dir.join(&meta.artifacts.audio_file), b"OggS").expect("write audio fixture");
+        std::fs::write(session_dir.join(&meta.artifacts.audio_file), b"OggS")
+            .expect("write audio fixture");
         upsert_session(app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
     }
 

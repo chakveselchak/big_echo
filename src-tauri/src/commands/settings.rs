@@ -16,7 +16,10 @@ pub fn get_settings(dirs: tauri::State<AppDirs>) -> Result<PublicSettings, Strin
 }
 
 #[tauri::command]
-pub fn save_public_settings(dirs: tauri::State<AppDirs>, payload: PublicSettings) -> Result<(), String> {
+pub fn save_public_settings(
+    dirs: tauri::State<AppDirs>,
+    payload: PublicSettings,
+) -> Result<(), String> {
     save_settings(&dirs.app_data_dir, &payload)
 }
 
@@ -31,7 +34,11 @@ pub fn detect_system_source_device() -> Result<Option<String>, String> {
 }
 
 fn command_exists(program: &str) -> bool {
-    let lookup_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let lookup_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
     Command::new(lookup_cmd)
         .arg(program)
         .output()
@@ -81,13 +88,20 @@ fn normalize_id(value: &str) -> String {
 }
 
 fn resolve_command_path(program: &str) -> Option<PathBuf> {
-    let lookup_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let lookup_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
     let output = Command::new(lookup_cmd).arg(program).output().ok()?;
     if !output.status.success() {
         return None;
     }
     let stdout = String::from_utf8(output.stdout).ok()?;
-    let first = stdout.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let first = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
     Some(PathBuf::from(first))
 }
 
@@ -121,11 +135,18 @@ fn username_from_env_or_system() -> Option<String> {
         return None;
     }
     let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
-    if name.is_empty() { None } else { Some(name) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
 }
 
 fn macos_application_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![PathBuf::from("/Applications"), PathBuf::from("/System/Applications")];
+    let mut dirs = vec![
+        PathBuf::from("/Applications"),
+        PathBuf::from("/System/Applications"),
+    ];
 
     if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
         dirs.push(home.join("Applications"));
@@ -172,7 +193,13 @@ fn detect_text_editor_apps() -> Vec<DetectedEditorApp> {
 
         for (display_name, candidates) in [
             ("TextEdit", vec!["TextEdit.app"]),
-            ("Visual Studio Code", vec!["Visual Studio Code.app", "Visual Studio Code - Insiders.app"]),
+            (
+                "Visual Studio Code",
+                vec![
+                    "Visual Studio Code.app",
+                    "Visual Studio Code - Insiders.app",
+                ],
+            ),
             ("Cursor", vec!["Cursor.app"]),
             ("Windsurf", vec!["Windsurf.app", "Codeium Windsurf.app"]),
             ("Sublime Text", vec!["Sublime Text.app"]),
@@ -268,14 +295,26 @@ fn detect_text_editor_apps() -> Vec<DetectedEditorApp> {
     {
         for (_id, name, exe_path) in [
             ("notepad", "Notepad", r"C:\Windows\System32\notepad.exe"),
-            ("notepad_plus_plus", "Notepad++", r"C:\Program Files\Notepad++\notepad++.exe"),
-            ("visual_studio_code", "Visual Studio Code", r"C:\Program Files\Microsoft VS Code\Code.exe"),
+            (
+                "notepad_plus_plus",
+                "Notepad++",
+                r"C:\Program Files\Notepad++\notepad++.exe",
+            ),
+            (
+                "visual_studio_code",
+                "Visual Studio Code",
+                r"C:\Program Files\Microsoft VS Code\Code.exe",
+            ),
             (
                 "visual_studio_code",
                 "Visual Studio Code",
                 r"C:\Program Files (x86)\Microsoft VS Code\Code.exe",
             ),
-            ("sublime_text", "Sublime Text", r"C:\Program Files\Sublime Text\sublime_text.exe"),
+            (
+                "sublime_text",
+                "Sublime Text",
+                r"C:\Program Files\Sublime Text\sublime_text.exe",
+            ),
         ] {
             let path = PathBuf::from(exe_path);
             if path.exists() {
@@ -491,7 +530,11 @@ fn list_text_editor_apps_blocking() -> Result<TextEditorAppsResponse, String> {
     }
     let apps = by_id.into_values().collect::<Vec<_>>();
     #[cfg(target_os = "macos")]
-    let apps = if apps.is_empty() { macos_fallback_editor_apps() } else { apps };
+    let apps = if apps.is_empty() {
+        macos_fallback_editor_apps()
+    } else {
+        apps
+    };
 
     let default_name = if cfg!(target_os = "macos") {
         "TextEdit"
@@ -507,7 +550,10 @@ fn list_text_editor_apps_blocking() -> Result<TextEditorAppsResponse, String> {
             .find(|app| app.name.eq_ignore_ascii_case(default_name))
             .map(|app| app.id.clone())
     };
-    Ok(TextEditorAppsResponse { apps, default_app_id })
+    Ok(TextEditorAppsResponse {
+        apps,
+        default_app_id,
+    })
 }
 
 #[tauri::command]

@@ -131,7 +131,12 @@ pub fn write_mixed_raw_i16_to_opus(
         )
         .map_err(|e| e.to_string())?;
     writer
-        .write_packet(opus_tags_packet("BigEcho"), serial, PacketWriteEndInfo::EndPage, 0)
+        .write_packet(
+            opus_tags_packet("BigEcho"),
+            serial,
+            PacketWriteEndInfo::EndPage,
+            0,
+        )
         .map_err(|e| e.to_string())?;
 
     let mut mic_resampler = StreamResampler::new(mic_raw_path, mic_rate, SAMPLE_RATE)?;
@@ -145,9 +150,13 @@ pub fn write_mixed_raw_i16_to_opus(
     let mut emitted_any = false;
 
     loop {
-        let mic_frame = mic_resampler.read_frame(FRAME_SIZE).map_err(|e| e.to_string())?;
+        let mic_frame = mic_resampler
+            .read_frame(FRAME_SIZE)
+            .map_err(|e| e.to_string())?;
         let system_frame = if let Some(resampler) = system_resampler.as_mut() {
-            resampler.read_frame(FRAME_SIZE).map_err(|e| e.to_string())?
+            resampler
+                .read_frame(FRAME_SIZE)
+                .map_err(|e| e.to_string())?
         } else {
             Vec::new()
         };
@@ -263,7 +272,9 @@ impl StreamResampler {
         self.src_pos += step;
         self.compact_buffer();
 
-        Ok(Some(v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16))
+        Ok(Some(
+            v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
+        ))
     }
 
     fn sample_at(&mut self, idx: usize) -> std::io::Result<Option<i16>> {

@@ -3,6 +3,13 @@ import { PublicSettings } from "../appTypes";
 const allowedAudioFormats = new Set(["opus", "mp3", "m4a", "ogg", "wav"]);
 const allowedTranscriptionProviders = new Set(["nexara", "salute_speech"]);
 const saluteSpeechSupportedAudioFormats = new Set(["opus", "mp3", "wav"]);
+const saluteSpeechAllowedScopes = new Set([
+  "SALUTE_SPEECH_PERS",
+  "SALUTE_SPEECH_CORP",
+  "SALUTE_SPEECH_B2B",
+  "SBER_SPEECH",
+]);
+const saluteSpeechAllowedModels = new Set(["general", "callcenter"]);
 
 function isValidHttpUrl(value: string): boolean {
   try {
@@ -36,6 +43,12 @@ export function validateSettings(settings: PublicSettings | null): string[] {
     errors.push("Битрейт Opus должен быть от 12 до 128 kbps");
   }
   if (settings.transcription_provider === "salute_speech") {
+    if (!saluteSpeechAllowedScopes.has(settings.salute_speech_scope)) {
+      errors.push("Неверный scope SalutSpeech");
+    }
+    if (!saluteSpeechAllowedModels.has(settings.salute_speech_model)) {
+      errors.push("Неверная модель распознавания SalutSpeech");
+    }
     if (!saluteSpeechSupportedAudioFormats.has(settings.audio_format)) {
       errors.push("Формат аудио не поддерживается SalutSpeech");
     }

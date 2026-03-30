@@ -8,7 +8,12 @@ use bigecho::storage::sqlite_repo::{
 };
 use tempfile::tempdir;
 
-fn prepare_session() -> (tempfile::TempDir, SessionMeta, std::path::PathBuf, std::path::PathBuf) {
+fn prepare_session() -> (
+    tempfile::TempDir,
+    SessionMeta,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
     let temp = tempdir().expect("temp dir");
     let app_data_dir = temp.path().join("app-data");
     std::fs::create_dir_all(&app_data_dir).expect("app-data dir");

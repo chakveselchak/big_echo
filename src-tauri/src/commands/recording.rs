@@ -6,12 +6,19 @@ use crate::settings::secret_store::{get_secret, set_secret};
 use crate::storage::fs_layout::{build_session_relative_dir, summary_name, transcript_name};
 use crate::storage::session_store::save_meta;
 use crate::storage::sqlite_repo::{add_event, upsert_session};
-use crate::{get_settings_from_dirs, root_recordings_dir, set_tray_indicator_from_state, stop_active_recording_internal};
+use crate::{
+    get_settings_from_dirs, root_recordings_dir, set_tray_indicator_from_state,
+    stop_active_recording_internal,
+};
 use chrono::{DateTime, Local};
 use uuid::Uuid;
 
 #[tauri::command]
-pub fn set_api_secret(dirs: tauri::State<AppDirs>, name: String, value: String) -> Result<(), String> {
+pub fn set_api_secret(
+    dirs: tauri::State<AppDirs>,
+    name: String,
+    value: String,
+) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("Secret name must not be empty".to_string());
     }
@@ -77,7 +84,12 @@ pub fn start_recording(
     save_meta(&abs_dir.join("meta.json"), &meta)?;
     let data_dir = dirs.app_data_dir.clone();
     upsert_session(&data_dir, &meta, &abs_dir, &abs_dir.join("meta.json"))?;
-    add_event(&data_dir, &meta.session_id, "recording_started", "Session created")?;
+    add_event(
+        &data_dir,
+        &meta.session_id,
+        "recording_started",
+        "Session created",
+    )?;
 
     std::fs::write(abs_dir.join(&meta.artifacts.transcript_file), "").map_err(|e| e.to_string())?;
     std::fs::write(abs_dir.join(&meta.artifacts.summary_file), "").map_err(|e| e.to_string())?;
@@ -134,7 +146,10 @@ pub fn stop_active_recording(
 }
 
 #[tauri::command]
-pub async fn run_pipeline(dirs: tauri::State<'_, AppDirs>, session_id: String) -> Result<String, String> {
+pub async fn run_pipeline(
+    dirs: tauri::State<'_, AppDirs>,
+    session_id: String,
+) -> Result<String, String> {
     run_pipeline_core(
         dirs.inner().clone(),
         &session_id,
@@ -145,7 +160,10 @@ pub async fn run_pipeline(dirs: tauri::State<'_, AppDirs>, session_id: String) -
 }
 
 #[tauri::command]
-pub async fn retry_pipeline(dirs: tauri::State<'_, AppDirs>, session_id: String) -> Result<String, String> {
+pub async fn retry_pipeline(
+    dirs: tauri::State<'_, AppDirs>,
+    session_id: String,
+) -> Result<String, String> {
     run_pipeline_core(
         dirs.inner().clone(),
         &session_id,
@@ -156,7 +174,10 @@ pub async fn retry_pipeline(dirs: tauri::State<'_, AppDirs>, session_id: String)
 }
 
 #[tauri::command]
-pub async fn run_transcription(dirs: tauri::State<'_, AppDirs>, session_id: String) -> Result<String, String> {
+pub async fn run_transcription(
+    dirs: tauri::State<'_, AppDirs>,
+    session_id: String,
+) -> Result<String, String> {
     run_pipeline_core(
         dirs.inner().clone(),
         &session_id,
@@ -167,7 +188,10 @@ pub async fn run_transcription(dirs: tauri::State<'_, AppDirs>, session_id: Stri
 }
 
 #[tauri::command]
-pub async fn run_summary(dirs: tauri::State<'_, AppDirs>, session_id: String) -> Result<String, String> {
+pub async fn run_summary(
+    dirs: tauri::State<'_, AppDirs>,
+    session_id: String,
+) -> Result<String, String> {
     run_pipeline_core(
         dirs.inner().clone(),
         &session_id,

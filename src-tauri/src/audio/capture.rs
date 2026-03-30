@@ -132,7 +132,8 @@ impl ContinuousCapture {
             .ok_or_else(|| "No input device available for microphone".to_string())?;
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
-        let join = thread::spawn(move || capture_until_stopped(stop_rx, mic_name, system_name, levels));
+        let join =
+            thread::spawn(move || capture_until_stopped(stop_rx, mic_name, system_name, levels));
 
         Ok(Self {
             stop_tx,
@@ -255,7 +256,10 @@ pub fn detect_system_source_device() -> Result<Option<String>, String> {
     Ok(select_best_system_source(&devices))
 }
 
-pub fn probe_levels(mic_name: Option<&str>, system_name: Option<&str>) -> Result<LiveLevels, String> {
+pub fn probe_levels(
+    mic_name: Option<&str>,
+    system_name: Option<&str>,
+) -> Result<LiveLevels, String> {
     let host = cpal::default_host();
     let mic_device = select_input_device(&host, mic_name)
         .or_else(|| host.default_input_device())
@@ -263,7 +267,8 @@ pub fn probe_levels(mic_name: Option<&str>, system_name: Option<&str>) -> Result
 
     let mic_device_name = mic_device.name().ok();
     let device_names = list_input_devices_for_host(&host).unwrap_or_default();
-    let resolved_system_name = resolve_system_source_name(system_name, mic_device_name.as_deref(), &device_names);
+    let resolved_system_name =
+        resolve_system_source_name(system_name, mic_device_name.as_deref(), &device_names);
     let system_device = resolved_system_name
         .as_deref()
         .and_then(|name| select_input_device(&host, Some(name)));
@@ -296,7 +301,9 @@ fn resolve_system_source_name(
     mic_name: Option<&str>,
     devices: &[String],
 ) -> Option<String> {
-    let mic = mic_name.map(|v| v.trim().to_lowercase()).unwrap_or_default();
+    let mic = mic_name
+        .map(|v| v.trim().to_lowercase())
+        .unwrap_or_default();
     let is_mic = |name: &str| !mic.is_empty() && name.trim().to_lowercase() == mic;
 
     if let Some(preferred) = preferred_name {
@@ -344,9 +351,26 @@ fn score_system_source_name(name: &str, os: &str) -> i32 {
 
     // Platform-specific preferred devices.
     let platform_strong_hits: &[&str] = match os {
-        "macos" => &["blackhole", "soundflower", "loopback audio", "aggregate device"],
-        "windows" => &["vb-cable", "cable output", "stereo mix", "what u hear", "loopback"],
-        _ => &["loopback", "monitor of", "stereo mix", "vb-cable", "blackhole"],
+        "macos" => &[
+            "blackhole",
+            "soundflower",
+            "loopback audio",
+            "aggregate device",
+        ],
+        "windows" => &[
+            "vb-cable",
+            "cable output",
+            "stereo mix",
+            "what u hear",
+            "loopback",
+        ],
+        _ => &[
+            "loopback",
+            "monitor of",
+            "stereo mix",
+            "vb-cable",
+            "blackhole",
+        ],
     };
 
     for key in strong_hits {
@@ -383,7 +407,10 @@ fn select_input_device(host: &cpal::Host, preferred_name: Option<&str>) -> Optio
         }
         if let Ok(devices) = host.input_devices() {
             for d in devices {
-                if d.name().map(|n| n.to_lowercase() == needle).unwrap_or(false) {
+                if d.name()
+                    .map(|n| n.to_lowercase() == needle)
+                    .unwrap_or(false)
+                {
                     return Some(d);
                 }
             }
@@ -418,7 +445,9 @@ fn build_capture_stream(
             device
                 .build_input_stream(
                     &cfg,
-                    move |data: &[f32], _| append_mono_f32_as_i16(data, channels, &sink, &level_output),
+                    move |data: &[f32], _| {
+                        append_mono_f32_as_i16(data, channels, &sink, &level_output)
+                    },
                     err_fn,
                     None,
                 )
@@ -442,7 +471,9 @@ fn build_capture_stream(
             device
                 .build_input_stream(
                     &cfg,
-                    move |data: &[u16], _| append_mono_u16_as_i16(data, channels, &sink, &level_output),
+                    move |data: &[u16], _| {
+                        append_mono_u16_as_i16(data, channels, &sink, &level_output)
+                    },
                     err_fn,
                     None,
                 )
@@ -454,7 +485,10 @@ fn build_capture_stream(
     Ok((stream, sample_rate))
 }
 
-fn build_probe_level_stream(device: &Device, level_output: Arc<AtomicU32>) -> Result<Stream, String> {
+fn build_probe_level_stream(
+    device: &Device,
+    level_output: Arc<AtomicU32>,
+) -> Result<Stream, String> {
     let default_cfg = device
         .default_input_config()
         .map_err(|e| format!("default input config error: {e}"))?;
@@ -503,7 +537,12 @@ fn build_probe_level_stream(device: &Device, level_output: Arc<AtomicU32>) -> Re
     Ok(stream)
 }
 
-fn append_mono_f32_as_i16(data: &[f32], channels: usize, sink: &I16Sink, level_output: &Arc<AtomicU32>) {
+fn append_mono_f32_as_i16(
+    data: &[f32],
+    channels: usize,
+    sink: &I16Sink,
+    level_output: &Arc<AtomicU32>,
+) {
     if channels == 0 {
         return;
     }
@@ -556,7 +595,12 @@ fn append_mono_i16(data: &[i16], channels: usize, sink: &I16Sink, level_output: 
     }
 }
 
-fn append_mono_u16_as_i16(data: &[u16], channels: usize, sink: &I16Sink, level_output: &Arc<AtomicU32>) {
+fn append_mono_u16_as_i16(
+    data: &[u16],
+    channels: usize,
+    sink: &I16Sink,
+    level_output: &Arc<AtomicU32>,
+) {
     if channels == 0 {
         return;
     }
@@ -671,7 +715,9 @@ fn resample_i16(input: &[i16], src_rate: u32, target_rate: u32) -> Vec<i16> {
         let idx = src_pos.floor() as usize;
         let frac = (src_pos - idx as f64) as f32;
         let a = *input.get(idx).unwrap_or(&0) as f32;
-        let b = *input.get(idx + 1).unwrap_or_else(|| input.last().unwrap_or(&0)) as f32;
+        let b = *input
+            .get(idx + 1)
+            .unwrap_or_else(|| input.last().unwrap_or(&0)) as f32;
         let v = a + (b - a) * frac;
         out.push(v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16);
     }
@@ -728,7 +774,11 @@ mod tests {
             "BlackHole 2ch".to_string(),
             "Stereo Mix (Realtek)".to_string(),
         ];
-        let selected = resolve_system_source_name(Some("Stereo Mix (Realtek)"), Some("Built-in Microphone"), &items);
+        let selected = resolve_system_source_name(
+            Some("Stereo Mix (Realtek)"),
+            Some("Built-in Microphone"),
+            &items,
+        );
         assert_eq!(selected.as_deref(), Some("Stereo Mix (Realtek)"));
     }
 
@@ -739,11 +789,8 @@ mod tests {
             "BlackHole 2ch".to_string(),
             "MacBook Pro Microphone".to_string(),
         ];
-        let selected = resolve_system_source_name(
-            Some("Missing Device"),
-            Some("Built-in Microphone"),
-            &items,
-        );
+        let selected =
+            resolve_system_source_name(Some("Missing Device"), Some("Built-in Microphone"), &items);
         assert_eq!(selected.as_deref(), Some("BlackHole 2ch"));
     }
 
@@ -753,7 +800,11 @@ mod tests {
             "Built-in Microphone".to_string(),
             "External Mic".to_string(),
         ];
-        let selected = resolve_system_source_name(Some("Built-in Microphone"), Some("Built-in Microphone"), &items);
+        let selected = resolve_system_source_name(
+            Some("Built-in Microphone"),
+            Some("Built-in Microphone"),
+            &items,
+        );
         assert!(selected.is_none());
     }
 

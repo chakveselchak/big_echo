@@ -159,7 +159,12 @@ pub fn upsert_session(
     Ok(())
 }
 
-pub fn add_event(app_data_dir: &Path, session_id: &str, event_type: &str, detail: &str) -> Result<(), String> {
+pub fn add_event(
+    app_data_dir: &Path,
+    session_id: &str,
+    event_type: &str,
+    detail: &str,
+) -> Result<(), String> {
     let conn = open(app_data_dir)?;
     conn.execute(
         "INSERT INTO session_events(session_id, at_iso, event_type, detail) VALUES (?1, ?2, ?3, ?4)",
@@ -170,7 +175,10 @@ pub fn add_event(app_data_dir: &Path, session_id: &str, event_type: &str, detail
 }
 
 #[cfg(test)]
-pub fn list_session_events(app_data_dir: &Path, session_id: &str) -> Result<Vec<SessionEvent>, String> {
+pub fn list_session_events(
+    app_data_dir: &Path,
+    session_id: &str,
+) -> Result<Vec<SessionEvent>, String> {
     let conn = open(app_data_dir)?;
     let mut stmt = conn
         .prepare(
@@ -244,10 +252,13 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     file_has_non_empty_text(&session_dir.join(&meta.artifacts.summary_file));
                 item.audio_format = audio_format_from_file_name(&meta.artifacts.audio_file);
                 item.audio_duration_hms = audio_duration_hms(&meta);
-                item.has_transcript_text =
-                    transcript_ok && !matches!(meta.status, SessionStatus::Recording | SessionStatus::Recorded);
-                item.has_summary_text =
-                    summary_ok && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
+                item.has_transcript_text = transcript_ok
+                    && !matches!(
+                        meta.status,
+                        SessionStatus::Recording | SessionStatus::Recorded
+                    );
+                item.has_summary_text = summary_ok
+                    && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
             }
         }
         out.push(item);
@@ -290,10 +301,16 @@ pub fn delete_session(app_data_dir: &Path, session_id: &str) -> Result<bool, Str
         params![session_id],
     )
     .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM session_events WHERE session_id=?1", params![session_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM session_events WHERE session_id=?1",
+        params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
     let deleted = conn
-        .execute("DELETE FROM sessions WHERE session_id=?1", params![session_id])
+        .execute(
+            "DELETE FROM sessions WHERE session_id=?1",
+            params![session_id],
+        )
         .map_err(|e| e.to_string())?;
     Ok(deleted > 0)
 }
@@ -429,7 +446,8 @@ mod tests {
         meta.artifacts.summary_file = "summary.txt".to_string();
 
         save_meta(&meta_path, &meta).expect("save meta");
-        std::fs::write(session_dir.join("transcript.txt"), "mock transcript").expect("write transcript");
+        std::fs::write(session_dir.join("transcript.txt"), "mock transcript")
+            .expect("write transcript");
         std::fs::write(session_dir.join("summary.txt"), "mock summary").expect("write summary");
         upsert_session(dir.path(), &meta, &session_dir, &meta_path).expect("upsert session");
 
@@ -483,9 +501,8 @@ mod tests {
         assert_eq!(r2, Some(2));
         assert_eq!(r3, None);
 
-        let due =
-            fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
-                .expect("fetch due");
+        let due = fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
+            .expect("fetch due");
         assert!(due.iter().all(|j| j.session_id != session_id));
     }
 
@@ -497,9 +514,8 @@ mod tests {
         let _ = schedule_retry_job(dir.path(), session_id, "e1", 4).expect("schedule");
         clear_retry_job(dir.path(), session_id).expect("clear");
 
-        let due =
-            fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
-                .expect("fetch due");
+        let due = fetch_due_retry_jobs(dir.path(), chrono::Utc::now().timestamp() + 100_000, 10)
+            .expect("fetch due");
         assert!(due.iter().all(|j| j.session_id != session_id));
     }
 }

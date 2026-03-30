@@ -4,6 +4,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use url::Url;
 
+const SALUTE_SPEECH_ALLOWED_SCOPES: &[&str] = &[
+    "SALUTE_SPEECH_PERS",
+    "SALUTE_SPEECH_CORP",
+    "SALUTE_SPEECH_B2B",
+    "SBER_SPEECH",
+];
+const SALUTE_SPEECH_ALLOWED_MODELS: &[&str] = &["general", "callcenter"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PublicSettings {
@@ -74,7 +82,8 @@ impl PublicSettings {
         ) {
             return Err("Invalid audio format".to_string());
         }
-        if self.transcription_provider != "nexara" && self.transcription_provider != "salute_speech" {
+        if self.transcription_provider != "nexara" && self.transcription_provider != "salute_speech"
+        {
             return Err("Invalid transcription provider".to_string());
         }
         if self.transcription_provider == "nexara" && !self.transcription_url.is_empty() {
@@ -96,6 +105,12 @@ impl PublicSettings {
             return Err("Opus bitrate must be between 12 and 128 kbps".to_string());
         }
         if self.transcription_provider == "salute_speech" {
+            if !SALUTE_SPEECH_ALLOWED_SCOPES.contains(&self.salute_speech_scope.as_str()) {
+                return Err("Invalid SalutSpeech scope".to_string());
+            }
+            if !SALUTE_SPEECH_ALLOWED_MODELS.contains(&self.salute_speech_model.as_str()) {
+                return Err("Invalid SalutSpeech recognition model".to_string());
+            }
             if !matches!(self.audio_format.as_str(), "opus" | "mp3" | "wav") {
                 return Err("SalutSpeech supports only opus, mp3, or wav audio".to_string());
             }
@@ -230,6 +245,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_salutespeech_scope() {
+        let s = PublicSettings {
+            transcription_provider: "salute_speech".to_string(),
+            salute_speech_scope: "invalid".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(s.validate(), Err("Invalid SalutSpeech scope".to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_salutespeech_model() {
+        let s = PublicSettings {
+            transcription_provider: "salute_speech".to_string(),
+            salute_speech_model: "invalid".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            s.validate(),
+            Err("Invalid SalutSpeech recognition model".to_string())
+        );
+    }
+
+    #[test]
     fn missing_summary_prompt_uses_default() {
         let body = r#"{
             "recording_root":"./recordings",
@@ -326,7 +364,10 @@ mod tests {
             transcription_provider: "other".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid transcription provider".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid transcription provider".to_string())
+        );
     }
 
     #[test]

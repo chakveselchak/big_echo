@@ -31,7 +31,10 @@ pub fn ensure_stop_session_matches(
 }
 
 pub fn should_schedule_retry(invocation: PipelineInvocation) -> bool {
-    !matches!(invocation, PipelineInvocation::WorkerRetry | PipelineInvocation::Manual)
+    !matches!(
+        invocation,
+        PipelineInvocation::WorkerRetry | PipelineInvocation::Manual
+    )
 }
 
 pub fn mark_pipeline_audio_missing(meta: &mut SessionMeta) -> String {
@@ -136,7 +139,10 @@ mod tests {
         let detail = mark_pipeline_transcription_failed(&mut meta, "timeout");
         assert_eq!(detail, "Transcription error: timeout");
         assert_eq!(meta.status, SessionStatus::Failed);
-        assert!(meta.errors.iter().any(|e| e == "Transcription error: timeout"));
+        assert!(meta
+            .errors
+            .iter()
+            .any(|e| e == "Transcription error: timeout"));
     }
 
     #[test]
@@ -145,6 +151,9 @@ mod tests {
         let detail = mark_pipeline_summary_failed(&mut meta, "upstream 500");
         assert_eq!(detail, "Summary error: upstream 500");
         assert_eq!(meta.status, SessionStatus::Failed);
-        assert!(meta.errors.iter().any(|e| e == "Summary error: upstream 500"));
+        assert!(meta
+            .errors
+            .iter()
+            .any(|e| e == "Summary error: upstream 500"));
     }
 }

@@ -4,6 +4,8 @@ import {
   fixedSources,
   diarizationSettingOptions,
   PublicSettings,
+  saluteSpeechRecognitionModelOptions,
+  saluteSpeechScopeOptions,
   SessionMetaView,
   SettingsTab,
   StartResponse,
@@ -313,17 +315,29 @@ export function App() {
                     <>
                       <label className="field">
                         Scope
-                        <input
+                        <select
                           value={settings.salute_speech_scope}
                           onChange={(e) => setSettings({ ...settings, salute_speech_scope: e.target.value })}
-                        />
+                        >
+                          {saluteSpeechScopeOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       <label className="field">
                         Recognition model
-                        <input
+                        <select
                           value={settings.salute_speech_model}
                           onChange={(e) => setSettings({ ...settings, salute_speech_model: e.target.value })}
-                        />
+                        >
+                          {saluteSpeechRecognitionModelOptions.map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       <label className="field">
                         Language

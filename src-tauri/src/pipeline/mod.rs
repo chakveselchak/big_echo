@@ -70,9 +70,17 @@ impl ExternalApiLogger {
             format!("url: {url}"),
             "headers:".to_string(),
         ];
-        lines.extend(format_headers(headers).into_iter().map(|line| format!("  {line}")));
+        lines.extend(
+            format_headers(headers)
+                .into_iter()
+                .map(|line| format!("  {line}")),
+        );
         lines.push("body:".to_string());
-        lines.extend(format_http_body(body).into_iter().map(|line| format!("  {line}")));
+        lines.extend(
+            format_http_body(body)
+                .into_iter()
+                .map(|line| format!("  {line}")),
+        );
         self.log("api_http_request", lines.join("\n"));
     }
 
@@ -90,20 +98,21 @@ impl ExternalApiLogger {
             format!("status: {status}"),
             "headers:".to_string(),
         ];
-        lines.extend(format_headers(headers).into_iter().map(|line| format!("  {line}")));
+        lines.extend(
+            format_headers(headers)
+                .into_iter()
+                .map(|line| format!("  {line}")),
+        );
         lines.push("body:".to_string());
-        lines.extend(format_response_body(body_text).into_iter().map(|line| format!("  {line}")));
+        lines.extend(
+            format_response_body(body_text)
+                .into_iter()
+                .map(|line| format!("  {line}")),
+        );
         self.log("api_http_response", lines.join("\n"));
     }
 
-    fn log_http_error(
-        &self,
-        service: &str,
-        operation: &str,
-        method: &str,
-        url: &str,
-        error: &str,
-    ) {
+    fn log_http_error(&self, service: &str, operation: &str, method: &str, url: &str, error: &str) {
         let lines = [
             format!("service: {service}"),
             format!("operation: {operation}"),
@@ -120,7 +129,10 @@ fn format_headers(headers: &HeaderMap) -> Vec<String> {
         .iter()
         .map(|(name, value)| {
             let raw = value.to_str().unwrap_or("<non-utf8>");
-            (name.as_str().to_string(), mask_header_value(name.as_str(), raw))
+            (
+                name.as_str().to_string(),
+                mask_header_value(name.as_str(), raw),
+            )
         })
         .collect();
     pairs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -252,7 +264,13 @@ pub async fn transcribe_audio(
     api_key: &str,
     audio_path: &Path,
 ) -> Result<String, String> {
-    transcribe_audio_logged(settings, api_key, audio_path, &ExternalApiLogger::disabled()).await
+    transcribe_audio_logged(
+        settings,
+        api_key,
+        audio_path,
+        &ExternalApiLogger::disabled(),
+    )
+    .await
 }
 
 pub async fn transcribe_audio_logged(
@@ -345,7 +363,13 @@ async fn transcribe_audio_with_nexara(
         .await
         .map_err(|e| {
             let message = e.to_string();
-            logger.log_http_error("nexara", "transcription", "POST", &settings.transcription_url, &message);
+            logger.log_http_error(
+                "nexara",
+                "transcription",
+                "POST",
+                &settings.transcription_url,
+                &message,
+            );
             message
         })?;
 
@@ -367,14 +391,28 @@ async fn transcribe_audio_with_salutespeech(
     }
 
     let client = salute_speech_client()?;
-    let access_token =
-        request_salute_speech_access_token(&client, auth_key, &settings.salute_speech_scope, logger).await?;
-    let request_file_id = upload_salute_speech_audio(&client, &access_token, audio_path, logger).await?;
-    let task_id =
-        create_salute_speech_recognition_task(&client, &access_token, settings, audio_path, &request_file_id, logger)
-            .await?;
-    let response_file_id = poll_salute_speech_task(&client, &access_token, &task_id, logger).await?;
-    let payload = download_salute_speech_result(&client, &access_token, &response_file_id, logger).await?;
+    let access_token = request_salute_speech_access_token(
+        &client,
+        auth_key,
+        &settings.salute_speech_scope,
+        logger,
+    )
+    .await?;
+    let request_file_id =
+        upload_salute_speech_audio(&client, &access_token, audio_path, logger).await?;
+    let task_id = create_salute_speech_recognition_task(
+        &client,
+        &access_token,
+        settings,
+        audio_path,
+        &request_file_id,
+        logger,
+    )
+    .await?;
+    let response_file_id =
+        poll_salute_speech_task(&client, &access_token, &task_id, logger).await?;
+    let payload =
+        download_salute_speech_result(&client, &access_token, &response_file_id, logger).await?;
     if let Some(formatted) = format_diarize_segments(&payload) {
         return Ok(formatted);
     }
@@ -423,8 +461,14 @@ async fn request_salute_speech_access_token(
             formatted
         })?;
 
-    let body = parse_json_response(res, "salutespeech token request", logger, "salute_speech", "token request")
-        .await?;
+    let body = parse_json_response(
+        res,
+        "salutespeech token request",
+        logger,
+        "salute_speech",
+        "token request",
+    )
+    .await?;
     body.get("access_token")
         .and_then(|v| v.as_str())
         .map(ToString::to_string)
@@ -471,7 +515,14 @@ async fn upload_salute_speech_audio(
             formatted
         })?;
 
-    let body = parse_json_response(res, "salutespeech upload", logger, "salute_speech", "audio upload").await?;
+    let body = parse_json_response(
+        res,
+        "salutespeech upload",
+        logger,
+        "salute_speech",
+        "audio upload",
+    )
+    .await?;
     body.get("result")
         .and_then(|v| v.get("request_file_id"))
         .and_then(|v| v.as_str())
@@ -488,20 +539,47 @@ async fn create_salute_speech_recognition_task(
     request_file_id: &str,
     logger: &ExternalApiLogger,
 ) -> Result<String, String> {
+    let mut options = serde_json::Map::new();
+    options.insert(
+        "model".to_string(),
+        serde_json::Value::String(settings.salute_speech_model.trim().to_string()),
+    );
+    options.insert(
+        "audio_encoding".to_string(),
+        serde_json::Value::String(salute_speech_audio_encoding(audio_path)?.to_string()),
+    );
+    options.insert(
+        "sample_rate".to_string(),
+        serde_json::Value::Number(settings.salute_speech_sample_rate.into()),
+    );
+    options.insert(
+        "language".to_string(),
+        serde_json::Value::String(settings.salute_speech_language.trim().to_string()),
+    );
+    options.insert(
+        "channels_count".to_string(),
+        serde_json::Value::Number(settings.salute_speech_channels_count.into()),
+    );
+    if settings.transcription_task == "diarize" && settings.salute_speech_model.trim() == "general"
+    {
+        options.insert(
+            "speaker_separation_options".to_string(),
+            json!({
+                "enable": true
+            }),
+        );
+    }
     let payload = json!({
-      "options": {
-        "model": settings.salute_speech_model.trim(),
-        "audio_encoding": salute_speech_audio_encoding(audio_path)?,
-        "sample_rate": settings.salute_speech_sample_rate,
-        "language": settings.salute_speech_language.trim(),
-        "channels_count": settings.salute_speech_channels_count
-      },
+      "options": serde_json::Value::Object(options),
       "request_file_id": request_file_id
     });
 
     let mut headers = salute_speech_bearer_headers(access_token)?;
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    let url = format!("{}/rest/v1/speech:async_recognize", salute_speech_api_base_url());
+    let url = format!(
+        "{}/rest/v1/speech:async_recognize",
+        salute_speech_api_base_url()
+    );
     logger.log_http_request(
         "salute_speech",
         "recognition task",
@@ -519,12 +597,24 @@ async fn create_salute_speech_recognition_task(
         .await
         .map_err(|e| {
             let formatted = format_salute_speech_network_error("recognition task", &e);
-            logger.log_http_error("salute_speech", "recognition task", "POST", &url, &formatted);
+            logger.log_http_error(
+                "salute_speech",
+                "recognition task",
+                "POST",
+                &url,
+                &formatted,
+            );
             formatted
         })?;
 
-    let body =
-        parse_json_response(res, "salutespeech recognize", logger, "salute_speech", "recognition task").await?;
+    let body = parse_json_response(
+        res,
+        "salutespeech recognize",
+        logger,
+        "salute_speech",
+        "recognition task",
+    )
+    .await?;
     body.get("result")
         .and_then(|v| v.get("id"))
         .and_then(|v| v.as_str())
@@ -542,7 +632,10 @@ async fn poll_salute_speech_task(
     let mut last_status = String::new();
     for _ in 0..salute_speech_status_poll_attempts() {
         let headers = salute_speech_bearer_headers(access_token)?;
-        let url = format!("{}/rest/v1/task:get?id={task_id}", salute_speech_api_base_url());
+        let url = format!(
+            "{}/rest/v1/task:get?id={task_id}",
+            salute_speech_api_base_url()
+        );
         logger.log_http_request(
             "salute_speech",
             "task status",
@@ -563,12 +656,22 @@ async fn poll_salute_speech_task(
                 formatted
             })?;
 
-        let body = parse_json_response(res, "salutespeech task status", logger, "salute_speech", "task status")
-            .await?;
+        let body = parse_json_response(
+            res,
+            "salutespeech task status",
+            logger,
+            "salute_speech",
+            "task status",
+        )
+        .await?;
         let status = body
             .get("status")
             .and_then(|v| v.as_str())
-            .or_else(|| body.get("result").and_then(|v| v.get("status")).and_then(|v| v.as_str()))
+            .or_else(|| {
+                body.get("result")
+                    .and_then(|v| v.get("status"))
+                    .and_then(|v| v.as_str())
+            })
             .unwrap_or_default();
         last_status = status.to_string();
 
@@ -583,7 +686,9 @@ async fn poll_salute_speech_task(
                 })
                 .map(ToString::to_string)
                 .filter(|v| !v.trim().is_empty())
-                .ok_or_else(|| "SalutSpeech task status does not contain response_file_id".to_string());
+                .ok_or_else(|| {
+                    "SalutSpeech task status does not contain response_file_id".to_string()
+                });
         }
 
         if status == "ERROR" || status == "CANCELED" {
@@ -641,7 +746,8 @@ fn salute_speech_task_error_detail(body: &serde_json::Value) -> String {
             Some(serde_json::Value::String(text)) if !text.trim().is_empty() => {
                 return text.trim().to_string();
             }
-            Some(value @ serde_json::Value::Object(_)) | Some(value @ serde_json::Value::Array(_)) => {
+            Some(value @ serde_json::Value::Object(_))
+            | Some(value @ serde_json::Value::Array(_)) => {
                 let serialized = value.to_string();
                 if !serialized.is_empty() && serialized != "null" {
                     return serialized;
@@ -695,7 +801,14 @@ async fn download_salute_speech_result(
             formatted
         })?;
 
-    parse_json_response(res, "salutespeech download", logger, "salute_speech", "result download").await
+    parse_json_response(
+        res,
+        "salutespeech download",
+        logger,
+        "salute_speech",
+        "result download",
+    )
+    .await
 }
 
 fn salute_speech_auth_url() -> String {
@@ -714,14 +827,20 @@ fn salute_speech_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .add_root_certificate(root_cert)
         .build()
-        .map_err(|e| format!("Failed to build SalutSpeech HTTP client: {}", format_reqwest_error(&e)))
+        .map_err(|e| {
+            format!(
+                "Failed to build SalutSpeech HTTP client: {}",
+                format_reqwest_error(&e)
+            )
+        })
 }
 
 fn salute_speech_bearer_headers(access_token: &str) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", access_token.trim())).map_err(|e| e.to_string())?,
+        HeaderValue::from_str(&format!("Bearer {}", access_token.trim()))
+            .map_err(|e| e.to_string())?,
     );
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
     Ok(headers)
@@ -738,7 +857,9 @@ fn salute_speech_audio_encoding(audio_path: &Path) -> Result<&'static str, Strin
         "opus" => Ok("OPUS"),
         "mp3" => Ok("MP3"),
         "wav" => Ok("PCM_S16LE"),
-        other => Err(format!("SalutSpeech does not support recorded audio format {other}")),
+        other => Err(format!(
+            "SalutSpeech does not support recorded audio format {other}"
+        )),
     }
 }
 
@@ -753,7 +874,9 @@ fn salute_speech_upload_content_type(audio_path: &Path) -> Result<String, String
         "opus" => Ok("audio/ogg;codecs=opus".to_string()),
         "mp3" => Ok("audio/mpeg".to_string()),
         "wav" => Ok("audio/x-pcm;bit=16".to_string()),
-        other => Err(format!("SalutSpeech does not support recorded audio format {other}")),
+        other => Err(format!(
+            "SalutSpeech does not support recorded audio format {other}"
+        )),
     }
 }
 
@@ -804,6 +927,9 @@ fn format_salute_speech_network_error(operation: &str, error: &reqwest::Error) -
 }
 
 fn extract_transcript_text(body: &serde_json::Value) -> Result<String, String> {
+    if let Some(text) = extract_salute_speaker_transcript(body) {
+        return Ok(text);
+    }
     if let Some(text) = body.get("text").and_then(|v| v.as_str()) {
         return Ok(text.to_string());
     }
@@ -820,13 +946,96 @@ fn extract_transcript_text(body: &serde_json::Value) -> Result<String, String> {
     Ok(String::new())
 }
 
+fn extract_salute_speaker_transcript(body: &serde_json::Value) -> Option<String> {
+    let mut utterances = Vec::new();
+    collect_salute_speaker_utterances(body, &mut utterances);
+    if utterances.is_empty() {
+        return None;
+    }
+
+    let mut merged: Vec<(i64, String)> = Vec::new();
+    for (speaker, text) in utterances {
+        if let Some((_, existing_text)) = merged
+            .iter_mut()
+            .find(|(speaker_id, _)| *speaker_id == speaker)
+        {
+            if !existing_text.is_empty() {
+                existing_text.push(' ');
+            }
+            existing_text.push_str(&text);
+            continue;
+        }
+        merged.push((speaker, text));
+    }
+
+    Some(
+        merged
+            .into_iter()
+            .enumerate()
+            .map(|(speaker_index, (_, text))| format!("speaker{speaker_index}: {text}"))
+            .collect::<Vec<String>>()
+            .join("\n\n"),
+    )
+}
+
+fn collect_salute_speaker_utterances(
+    body: &serde_json::Value,
+    utterances: &mut Vec<(i64, String)>,
+) {
+    match body {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_salute_speaker_utterances(item, utterances);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(results) = map.get("results").and_then(|value| value.as_array()) {
+                let speaker_id = map
+                    .get("speaker_info")
+                    .and_then(|value| value.get("speaker_id"))
+                    .and_then(|value| value.as_i64());
+                let Some(speaker_id) = speaker_id.filter(|speaker_id| *speaker_id >= 0) else {
+                    if let Some(result) = map.get("result") {
+                        collect_salute_speaker_utterances(result, utterances);
+                    }
+                    return;
+                };
+                for result in results {
+                    let text = extract_salute_result_text(result).unwrap_or_default();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    utterances.push((speaker_id, text.to_string()));
+                }
+            }
+
+            if let Some(result) = map.get("result") {
+                collect_salute_speaker_utterances(result, utterances);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_salute_result_text(result: &serde_json::Value) -> Option<&str> {
+    result
+        .get("normalized_text")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .or_else(|| {
+            result
+                .get("text")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+        })
+}
+
 fn extract_salute_results_text(body: &serde_json::Value) -> Option<String> {
     match body {
         serde_json::Value::Array(items) => {
-            let chunks: Vec<String> = items
-                .iter()
-                .filter_map(extract_salute_chunk_text)
-                .collect();
+            let chunks: Vec<String> = items.iter().filter_map(extract_salute_chunk_text).collect();
             if chunks.is_empty() {
                 None
             } else {
@@ -837,8 +1046,7 @@ fn extract_salute_results_text(body: &serde_json::Value) -> Option<String> {
             if let Some(results) = body.get("results").and_then(|v| v.as_array()) {
                 let parts: Vec<&str> = results
                     .iter()
-                    .filter_map(|item| item.get("text").and_then(|v| v.as_str()).map(str::trim))
-                    .filter(|text| !text.is_empty())
+                    .filter_map(extract_salute_result_text)
                     .collect();
                 if !parts.is_empty() {
                     return Some(parts.join(" "));
@@ -856,7 +1064,18 @@ fn extract_salute_results_text(body: &serde_json::Value) -> Option<String> {
 }
 
 fn extract_salute_chunk_text(item: &serde_json::Value) -> Option<String> {
-    if let Some(text) = item.get("text").and_then(|v| v.as_str()).map(str::trim) {
+    if let Some(text) = item
+        .get("normalized_text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .or_else(|| {
+            item.get("text")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+        })
+    {
         if !text.is_empty() {
             return Some(text.to_string());
         }
@@ -865,8 +1084,7 @@ fn extract_salute_chunk_text(item: &serde_json::Value) -> Option<String> {
     let results = item.get("results").and_then(|v| v.as_array())?;
     let parts: Vec<&str> = results
         .iter()
-        .filter_map(|result| result.get("text").and_then(|v| v.as_str()).map(str::trim))
-        .filter(|text| !text.is_empty())
+        .filter_map(extract_salute_result_text)
         .collect();
     if parts.is_empty() {
         None
@@ -881,7 +1099,13 @@ pub async fn summarize_text(
     api_key: &str,
     transcript: &str,
 ) -> Result<String, String> {
-    summarize_text_logged(settings, api_key, transcript, &ExternalApiLogger::disabled()).await
+    summarize_text_logged(
+        settings,
+        api_key,
+        transcript,
+        &ExternalApiLogger::disabled(),
+    )
+    .await
 }
 
 pub async fn summarize_text_logged(
@@ -936,7 +1160,13 @@ pub async fn summarize_text_logged(
         .await
         .map_err(|e| {
             let message = e.to_string();
-            logger.log_http_error("summary", "chat completions", "POST", &settings.summary_url, &message);
+            logger.log_http_error(
+                "summary",
+                "chat completions",
+                "POST",
+                &settings.summary_url,
+                &message,
+            );
             message
         })?;
 
@@ -1145,7 +1375,10 @@ mod tests {
                 let (mut stream, _) = listener.accept().expect("accept");
                 let req = read_http_request(&mut stream);
                 let req_str = String::from_utf8_lossy(&req).to_string();
-                requests_for_server.lock().expect("lock").push(req_str.clone());
+                requests_for_server
+                    .lock()
+                    .expect("lock")
+                    .push(req_str.clone());
 
                 let (content_type, body) = if req_str.starts_with("POST /api/v2/oauth ") {
                     (
@@ -1155,7 +1388,8 @@ mod tests {
                 } else if req_str.starts_with("POST /rest/v1/data:upload ") {
                     (
                         "application/json",
-                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#.to_string(),
+                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#
+                            .to_string(),
                     )
                 } else if req_str.starts_with("POST /rest/v1/speech:async_recognize ") {
                     (
@@ -1167,7 +1401,9 @@ mod tests {
                         "application/json",
                         r#"{"status":"DONE","response_file_id":"response-file-1"}"#.to_string(),
                     )
-                } else if req_str.starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ") {
+                } else if req_str
+                    .starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ")
+                {
                     (
                         "application/json",
                         r#"{"text":"salute transcript"}"#.to_string(),
@@ -1240,16 +1476,21 @@ mod tests {
 
         let upload_req = &captured[1];
         assert!(upload_req.starts_with("POST /rest/v1/data:upload "));
-        assert!(upload_req.to_ascii_lowercase().contains("authorization: bearer salute-token"));
+        assert!(upload_req
+            .to_ascii_lowercase()
+            .contains("authorization: bearer salute-token"));
 
         let recognize_req = &captured[2];
         assert!(recognize_req.starts_with("POST /rest/v1/speech:async_recognize "));
-        assert!(recognize_req.to_ascii_lowercase().contains("authorization: bearer salute-token"));
+        assert!(recognize_req
+            .to_ascii_lowercase()
+            .contains("authorization: bearer salute-token"));
         let recognize_body = recognize_req
             .split("\r\n\r\n")
             .nth(1)
             .expect("http request body should exist");
-        let payload: serde_json::Value = serde_json::from_str(recognize_body).expect("valid json payload");
+        let payload: serde_json::Value =
+            serde_json::from_str(recognize_body).expect("valid json payload");
         assert_eq!(payload["request_file_id"].as_str(), Some("request-file-1"));
         assert_eq!(payload["options"]["model"].as_str(), Some("general"));
         assert_eq!(payload["options"]["audio_encoding"].as_str(), Some("OPUS"));
@@ -1261,9 +1502,8 @@ mod tests {
         assert!(status_req.starts_with("GET /rest/v1/task:get?id=task-1 "));
 
         let download_req = &captured[4];
-        assert!(download_req.starts_with(
-            "GET /rest/v1/data:download?response_file_id=response-file-1 "
-        ));
+        assert!(download_req
+            .starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 "));
     }
 
     #[test]
@@ -1285,7 +1525,8 @@ mod tests {
                 } else if req_str.starts_with("POST /rest/v1/data:upload ") {
                     (
                         "application/json",
-                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#.to_string(),
+                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#
+                            .to_string(),
                     )
                 } else if req_str.starts_with("POST /rest/v1/speech:async_recognize ") {
                     (
@@ -1366,7 +1607,10 @@ mod tests {
                 let (mut stream, _) = listener.accept().expect("accept");
                 let req = read_http_request(&mut stream);
                 let req_str = String::from_utf8_lossy(&req).to_string();
-                requests_for_server.lock().expect("lock").push(req_str.clone());
+                requests_for_server
+                    .lock()
+                    .expect("lock")
+                    .push(req_str.clone());
 
                 let (content_type, body) = if req_str.starts_with("POST /api/v2/oauth ") {
                     (
@@ -1376,7 +1620,8 @@ mod tests {
                 } else if req_str.starts_with("POST /rest/v1/data:upload ") {
                     (
                         "application/json",
-                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#.to_string(),
+                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#
+                            .to_string(),
                     )
                 } else if req_str.starts_with("POST /rest/v1/speech:async_recognize ") {
                     (
@@ -1388,7 +1633,9 @@ mod tests {
                         "application/json",
                         r#"{"status":"DONE","response_file_id":"response-file-1"}"#.to_string(),
                     )
-                } else if req_str.starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ") {
+                } else if req_str
+                    .starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ")
+                {
                     (
                         "application/json",
                         r#"{"text":"salute transcript"}"#.to_string(),
@@ -1451,14 +1698,17 @@ mod tests {
         let captured = requests.lock().expect("lock");
 
         let upload_req = &captured[1];
-        assert!(upload_req.to_ascii_lowercase().contains("content-type: audio/mpeg"));
+        assert!(upload_req
+            .to_ascii_lowercase()
+            .contains("content-type: audio/mpeg"));
 
         let recognize_req = &captured[2];
         let recognize_body = recognize_req
             .split("\r\n\r\n")
             .nth(1)
             .expect("http request body should exist");
-        let payload: serde_json::Value = serde_json::from_str(recognize_body).expect("valid json payload");
+        let payload: serde_json::Value =
+            serde_json::from_str(recognize_body).expect("valid json payload");
         assert_eq!(payload["options"]["audio_encoding"].as_str(), Some("MP3"));
     }
 
@@ -1482,7 +1732,8 @@ mod tests {
                 } else if req_str.starts_with("POST /rest/v1/data:upload ") {
                     (
                         "application/json",
-                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#.to_string(),
+                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#
+                            .to_string(),
                     )
                 } else if req_str.starts_with("POST /rest/v1/speech:async_recognize ") {
                     (
@@ -1492,17 +1743,16 @@ mod tests {
                 } else if req_str.starts_with("GET /rest/v1/task:get?id=task-1 ") {
                     poll_count += 1;
                     if poll_count < 66 {
-                        (
-                            "application/json",
-                            r#"{"status":"NEW"}"#.to_string(),
-                        )
+                        ("application/json", r#"{"status":"NEW"}"#.to_string())
                     } else {
                         (
                             "application/json",
                             r#"{"status":"DONE","response_file_id":"response-file-1"}"#.to_string(),
                         )
                     }
-                } else if req_str.starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ") {
+                } else if req_str
+                    .starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ")
+                {
                     (
                         "application/json",
                         r#"{"text":"salute transcript"}"#.to_string(),
@@ -1572,14 +1822,14 @@ mod tests {
         let body = serde_json::json!([
             {
                 "results": [
-                    {"text": "привет"},
-                    {"text": "мир"}
+                    {"normalized_text": "привет"},
+                    {"normalized_text": "мир"}
                 ],
                 "eou": true
             },
             {
                 "results": [
-                    {"text": "как дела"}
+                    {"normalized_text": "как дела"}
                 ],
                 "eou": true
             }
@@ -1587,6 +1837,161 @@ mod tests {
 
         let text = extract_transcript_text(&body).expect("text");
         assert_eq!(text, "привет мир\n\nкак дела");
+    }
+
+    #[test]
+    fn extract_transcript_text_formats_salutespeech_speaker_separation() {
+        let body = serde_json::json!([
+            {
+                "results": [
+                    {"normalized_text": "Привет"},
+                    {"normalized_text": "как дела"}
+                ],
+                "speaker_info": {"speaker_id": 1}
+            },
+            {
+                "results": [
+                    {"normalized_text": "Нормально"}
+                ],
+                "speaker_info": {"speaker_id": 2}
+            },
+            {
+                "results": [
+                    {"normalized_text": "Отлично"}
+                ],
+                "speaker_info": {"speaker_id": 1}
+            },
+            {
+                "results": [
+                    {"normalized_text": "общий текст который не должен попасть в diarization transcript"}
+                ],
+                "speaker_info": {"speaker_id": -1}
+            }
+        ]);
+
+        let text = extract_transcript_text(&body).expect("text");
+        assert_eq!(
+            text,
+            "speaker0: Привет как дела Отлично\n\nspeaker1: Нормально"
+        );
+    }
+
+    #[test]
+    fn transcribe_audio_enables_salutespeech_speaker_separation_for_diarize_task() {
+        let _env_guard = lock_salute_speech_env();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let requests: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let requests_for_server = Arc::clone(&requests);
+        let server = thread::spawn(move || {
+            for _ in 0..5 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let req = read_http_request(&mut stream);
+                let req_str = String::from_utf8_lossy(&req).to_string();
+                requests_for_server
+                    .lock()
+                    .expect("lock")
+                    .push(req_str.clone());
+
+                let (content_type, body) = if req_str.starts_with("POST /api/v2/oauth ") {
+                    (
+                        "application/json",
+                        r#"{"access_token":"salute-token","expires_at":1893456000000}"#.to_string(),
+                    )
+                } else if req_str.starts_with("POST /rest/v1/data:upload ") {
+                    (
+                        "application/json",
+                        r#"{"status":200,"result":{"request_file_id":"request-file-1"}}"#
+                            .to_string(),
+                    )
+                } else if req_str.starts_with("POST /rest/v1/speech:async_recognize ") {
+                    (
+                        "application/json",
+                        r#"{"status":200,"result":{"id":"task-1","status":"NEW"}}"#.to_string(),
+                    )
+                } else if req_str.starts_with("GET /rest/v1/task:get?id=task-1 ") {
+                    (
+                        "application/json",
+                        r#"{"status":"DONE","response_file_id":"response-file-1"}"#.to_string(),
+                    )
+                } else if req_str
+                    .starts_with("GET /rest/v1/data:download?response_file_id=response-file-1 ")
+                {
+                    (
+                        "application/json",
+                        r#"[
+                            {"results":[{"normalized_text":"Привет"}],"speaker_info":{"speaker_id":0}},
+                            {"results":[{"normalized_text":"Здравствуйте"}],"speaker_info":{"speaker_id":2}}
+                        ]"#
+                        .to_string(),
+                    )
+                } else {
+                    ("text/plain", format!("unexpected request: {req_str}"))
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).expect("write");
+            }
+        });
+
+        let auth_url = format!("http://{addr}/api/v2/oauth");
+        let api_base_url = format!("http://{addr}");
+        std::env::set_var("BIGECHO_SALUTE_SPEECH_AUTH_URL", &auth_url);
+        std::env::set_var("BIGECHO_SALUTE_SPEECH_API_URL", &api_base_url);
+
+        let tmp_path =
+            std::env::temp_dir().join(format!("bigecho_pipeline_{}.opus", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp_path, b"fake-opus").expect("write temp opus");
+        let settings = PublicSettings {
+            recording_root: "./recordings".to_string(),
+            artifact_open_app: String::new(),
+            transcription_provider: "salute_speech".to_string(),
+            transcription_url: String::new(),
+            transcription_task: "diarize".to_string(),
+            transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_B2B".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
+            summary_url: "https://example.com/summary".to_string(),
+            summary_prompt: String::new(),
+            openai_model: "gpt-4.1-mini".to_string(),
+            audio_format: "opus".to_string(),
+            opus_bitrate_kbps: 24,
+            mic_device_name: String::new(),
+            system_device_name: String::new(),
+            artifact_opener_app: String::new(),
+            auto_run_pipeline_on_stop: false,
+            api_call_logging_enabled: false,
+        };
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let out = rt
+            .block_on(transcribe_audio(&settings, "salute-auth-key", &tmp_path))
+            .expect("transcribe ok");
+        assert_eq!(out, "speaker0: Привет\n\nspeaker1: Здравствуйте");
+
+        std::env::remove_var("BIGECHO_SALUTE_SPEECH_AUTH_URL");
+        std::env::remove_var("BIGECHO_SALUTE_SPEECH_API_URL");
+        server.join().expect("join");
+
+        let captured = requests.lock().expect("lock");
+        let recognize_req = &captured[2];
+        let recognize_body = recognize_req
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        let payload: serde_json::Value =
+            serde_json::from_str(recognize_body).expect("valid json payload");
+        assert_eq!(
+            payload["options"]["speaker_separation_options"]["enable"].as_bool(),
+            Some(true)
+        );
     }
 
     #[test]
@@ -1671,6 +2076,8 @@ mod tests {
         });
         let formatted = format_reqwest_error(&err);
         assert!(formatted.contains("error sending request") || formatted.contains("client error"));
-        assert!(formatted.contains("Connection refused") || formatted.contains("connection refused"));
+        assert!(
+            formatted.contains("Connection refused") || formatted.contains("connection refused")
+        );
     }
 }

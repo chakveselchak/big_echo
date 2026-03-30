@@ -19,7 +19,11 @@ pub fn extension_for_format(audio_format: &str) -> &'static str {
 }
 
 pub fn mime_type_for_audio_path(path: &Path) -> &'static str {
-    match path.extension().and_then(|value| value.to_str()).unwrap_or_default() {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+    {
         "mp3" => "audio/mpeg",
         "m4a" => "audio/mp4",
         "ogg" => "audio/ogg",
@@ -115,7 +119,11 @@ pub fn write_silence_audio_file(
 fn append_output_args(command: &mut Command, audio_format: &str, opus_bitrate_kbps: u32) {
     match audio_format {
         "mp3" => {
-            command.arg("-c:a").arg("libmp3lame").arg("-b:a").arg("192k");
+            command
+                .arg("-c:a")
+                .arg("libmp3lame")
+                .arg("-b:a")
+                .arg("192k");
         }
         "m4a" => {
             command.arg("-c:a").arg("aac").arg("-b:a").arg("192k");
@@ -137,7 +145,9 @@ fn append_output_args(command: &mut Command, audio_format: &str, opus_bitrate_kb
 }
 
 fn run_ffmpeg(mut command: Command) -> Result<(), String> {
-    let output = command.output().map_err(|e| format!("failed to run ffmpeg: {e}"))?;
+    let output = command
+        .output()
+        .map_err(|e| format!("failed to run ffmpeg: {e}"))?;
     if output.status.success() {
         return Ok(());
     }
@@ -164,10 +174,25 @@ mod tests {
 
     #[test]
     fn derives_expected_mime_types() {
-        assert_eq!(mime_type_for_audio_path(Path::new("/tmp/audio.opus")), "audio/opus");
-        assert_eq!(mime_type_for_audio_path(Path::new("/tmp/audio.mp3")), "audio/mpeg");
-        assert_eq!(mime_type_for_audio_path(Path::new("/tmp/audio.m4a")), "audio/mp4");
-        assert_eq!(mime_type_for_audio_path(Path::new("/tmp/audio.ogg")), "audio/ogg");
-        assert_eq!(mime_type_for_audio_path(Path::new("/tmp/audio.wav")), "audio/wav");
+        assert_eq!(
+            mime_type_for_audio_path(Path::new("/tmp/audio.opus")),
+            "audio/opus"
+        );
+        assert_eq!(
+            mime_type_for_audio_path(Path::new("/tmp/audio.mp3")),
+            "audio/mpeg"
+        );
+        assert_eq!(
+            mime_type_for_audio_path(Path::new("/tmp/audio.m4a")),
+            "audio/mp4"
+        );
+        assert_eq!(
+            mime_type_for_audio_path(Path::new("/tmp/audio.ogg")),
+            "audio/ogg"
+        );
+        assert_eq!(
+            mime_type_for_audio_path(Path::new("/tmp/audio.wav")),
+            "audio/wav"
+        );
     }
 }

@@ -87,3 +87,10 @@ export const transcriptionProviderOptions = ["nexara", "salute_speech"];
 export const transcriptionTaskOptions = ["transcribe", "diarize"];
 export const diarizationSettingOptions = ["general", "meeting", "telephonic"];
 export const audioFormatOptions = ["opus", "mp3", "m4a", "ogg", "wav"];
+export const saluteSpeechScopeOptions = [
+  "SALUTE_SPEECH_PERS",
+  "SALUTE_SPEECH_CORP",
+  "SALUTE_SPEECH_B2B",
+  "SBER_SPEECH",
+];
+export const saluteSpeechRecognitionModelOptions = ["general", "callcenter"];
