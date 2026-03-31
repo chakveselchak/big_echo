@@ -200,6 +200,37 @@ select {
   font-weight: 620;
 }
 
+.main-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(180deg, #f4f4f6 0%, #ebebee 100%);
+  border: 1px solid #d7d7db;
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.main-tab-button {
+  border: 1px solid #c7c9cf;
+  background: linear-gradient(180deg, #ffffff 0%, #efeff2 100%);
+  color: #252933;
+  border-radius: 9px;
+  min-height: 38px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.main-tab-button.is-active {
+  background: linear-gradient(180deg, #0a84ff 0%, #0068d6 100%);
+  color: #fff;
+  border-color: #0068d6;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
 .form-grid {
   display: grid;
   gap: 10px;
@@ -328,6 +359,26 @@ select {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.session-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.session-toolbar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-search-label {
+  gap: 0;
+}
+
+.session-toolbar-search input {
+  width: 100%;
+}
+
 .field {
   display: grid;
   gap: 6px;
@@ -336,6 +387,7 @@ select {
 }
 
 .field input,
+.session-toolbar-search input,
 .field select {
   border: 1px solid #c8c8cd;
   background: #ffffff;
@@ -692,6 +744,34 @@ select {
   cursor: not-allowed;
 }
 
+.refresh-icon-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  color: #2f5f93;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.refresh-icon-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.refresh-icon-button:hover {
+  color: #1c75bf;
+}
+
+.refresh-icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .primary-button:hover,
 .secondary-button:hover {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
@@ -1004,6 +1084,18 @@ select {
   .search-grid,
   .session-edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .main-tabs {
+    flex-wrap: wrap;
+  }
+
+  .session-toolbar {
+    gap: 8px;
+  }
+
+  .session-toolbar-header {
+    align-items: center;
   }
 
   .settings-layout .settings-tabs,

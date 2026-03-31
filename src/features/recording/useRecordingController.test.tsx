@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invokeMock, emitMock, listenMock, listeners } = vi.hoisted(() => ({
   listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
@@ -38,9 +38,21 @@ vi.mock("../../lib/tauri", () => ({
   tauriListen: listenMock,
 }));
 
+import { StartResponse } from "../../appTypes";
 import { useRecordingController } from "./useRecordingController";
 
 describe("useRecordingController", () => {
+  beforeEach(() => {
+    listeners.clear();
+    invokeMock.mockClear();
+    emitMock.mockClear();
+    listenMock.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("hydrates ui sync state and starts recording through the tauri adapter", async () => {
     const loadSessions = vi.fn(async () => undefined);
 
@@ -49,7 +61,7 @@ describe("useRecordingController", () => {
       const [participants, setParticipants] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag, setCustomTag] = useState("");
-      const [session, setSession] = useState(null);
+      const [session, setSession] = useState<StartResponse | null>(null);
       const [lastSessionId, setLastSessionId] = useState<string | null>(null);
       const [status, setStatus] = useState("idle");
 
@@ -90,5 +102,137 @@ describe("useRecordingController", () => {
       },
     });
     expect(loadSessions).toHaveBeenCalled();
+  });
+
+  it("debounces shared ui sync writes while source and topic are changing", async () => {
+    vi.useFakeTimers();
+    const loadSessions = vi.fn(async () => undefined);
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        setSource,
+        setTopic,
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: false,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+      };
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+
+    invokeMock.mockClear();
+    emitMock.mockClear();
+
+    await act(async () => {
+      result.current.setTopic("Q1");
+      result.current.setTopic("Q1 planning");
+      result.current.setSource("telegram");
+      await Promise.resolve();
+    });
+
+    expect(invokeMock).not.toHaveBeenCalledWith("set_ui_sync_state", expect.anything());
+
+    await act(async () => {
+      vi.advanceTimersByTime(149);
+      await Promise.resolve();
+    });
+
+    expect(invokeMock).not.toHaveBeenCalledWith("set_ui_sync_state", expect.anything());
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("set_ui_sync_state", {
+      source: "telegram",
+      topic: "Q1 planning",
+    });
+    expect(emitMock).toHaveBeenCalledTimes(1);
+    expect(emitMock).toHaveBeenCalledWith("ui:sync", {
+      source: "telegram",
+      topic: "Q1 planning",
+    });
+    expect(result.current.controller.uiSyncReady).toBe(true);
+  });
+
+  it("reduces idle tray live-level polling frequency", async () => {
+    vi.useFakeTimers();
+    const loadSessions = vi.fn(async () => undefined);
+
+    renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return useRecordingController({
+        isSettingsWindow: false,
+        isTrayWindow: true,
+        topic,
+        setTopic,
+        participants,
+        setParticipants,
+        source,
+        setSource,
+        customTag,
+        setCustomTag,
+        session,
+        setSession,
+        lastSessionId,
+        setLastSessionId,
+        status,
+        setStatus,
+        loadSessions,
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(invokeMock).toHaveBeenCalledWith("get_live_input_levels");
+
+    invokeMock.mockClear();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+
+    const liveLevelCalls = invokeMock.mock.calls.filter(([command]) => command === "get_live_input_levels");
+    expect(liveLevelCalls.length).toBeLessThanOrEqual(4);
   });
 });

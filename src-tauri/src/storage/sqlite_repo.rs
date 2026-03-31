@@ -6,6 +6,15 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionListMeta {
+    pub session_id: String,
+    pub source: String,
+    pub custom_tag: String,
+    pub topic: String,
+    pub participants: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionListItem {
     pub session_id: String,
     pub status: String,
@@ -18,6 +27,7 @@ pub struct SessionListItem {
     pub audio_duration_hms: String,
     pub has_transcript_text: bool,
     pub has_summary_text: bool,
+    pub meta: Option<SessionListMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,6 +246,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                 audio_duration_hms: "00:00:00".to_string(),
                 has_transcript_text: false,
                 has_summary_text: false,
+                meta: None,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -259,6 +270,20 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     );
                 item.has_summary_text = summary_ok
                     && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
+                let custom_tag = meta
+                    .tags
+                    .iter()
+                    .skip(1)
+                    .find(|value| !value.trim().is_empty())
+                    .cloned()
+                    .unwrap_or_default();
+                item.meta = Some(SessionListMeta {
+                    session_id: meta.session_id.clone(),
+                    source: meta.primary_tag.clone(),
+                    custom_tag,
+                    topic: meta.topic.clone(),
+                    participants: meta.participants.clone(),
+                });
             }
         }
         out.push(item);

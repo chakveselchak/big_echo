@@ -67,6 +67,31 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { App } from "./App";
 
 describe("App main window", () => {
+  it("shows top-level Sessions and Settings tabs and loads sessions when Sessions opens", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const topTabs = screen.getByRole("tablist", { name: "Main sections" });
+    expect(topTabs).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Sessions" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "false");
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("list_sessions");
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
+
+    invokeMock.mockClear();
+
+    await user.click(screen.getByRole("tab", { name: "Sessions" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("list_sessions");
+    });
+  });
+
   it("syncs source/topic from shared ui events and uses it on tray start", async () => {
     render(<App />);
 
@@ -104,9 +129,7 @@ describe("App main window", () => {
     expect(screen.getByRole("main")).toHaveClass("mac-window");
     expect(screen.getByRole("main")).toHaveClass("mac-content");
     await waitFor(() => {
-      expect(screen.getByRole("tablist", { name: "Settings sections" }).parentElement).toHaveClass(
-        "settings-layout"
-      );
+      expect(screen.getByRole("tablist", { name: "Main sections" })).toBeInTheDocument();
     });
     expect(screen.queryByText("Recording")).not.toBeInTheDocument();
     expect(screen.queryByText("При закрытии окно сворачивается в трей")).not.toBeInTheDocument();
@@ -193,7 +216,6 @@ describe("App main window", () => {
     });
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("get_session_meta", { sessionId: "s2" });
     });
@@ -249,11 +271,23 @@ describe("App main window", () => {
     });
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
     await waitFor(() => {
       expect(screen.getByText("(wav) - 11.03.2026")).toBeInTheDocument();
     });
     expect(screen.queryByText("(zoom) - 11.03.2026")).not.toBeInTheDocument();
+  });
+
+  it("renders refresh sessions as an icon button in the sessions header", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("list_sessions");
+    });
+
+    const refreshButton = screen.getByRole("button", { name: "Refresh sessions" });
+    expect(refreshButton).toHaveClass("refresh-icon-button");
+    expect(refreshButton).not.toHaveClass("icon-button");
+    expect(refreshButton.textContent?.trim()).toBe("");
   });
 
   it("calls transcription command from Get text and keeps Get Summary disabled without text", async () => {
