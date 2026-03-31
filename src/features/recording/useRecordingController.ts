@@ -3,6 +3,10 @@ import { LiveInputLevels, StartResponse, UiSyncStateView } from "../../appTypes"
 import { clamp01, parseEventPayload, splitParticipants } from "../../lib/appUtils";
 import { tauriEmit, tauriInvoke, tauriListen } from "../../lib/tauri";
 
+const UI_SYNC_DEBOUNCE_MS = 150;
+const TRAY_LEVELS_IDLE_POLL_MS = 280;
+const TRAY_LEVELS_RECORDING_POLL_MS = 120;
+
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
 type UseRecordingControllerOptions = {
@@ -49,6 +53,8 @@ export function useRecordingController({
   const sessionRef = useRef<StartResponse | null>(session);
   const trayTopicAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trayTopicSavedSignatureRef = useRef<string>("");
+  const uiSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastUiSyncPayloadRef = useRef<{ source: string; topic: string } | null>(null);
 
   useEffect(() => {
     topicRef.current = topic;
@@ -114,10 +120,13 @@ export function useRecordingController({
       try {
         const levels = await tauriInvoke<LiveInputLevels>("get_live_input_levels");
         if (!active) return;
-        setLiveLevels({
+        const nextLevels = {
           mic: clamp01(levels.mic),
           system: clamp01(levels.system),
-        });
+        };
+        setLiveLevels((prev) =>
+          prev.mic === nextLevels.mic && prev.system === nextLevels.system ? prev : nextLevels
+        );
       } catch {
         if (!active) return;
       } finally {
@@ -125,7 +134,7 @@ export function useRecordingController({
       }
     };
     void tick();
-    const intervalMs = status === "recording" ? 90 : 160;
+    const intervalMs = status === "recording" ? TRAY_LEVELS_RECORDING_POLL_MS : TRAY_LEVELS_IDLE_POLL_MS;
     const timer = setInterval(() => {
       void tick();
     }, intervalMs);
@@ -141,8 +150,14 @@ export function useRecordingController({
     tauriInvoke<UiSyncStateView>("get_ui_sync_state")
       .then((current) => {
         if (!active) return;
-        if (current.source?.trim()) setSource(current.source.trim());
-        setTopic(current.topic ?? "");
+        const syncedSource = current.source?.trim() || sourceRef.current;
+        const syncedTopic = current.topic ?? "";
+        lastUiSyncPayloadRef.current = {
+          source: syncedSource,
+          topic: syncedTopic,
+        };
+        if (current.source?.trim()) setSource(syncedSource);
+        setTopic(syncedTopic);
         if (current.is_recording) {
           setStatus("recording");
           if (current.active_session_id) {
@@ -201,6 +216,13 @@ export function useRecordingController({
     tauriListen("ui:sync", (event) => {
       const payload = parseEventPayload<{ source?: string; topic?: string }>(event);
       if (!payload) return;
+      const nextSource =
+        typeof payload.source === "string" && payload.source.trim() ? payload.source.trim() : sourceRef.current;
+      const nextTopic = typeof payload.topic === "string" ? payload.topic : topicRef.current;
+      lastUiSyncPayloadRef.current = {
+        source: nextSource,
+        topic: nextTopic,
+      };
       if (typeof payload.source === "string" && payload.source.trim() && payload.source !== sourceRef.current) {
         setSource(payload.source);
       }
@@ -216,10 +238,10 @@ export function useRecordingController({
       if (!payload || typeof payload.recording !== "boolean") return;
       if (payload.recording) {
         setStatus("recording");
-        if (payload.sessionId) {
-          setSession((prev) => prev ?? { session_id: payload.sessionId, session_dir: "", status: "recording" });
-          setLastSessionId(payload.sessionId);
-        }
+        const sessionId = payload.sessionId;
+        if (!sessionId) return;
+        setSession((prev) => prev ?? { session_id: sessionId, session_dir: "", status: "recording" });
+        setLastSessionId(sessionId);
       } else {
         setSession(null);
         setStatus((prev) => (prev === "recording" ? "recorded" : prev));
@@ -248,8 +270,21 @@ export function useRecordingController({
 
   useEffect(() => {
     if (isSettingsWindow || !uiSyncReady) return;
-    tauriInvoke("set_ui_sync_state", { source, topic }).catch(() => undefined);
-    tauriEmit("ui:sync", { source, topic }).catch(() => undefined);
+    if (uiSyncTimerRef.current) clearTimeout(uiSyncTimerRef.current);
+    uiSyncTimerRef.current = setTimeout(() => {
+      if (
+        lastUiSyncPayloadRef.current?.source === source &&
+        lastUiSyncPayloadRef.current?.topic === topic
+      ) {
+        return;
+      }
+      lastUiSyncPayloadRef.current = { source, topic };
+      tauriInvoke("set_ui_sync_state", { source, topic }).catch(() => undefined);
+      tauriEmit("ui:sync", { source, topic }).catch(() => undefined);
+    }, UI_SYNC_DEBOUNCE_MS);
+    return () => {
+      if (uiSyncTimerRef.current) clearTimeout(uiSyncTimerRef.current);
+    };
   }, [isSettingsWindow, source, topic, uiSyncReady]);
 
   useEffect(() => {

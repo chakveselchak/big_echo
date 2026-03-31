@@ -25,6 +25,24 @@ type UseSessionsOptions = {
   setLastSessionId: (sessionId: string | null) => void;
 };
 
+function sameParticipants(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameSessionMeta(left: SessionMetaView, right: SessionMetaView) {
+  return (
+    left.session_id === right.session_id &&
+    left.source === right.source &&
+    left.custom_tag === right.custom_tag &&
+    left.topic === right.topic &&
+    sameParticipants(left.participants, right.participants)
+  );
+}
+
+function sessionMetaSignature(meta: SessionMetaView) {
+  return `${meta.session_id}\n${meta.source}\n${meta.custom_tag}\n${meta.topic}\n${meta.participants.join("\u001f")}`;
+}
+
 function fallbackSessionMeta(item: SessionListItem): SessionMetaView {
   return {
     session_id: item.session_id,
@@ -50,6 +68,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const [deletePendingSessionId, setDeletePendingSessionId] = useState<string | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<SessionArtifactPreview | null>(null);
   const autosaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
   const artifactSearchRequestIdRef = useRef(0);
 
   async function loadSessions() {
@@ -57,6 +76,9 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     setSessions(data);
     const details = await Promise.all(
       data.map(async (item) => {
+        if (item.meta) {
+          return [item.session_id, item.meta] as const;
+        }
         try {
           const meta = await tauriInvoke<SessionMetaView>("get_session_meta", { sessionId: item.session_id });
           return [item.session_id, meta] as const;
@@ -242,10 +264,17 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       const saved = savedSessionDetails[sessionId];
       if (!saved) continue;
 
-      if (JSON.stringify(current) === JSON.stringify(saved)) continue;
+      if (sameSessionMeta(current, saved)) {
+        delete pendingAutosaveSignatureRef.current[sessionId];
+        continue;
+      }
+
+      const signature = sessionMetaSignature(current);
+      if (pendingAutosaveSignatureRef.current[sessionId] === signature) continue;
 
       const existing = autosaveTimersRef.current[sessionId];
       if (existing) clearTimeout(existing);
+      pendingAutosaveSignatureRef.current[sessionId] = signature;
 
       autosaveTimersRef.current[sessionId] = setTimeout(async () => {
         try {
@@ -262,16 +291,28 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
           setStatus("session_details_autosaved");
         } catch (err) {
           setStatus(`error: ${String(err)}`);
+        } finally {
+          delete autosaveTimersRef.current[sessionId];
+          delete pendingAutosaveSignatureRef.current[sessionId];
         }
       }, 700);
     }
 
+    for (const sessionId of Object.keys(autosaveTimersRef.current)) {
+      if (sessionId in sessionDetails) continue;
+      clearTimeout(autosaveTimersRef.current[sessionId]);
+      delete autosaveTimersRef.current[sessionId];
+      delete pendingAutosaveSignatureRef.current[sessionId];
+    }
+  }, [savedSessionDetails, sessionDetails, setStatus]);
+
+  useEffect(() => {
     return () => {
       for (const timer of Object.values(autosaveTimersRef.current)) {
         clearTimeout(timer);
       }
     };
-  }, [savedSessionDetails, sessionDetails, setStatus]);
+  }, []);
 
   const filteredSessions = useMemo(() => {
     const query = sessionSearchQuery.trim().toLowerCase();

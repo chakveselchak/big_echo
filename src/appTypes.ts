@@ -39,6 +39,7 @@ export type SessionListItem = {
   audio_duration_hms: string;
   has_transcript_text: boolean;
   has_summary_text: boolean;
+  meta?: SessionMetaView;
 };
 
 export type SessionMetaView = {

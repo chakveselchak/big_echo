@@ -33,6 +33,8 @@ const openerUiFallback = [
   { id: "Zed", name: "Zed", icon_fallback: "🧩", icon_data_url: null },
 ] as const;
 
+type MainTab = "sessions" | "settings";
+
 function localIconForEditor(editorName: string): string | null {
   const lowered = editorName.toLowerCase();
   if (lowered.includes("visual studio code") || lowered === "vscode") return vscodeIcon;
@@ -59,6 +61,7 @@ function renderHighlightedText(text: string, query: string) {
 }
 
 export function App() {
+  const [mainTab, setMainTab] = useState<MainTab>("sessions");
   const [topic, setTopic] = useState("");
   const [participants, setParticipants] = useState("");
   const [source, setSource] = useState("slack");
@@ -70,6 +73,7 @@ export function App() {
   const openerDropdownRef = useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = useRef<HTMLInputElement | null>(null);
   const artifactPreviewBodyRef = useRef<HTMLPreElement | null>(null);
+  const loadSessionsRef = useRef<(() => Promise<void>) | null>(null);
   const {
     audioDevices,
     autoDetectSystemSource,
@@ -142,6 +146,10 @@ export function App() {
   });
 
   useEffect(() => {
+    loadSessionsRef.current = loadSessions;
+  }, [loadSessions]);
+
+  useEffect(() => {
     if (!isTrayWindow) return;
     document.body.classList.add("tray-window-body");
     document.documentElement.classList.add("tray-window-html");
@@ -181,6 +189,13 @@ export function App() {
     if (!(firstMatch instanceof HTMLElement) || typeof firstMatch.scrollIntoView !== "function") return;
     firstMatch.scrollIntoView({ block: "center" });
   }, [artifactPreview]);
+
+  useEffect(() => {
+    if (isTrayWindow || isSettingsWindow || mainTab !== "sessions") return;
+    loadSessionsRef.current?.().catch((err) => {
+      setStatus(`error: ${String(err)}`);
+    });
+  }, [isSettingsWindow, isTrayWindow, mainTab]);
 
   function renderSettingsFields() {
     if (!settings) return null;
@@ -729,272 +744,321 @@ export function App() {
 
   return (
     <main className="app-shell mac-window mac-content">
-      <section className="panel">
-        <h2>Settings</h2>
-        {renderSettingsFields()}
-      </section>
+      <div className="main-tabs" role="tablist" aria-label="Main sections">
+        <button
+          type="button"
+          role="tab"
+          className={`main-tab-button${mainTab === "sessions" ? " is-active" : ""}`}
+          aria-selected={mainTab === "sessions"}
+          onClick={() => setMainTab("sessions")}
+        >
+          Sessions
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={`main-tab-button${mainTab === "settings" ? " is-active" : ""}`}
+          aria-selected={mainTab === "settings"}
+          onClick={() => setMainTab("settings")}
+        >
+          Settings
+        </button>
+      </div>
 
-      <section className="panel">
-        <h2>Sessions</h2>
-        <div className="search-grid">
-          <label className="field">
-            Search sessions
-            <input
-              ref={sessionSearchInputRef}
-              value={sessionSearchQuery}
-              onChange={(e) => setSessionSearchQuery(e.target.value)}
-            />
-          </label>
-        </div>
-        <div className="button-row">
-          <button className="secondary-button" onClick={loadSessions}>
-            Refresh sessions
-          </button>
-        </div>
-        <div className="sessions-grid">
-          {filteredSessions.map((item) => {
-            const detail = sessionDetails[item.session_id] ?? {
-              session_id: item.session_id,
-              source: item.primary_tag,
-              custom_tag: "",
-              topic: item.topic,
-              participants: [],
-            };
-            const textPending = Boolean(textPendingBySession[item.session_id]);
-            const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
-            const pipelineState = pipelineStateBySession[item.session_id];
-            const query = sessionSearchQuery.trim().toLowerCase();
-            const sourceMatch = query !== "" && detail.source.toLowerCase().includes(query);
-            const customMatch = query !== "" && detail.custom_tag.toLowerCase().includes(query);
-            const topicMatch = query !== "" && detail.topic.toLowerCase().includes(query);
-            const participantsText = detail.participants.join(", ");
-            const participantsMatch = query !== "" && participantsText.toLowerCase().includes(query);
-            const pathMatch = query !== "" && item.session_dir.toLowerCase().includes(query);
-            const statusMatch = query !== "" && item.status.toLowerCase().includes(query);
-            const artifactHit = sessionArtifactSearchHits[item.session_id];
-            const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
-            const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
-            return (
-              <article key={item.session_id} className="session-card">
-                <div className="session-header">
-                  <div className="session-title-block">
-                    <div className="session-title-line">
-                      <strong>{detail.topic || "Без темы"}</strong>
-                      <span className="session-title-meta">
-                        ({item.audio_format}) - {item.display_date_ru}
-                      </span>
-                      <span className="session-duration-label">{item.audio_duration_hms}</span>
+      {mainTab === "settings" ? (
+        <section className="panel">
+          {renderSettingsFields()}
+        </section>
+      ) : (
+        <section className="panel">
+          <div className="session-toolbar">
+            <div className="session-toolbar-header">
+              <label className="field session-search-label" htmlFor="session-search-input">
+                Search sessions
+              </label>
+              <button
+                type="button"
+                className="refresh-icon-button"
+                aria-label="Refresh sessions"
+                title="Refresh sessions"
+                onClick={() => void loadSessions()}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M20 12a8 8 0 1 1-2.34-5.66"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M20 4v5h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div className="session-toolbar-search">
+              <input
+                id="session-search-input"
+                ref={sessionSearchInputRef}
+                aria-label="Search sessions"
+                value={sessionSearchQuery}
+                onChange={(e) => setSessionSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="sessions-grid">
+            {filteredSessions.map((item) => {
+              const detail = sessionDetails[item.session_id] ?? {
+                session_id: item.session_id,
+                source: item.primary_tag,
+                custom_tag: "",
+                topic: item.topic,
+                participants: [],
+              };
+              const textPending = Boolean(textPendingBySession[item.session_id]);
+              const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
+              const pipelineState = pipelineStateBySession[item.session_id];
+              const query = sessionSearchQuery.trim().toLowerCase();
+              const sourceMatch = query !== "" && detail.source.toLowerCase().includes(query);
+              const customMatch = query !== "" && detail.custom_tag.toLowerCase().includes(query);
+              const topicMatch = query !== "" && detail.topic.toLowerCase().includes(query);
+              const participantsText = detail.participants.join(", ");
+              const participantsMatch = query !== "" && participantsText.toLowerCase().includes(query);
+              const pathMatch = query !== "" && item.session_dir.toLowerCase().includes(query);
+              const statusMatch = query !== "" && item.status.toLowerCase().includes(query);
+              const artifactHit = sessionArtifactSearchHits[item.session_id];
+              const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
+              const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
+              return (
+                <article key={item.session_id} className="session-card">
+                  <div className="session-header">
+                    <div className="session-title-block">
+                      <div className="session-title-line">
+                        <strong>{detail.topic || "Без темы"}</strong>
+                        <span className="session-title-meta">
+                          ({item.audio_format}) - {item.display_date_ru}
+                        </span>
+                        <span className="session-duration-label">{item.audio_duration_hms}</span>
+                      </div>
+                      <div className={statusMatch ? "session-status match-hit" : "session-status"}>
+                        Status: {formatSessionStatus(item.status)}
+                      </div>
                     </div>
-                    <div className={statusMatch ? "session-status match-hit" : "session-status"}>
-                      Status: {formatSessionStatus(item.status)}
+                    <div className="session-header-right">
+                      <div className="session-labels">
+                        {item.has_transcript_text && (
+                          <button
+                            type="button"
+                            className={`session-label session-label-action session-label-text${transcriptMatch ? " match-hit" : ""}`}
+                            onClick={() => void openSessionArtifact(item.session_id, "transcript")}
+                          >
+                            текст
+                          </button>
+                        )}
+                        {item.has_summary_text && (
+                          <button
+                            type="button"
+                            className={`session-label session-label-action session-label-summary${summaryMatch ? " match-hit" : ""}`}
+                            onClick={() => void openSessionArtifact(item.session_id, "summary")}
+                          >
+                            саммари
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="icon-button delete-session-button"
+                        aria-label="Удалить сессию"
+                        title="Удалить сессию"
+                        onClick={() => requestDeleteSession(item.session_id, item.status === "recording")}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 7h2v8h-2v-8zm4 0h2v8h-2v-8zM7 10h2v8H7v-8z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   </div>
-                  <div className="session-header-right">
-                    <div className="session-labels">
-                      {item.has_transcript_text && (
-                        <button
-                          type="button"
-                          className={`session-label session-label-action session-label-text${transcriptMatch ? " match-hit" : ""}`}
-                          onClick={() => void openSessionArtifact(item.session_id, "transcript")}
-                        >
-                          текст
-                        </button>
-                      )}
-                      {item.has_summary_text && (
-                        <button
-                          type="button"
-                          className={`session-label session-label-action session-label-summary${summaryMatch ? " match-hit" : ""}`}
-                          onClick={() => void openSessionArtifact(item.session_id, "summary")}
-                        >
-                          саммари
-                        </button>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      className="icon-button delete-session-button"
-                      aria-label="Удалить сессию"
-                      title="Удалить сессию"
-                      onClick={() => requestDeleteSession(item.session_id, item.status === "recording")}
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path
-                          d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 7h2v8h-2v-8zm4 0h2v8h-2v-8zM7 10h2v8H7v-8z"
-                          fill="currentColor"
-                        />
-                      </svg>
+                  <div className="session-path-row">
+                    <div className={`session-path${pathMatch ? " match-hit" : ""}`}>{item.session_dir}</div>
+                    <button className="link-button" type="button" onClick={() => void openSessionFolder(item.session_dir)}>
+                      открыть
                     </button>
                   </div>
-                </div>
-                <div className="session-path-row">
-                  <div className={`session-path${pathMatch ? " match-hit" : ""}`}>{item.session_dir}</div>
-                  <button className="link-button" type="button" onClick={() => void openSessionFolder(item.session_dir)}>
-                    открыть
-                  </button>
-                </div>
-                <div className="session-edit-grid">
-                  <label className={`field${sourceMatch ? " match-hit" : ""}`}>
-                    Source
-                    <select
-                      value={detail.source}
-                      onChange={(e) =>
-                        setSessionDetails((prev) => ({
-                          ...prev,
-                          [item.session_id]: { ...detail, source: e.target.value },
-                        }))
+                  <div className="session-edit-grid">
+                    <label className={`field${sourceMatch ? " match-hit" : ""}`}>
+                      Source
+                      <select
+                        value={detail.source}
+                        onChange={(e) =>
+                          setSessionDetails((prev) => ({
+                            ...prev,
+                            [item.session_id]: { ...detail, source: e.target.value },
+                          }))
+                        }
+                      >
+                        {fixedSources.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={`field${customMatch ? " match-hit" : ""}`}>
+                      Custom tag
+                      <input
+                        value={detail.custom_tag}
+                        onChange={(e) =>
+                          setSessionDetails((prev) => ({
+                            ...prev,
+                            [item.session_id]: { ...detail, custom_tag: e.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={`field${topicMatch ? " match-hit" : ""}`}>
+                      Topic
+                      <input
+                        value={detail.topic}
+                        onChange={(e) =>
+                          setSessionDetails((prev) => ({
+                            ...prev,
+                            [item.session_id]: { ...detail, topic: e.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={`field${participantsMatch ? " match-hit" : ""}`}>
+                      Participants
+                      <input
+                        value={participantsText}
+                        onChange={(e) =>
+                          setSessionDetails((prev) => ({
+                            ...prev,
+                            [item.session_id]: {
+                              ...detail,
+                              participants: splitParticipants(e.target.value),
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      className="secondary-button"
+                      onClick={() => getText(item.session_id)}
+                      disabled={item.status === "recording" || textPending || summaryPending}
+                    >
+                      {textPending ? (
+                        <span className="button-loading-content">
+                          <span className="inline-loader" aria-hidden="true" />
+                          Getting text...
+                        </span>
+                      ) : (
+                        "Get text"
+                      )}
+                    </button>
+                    {textPending && (
+                      <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
+                        Loading text
+                      </span>
+                    )}
+                    <button
+                      className="secondary-button"
+                      onClick={() => getSummary(item.session_id)}
+                      disabled={
+                        item.status === "recording" || !item.has_transcript_text || summaryPending || textPending
                       }
                     >
-                      {fixedSources.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className={`field${customMatch ? " match-hit" : ""}`}>
-                    Custom tag
-                    <input
-                      value={detail.custom_tag}
-                      onChange={(e) =>
-                        setSessionDetails((prev) => ({
-                          ...prev,
-                          [item.session_id]: { ...detail, custom_tag: e.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={`field${topicMatch ? " match-hit" : ""}`}>
-                    Topic
-                    <input
-                      value={detail.topic}
-                      onChange={(e) =>
-                        setSessionDetails((prev) => ({
-                          ...prev,
-                          [item.session_id]: { ...detail, topic: e.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={`field${participantsMatch ? " match-hit" : ""}`}>
-                    Participants
-                    <input
-                      value={participantsText}
-                      onChange={(e) =>
-                        setSessionDetails((prev) => ({
-                          ...prev,
-                          [item.session_id]: {
-                            ...detail,
-                            participants: splitParticipants(e.target.value),
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
+                      {summaryPending ? (
+                        <span className="button-loading-content">
+                          <span className="inline-loader" aria-hidden="true" />
+                          Getting summary...
+                        </span>
+                      ) : (
+                        "Get Summary"
+                      )}
+                    </button>
+                    {summaryPending && (
+                      <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading summary">
+                        Loading summary
+                      </span>
+                    )}
+                    {pipelineState && (
+                      <span
+                        className={
+                          pipelineState.kind === "error"
+                            ? "retry-state retry-state-error"
+                            : "retry-state retry-state-success"
+                        }
+                      >
+                        {pipelineState.text}
+                      </span>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+            {!filteredSessions.length && <div>No sessions yet</div>}
+          </div>
+          {deleteTarget && (
+            <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Подтверждение удаления">
+              <div className="confirm-card">
+                <p>
+                  {deleteTarget.force
+                    ? "Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?"
+                    : "Удалить сессию и все связанные файлы?"}
+                </p>
                 <div className="button-row">
                   <button
                     className="secondary-button"
-                    onClick={() => getText(item.session_id)}
-                    disabled={item.status === "recording" || textPending || summaryPending}
+                    type="button"
+                    onClick={() => setDeleteTarget(null)}
+                    disabled={deletePendingSessionId !== null}
                   >
-                    {textPending ? (
-                      <span className="button-loading-content">
-                        <span className="inline-loader" aria-hidden="true" />
-                        Getting text...
-                      </span>
-                    ) : (
-                      "Get text"
-                    )}
+                    Отмена
                   </button>
-                  {textPending && (
-                    <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
-                      Loading text
-                    </span>
-                  )}
                   <button
-                    className="secondary-button"
-                    onClick={() => getSummary(item.session_id)}
-                    disabled={item.status === "recording" || !item.has_transcript_text || summaryPending || textPending}
+                    className="secondary-button danger-button"
+                    type="button"
+                    onClick={() => void confirmDeleteSession()}
+                    disabled={deletePendingSessionId !== null}
                   >
-                    {summaryPending ? (
-                      <span className="button-loading-content">
-                        <span className="inline-loader" aria-hidden="true" />
-                        Getting summary...
-                      </span>
-                    ) : (
-                      "Get Summary"
-                    )}
+                    {deletePendingSessionId !== null ? "Удаление..." : "Удалить"}
                   </button>
-                  {summaryPending && (
-                    <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading summary">
-                      Loading summary
-                    </span>
-                  )}
-                  {pipelineState && (
-                    <span
-                      className={
-                        pipelineState.kind === "error"
-                          ? "retry-state retry-state-error"
-                          : "retry-state retry-state-success"
-                      }
-                    >
-                      {pipelineState.text}
-                    </span>
-                  )}
                 </div>
-              </article>
-            );
-          })}
-          {!filteredSessions.length && <div>No sessions yet</div>}
-        </div>
-        {deleteTarget && (
-          <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Подтверждение удаления">
-            <div className="confirm-card">
-              <p>
-                {deleteTarget.force
-                  ? "Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?"
-                  : "Удалить сессию и все связанные файлы?"}
-              </p>
-              <div className="button-row">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => setDeleteTarget(null)}
-                  disabled={deletePendingSessionId !== null}
-                >
-                  Отмена
-                </button>
-                <button
-                  className="secondary-button danger-button"
-                  type="button"
-                  onClick={() => void confirmDeleteSession()}
-                  disabled={deletePendingSessionId !== null}
-                >
-                  {deletePendingSessionId !== null ? "Удаление..." : "Удалить"}
-                </button>
               </div>
             </div>
-          </div>
-        )}
-        {artifactPreview && (
-          <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Просмотр артефакта">
-            <div className="confirm-card artifact-preview-card">
-              <div className="session-title-line">
-                <strong>{artifactPreview.artifactKind === "transcript" ? "Текст" : "Саммари"}</strong>
-              </div>
-              <div className="session-path">{artifactPreview.path}</div>
-              <pre ref={artifactPreviewBodyRef} className="artifact-preview-text">
-                {renderHighlightedText(artifactPreview.text, artifactPreview.query)}
-              </pre>
-              <div className="button-row">
-                <button className="secondary-button" type="button" onClick={closeArtifactPreview}>
-                  Закрыть
-                </button>
+          )}
+          {artifactPreview && (
+            <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Просмотр артефакта">
+              <div className="confirm-card artifact-preview-card">
+                <div className="session-title-line">
+                  <strong>{artifactPreview.artifactKind === "transcript" ? "Текст" : "Саммари"}</strong>
+                </div>
+                <div className="session-path">{artifactPreview.path}</div>
+                <pre ref={artifactPreviewBodyRef} className="artifact-preview-text">
+                  {renderHighlightedText(artifactPreview.text, artifactPreview.query)}
+                </pre>
+                <div className="button-row">
+                  <button className="secondary-button" type="button" onClick={closeArtifactPreview}>
+                    Закрыть
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      )}
     </main>
   );
 }
