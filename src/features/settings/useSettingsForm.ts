@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { PublicSettings, SecretSaveState, SettingsTab, TextEditorAppOption, TextEditorAppsResponse } from "../../appTypes";
+import {
+  MacosSystemAudioPermissionStatus,
+  PublicSettings,
+  SecretSaveState,
+  SettingsTab,
+  TextEditorAppOption,
+  TextEditorAppsResponse,
+} from "../../appTypes";
 import { validateSettings } from "../../lib/validation";
 import { tauriInvoke } from "../../lib/tauri";
 
@@ -17,6 +24,38 @@ const frontendFallbackEditors: TextEditorAppOption[] = [
   { id: "Zed", name: "Zed", icon_fallback: "🧩", icon_data_url: null },
 ];
 
+const fallbackMacosSystemAudioPermission: MacosSystemAudioPermissionStatus = {
+  kind: "unsupported",
+  can_request: false,
+};
+
+function normalizeMacosSystemAudioPermissionStatus(
+  value: unknown
+): MacosSystemAudioPermissionStatus {
+  if (!value || typeof value !== "object") {
+    return fallbackMacosSystemAudioPermission;
+  }
+
+  const candidate = value as {
+    kind?: unknown;
+    can_request?: unknown;
+  };
+
+  if (
+    candidate.kind === "granted" ||
+    candidate.kind === "not_determined" ||
+    candidate.kind === "denied" ||
+    candidate.kind === "unsupported"
+  ) {
+    return {
+      kind: candidate.kind,
+      can_request: candidate.can_request === true,
+    };
+  }
+
+  return fallbackMacosSystemAudioPermission;
+}
+
 export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOptions) {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<PublicSettings | null>(null);
@@ -27,6 +66,8 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
   const [salutSpeechSecretState, setSalutSpeechSecretState] = useState<SecretSaveState>("unknown");
   const [openaiSecretState, setOpenaiSecretState] = useState<SecretSaveState>("unknown");
   const [audioDevices, setAudioDevices] = useState<string[]>([]);
+  const [macosSystemAudioPermission, setMacosSystemAudioPermission] =
+    useState<MacosSystemAudioPermissionStatus | null>(null);
   const [textEditorApps, setTextEditorApps] = useState<TextEditorAppOption[]>([]);
   const [textEditorAppsLoaded, setTextEditorAppsLoaded] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("audiototext");
@@ -43,6 +84,16 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
   async function loadAudioDevices() {
     const list = await tauriInvoke<string[]>("list_audio_input_devices");
     setAudioDevices(list);
+  }
+
+  async function loadMacosSystemAudioPermission() {
+    try {
+      const status = await tauriInvoke<unknown>("get_macos_system_audio_permission_status");
+      setMacosSystemAudioPermission(normalizeMacosSystemAudioPermissionStatus(status));
+    } catch {
+      setMacosSystemAudioPermission(fallbackMacosSystemAudioPermission);
+      setStatus("error: не удалось загрузить статус разрешения macOS system audio");
+    }
   }
 
   async function autoDetectSystemSource() {
@@ -138,6 +189,7 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
 
   useEffect(() => {
     void loadSettings().catch(() => undefined);
+    void loadMacosSystemAudioPermission().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -191,9 +243,11 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     autoDetectSystemSource,
     canSaveSettings,
     loadAudioDevices,
+    loadMacosSystemAudioPermission,
     loadSettings,
     nexaraKey,
     nexaraSecretState,
+    macosSystemAudioPermission,
     openaiKey,
     openaiSecretState,
     pickRecordingRoot,

@@ -33,6 +33,72 @@ pub fn detect_system_source_device() -> Result<Option<String>, String> {
     crate::audio::capture::detect_system_source_device()
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MacosSystemAudioPermissionKind {
+    Granted,
+    NotDetermined,
+    Denied,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MacosSystemAudioPermissionStatus {
+    pub kind: MacosSystemAudioPermissionKind,
+    pub can_request: bool,
+}
+
+#[tauri::command]
+pub fn get_macos_system_audio_permission_status() -> Result<MacosSystemAudioPermissionStatus, String>
+{
+    // Task 2 will replace this with the native macOS bridge.
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(MacosSystemAudioPermissionStatus {
+            kind: MacosSystemAudioPermissionKind::Unsupported,
+            can_request: false,
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(MacosSystemAudioPermissionStatus {
+            kind: MacosSystemAudioPermissionKind::Unsupported,
+            can_request: false,
+        })
+    }
+}
+
+#[tauri::command]
+pub fn open_macos_system_audio_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Err("macOS system audio settings are unavailable until the native bridge lands".to_string())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("macOS system audio settings are unavailable on this platform".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_permission_kind_using_snake_case() {
+        let payload = MacosSystemAudioPermissionStatus {
+            kind: MacosSystemAudioPermissionKind::NotDetermined,
+            can_request: true,
+        };
+        let json = serde_json::to_value(payload).expect("serialize permission payload");
+        assert_eq!(json["kind"], "not_determined");
+        assert_eq!(json["can_request"], true);
+    }
+}
+
 #[tauri::command]
 pub fn pick_recording_root() -> Result<Option<String>, String> {
     pick_directory_with_system_dialog()
@@ -104,7 +170,11 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 fn pick_directory_with_system_dialog() -> Result<Option<String>, String> {
     if command_exists("zenity") {
         let output = Command::new("zenity")
-            .args(["--file-selection", "--directory", "--title=Choose recording root"])
+            .args([
+                "--file-selection",
+                "--directory",
+                "--title=Choose recording root",
+            ])
             .output()
             .map_err(|e| e.to_string())?;
         if output.status.success() {
@@ -120,7 +190,12 @@ fn pick_directory_with_system_dialog() -> Result<Option<String>, String> {
 
     if command_exists("kdialog") {
         let output = Command::new("kdialog")
-            .args(["--getexistingdirectory", ".", "--title", "Choose recording root"])
+            .args([
+                "--getexistingdirectory",
+                ".",
+                "--title",
+                "Choose recording root",
+            ])
             .output()
             .map_err(|e| e.to_string())?;
         if output.status.success() {
