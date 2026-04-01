@@ -1,4 +1,5 @@
 use crate::app_state::AppDirs;
+pub use crate::audio::macos_system_audio::MacosSystemAudioPermissionStatus;
 use crate::settings::public_settings::{save_settings, PublicSettings};
 use crate::{get_settings_from_dirs, open_settings_window_internal, open_tray_window_internal};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -33,40 +34,17 @@ pub fn detect_system_source_device() -> Result<Option<String>, String> {
     crate::audio::capture::detect_system_source_device()
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MacosSystemAudioPermissionKind {
-    Granted,
-    NotDetermined,
-    Denied,
-    Unsupported,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct MacosSystemAudioPermissionStatus {
-    pub kind: MacosSystemAudioPermissionKind,
-    pub can_request: bool,
-}
-
 #[tauri::command]
 pub fn get_macos_system_audio_permission_status() -> Result<MacosSystemAudioPermissionStatus, String>
 {
-    // Task 2 will replace this with the native macOS bridge.
     #[cfg(target_os = "macos")]
     {
-        return Ok(MacosSystemAudioPermissionStatus {
-            kind: MacosSystemAudioPermissionKind::Unsupported,
-            can_request: false,
-        });
+        return Ok(crate::audio::macos_system_audio::permission_status());
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        Ok(MacosSystemAudioPermissionStatus {
-            kind: MacosSystemAudioPermissionKind::Unsupported,
-            can_request: false,
-        })
+        Ok(crate::audio::macos_system_audio::permission_status())
     }
 }
 
@@ -74,7 +52,7 @@ pub fn get_macos_system_audio_permission_status() -> Result<MacosSystemAudioPerm
 pub fn open_macos_system_audio_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        Err("macOS system audio settings are unavailable until the native bridge lands".to_string())
+        crate::audio::macos_system_audio::open_system_settings()
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -90,7 +68,7 @@ mod tests {
     #[test]
     fn serializes_permission_kind_using_snake_case() {
         let payload = MacosSystemAudioPermissionStatus {
-            kind: MacosSystemAudioPermissionKind::NotDetermined,
+            kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::NotDetermined,
             can_request: true,
         };
         let json = serde_json::to_value(payload).expect("serialize permission payload");

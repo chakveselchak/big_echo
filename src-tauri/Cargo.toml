@@ -5,6 +5,7 @@ edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+swift-rs = { version = "1.0.7", features = ["build"] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
@@ -24,6 +25,7 @@ cpal = "0.16"
 tauri-plugin-global-shortcut = "2"
 base64 = "0.22"
 sha2 = "0.10"
+swift-rs = "1.0.7"
 
 [features]
 default = []
