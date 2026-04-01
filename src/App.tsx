@@ -715,6 +715,10 @@ export function App() {
   if (isTrayWindow) {
     const micPct = Math.round(liveLevels.mic * 100);
     const systemPct = Math.round(liveLevels.system * 100);
+    const isMacosSystemAudioUnsupported =
+      macosSystemAudioPermissionLoadState === "ready" && macosSystemAudioPermission?.kind === "unsupported";
+    const isMacosSystemAudioLoading = macosSystemAudioPermissionLoadState === "loading";
+    const isMacosSystemAudioLookupFailed = macosSystemAudioPermissionLoadState === "error";
     return (
       <main className="tray-shell">
         <p className="status-line">Status: {formatAppStatus(status)}</p>
@@ -761,32 +765,57 @@ export function App() {
               </select>
             </label>
           </div>
-          <div className="tray-level-row">
-            <span className="tray-level-name">System</span>
-            <div className="tray-level-track" aria-label="System level">
-              <div className="tray-level-fill" style={{ width: `${systemPct}%` }} />
+          {isMacosSystemAudioLoading ? (
+            <div className="tray-level-row">
+              <span className="tray-level-name">System</span>
+              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
+                Checking macOS system audio status
+              </div>
             </div>
-            <label className="tray-level-device">
-              <span className="sr-only">System device</span>
-              <select
-                aria-label="System device"
-                value={settings?.system_device_name ?? ""}
-                onChange={(e) => {
-                  void saveSettingsPatch({ system_device_name: e.target.value }).catch((err) =>
-                    setStatus(`error: ${String(err)}`)
-                  );
-                }}
-                disabled={status === "recording"}
-              >
-                <option value="">Auto</option>
-                {audioDevices.map((dev) => (
-                  <option key={`sys-${dev}`} value={dev}>
-                    {dev}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          ) : isMacosSystemAudioLookupFailed ? (
+            <div className="tray-level-row">
+              <span className="tray-level-name">System</span>
+              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
+                Could not load macOS system audio status. Open System Settings to review the permission.
+              </div>
+            </div>
+          ) : isMacosSystemAudioUnsupported ? (
+            <div className="tray-level-row">
+              <span className="tray-level-name">System</span>
+              <div className="tray-level-track" aria-label="System level">
+                <div className="tray-level-fill" style={{ width: `${systemPct}%` }} />
+              </div>
+              <label className="tray-level-device">
+                <span className="sr-only">System device</span>
+                <select
+                  aria-label="System device"
+                  value={settings?.system_device_name ?? ""}
+                  onChange={(e) => {
+                    void saveSettingsPatch({ system_device_name: e.target.value }).catch((err) =>
+                      setStatus(`error: ${String(err)}`)
+                    );
+                  }}
+                  disabled={status === "recording"}
+                >
+                  <option value="">Auto</option>
+                  {audioDevices.map((dev) => (
+                    <option key={`sys-${dev}`} value={dev}>
+                      {dev}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : (
+            <div className="tray-level-row">
+              <span className="tray-level-name">System</span>
+              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
+                {macosSystemAudioPermission?.kind === "granted"
+                  ? "System audio is captured natively by macOS."
+                  : "System audio is captured natively by macOS. Open System Settings to review the permission."}
+              </div>
+            </div>
+          )}
         </div>
         <div className="button-row">
           <button className="primary-button rec-button" onClick={startFromTray} disabled={status === "recording"}>

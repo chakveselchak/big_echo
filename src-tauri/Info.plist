@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>BigEcho uses macOS system audio capture to record meetings.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>BigEcho uses microphone and loopback input devices to record meeting audio.</string>
+  <string>BigEcho uses the microphone and macOS system audio capture to record meetings.</string>
 </dict>
 </plist>
