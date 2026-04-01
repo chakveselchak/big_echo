@@ -88,11 +88,15 @@ export function useRecordingController({
   }
 
   async function startFromTray() {
-    await startRecording({
-      source,
-      topic,
-      participants: [],
-    });
+    try {
+      await startRecording({
+        source,
+        topic,
+        participants: [],
+      });
+    } catch (err) {
+      setStatus(`error: ${String(err)}`);
+    }
   }
 
   async function stop() {
