@@ -5,12 +5,19 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
+#[cfg(test)]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 const TARGET_RATE: u32 = 48_000;
+
+#[cfg(test)]
+static TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR: OnceLock<Mutex<Option<String>>> =
+    OnceLock::new();
 
 type I16Sink = Arc<Mutex<BufWriter<File>>>;
 
@@ -64,6 +71,7 @@ impl SharedLevels {
         Arc::clone(&self.mic)
     }
 
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn system_meter(&self) -> Arc<AtomicU32> {
         Arc::clone(&self.system)
     }
@@ -111,6 +119,8 @@ fn update_meter_level(target: &AtomicU32, measured_linear_rms: f32) {
 pub struct ContinuousCapture {
     stop_tx: Sender<()>,
     join: Option<thread::JoinHandle<Result<CaptureArtifacts, String>>>,
+    #[cfg(target_os = "macos")]
+    native_system_capture: Option<crate::audio::macos_system_audio::NativeSystemAudioCapture>,
 }
 
 pub struct CaptureArtifacts {
@@ -131,6 +141,9 @@ impl ContinuousCapture {
             .or_else(|| host.default_input_device())
             .ok_or_else(|| "No input device available for microphone".to_string())?;
 
+        #[cfg(target_os = "macos")]
+        let native_system_capture = Some(start_macos_native_system_capture()?);
+
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let join =
             thread::spawn(move || capture_until_stopped(stop_rx, mic_name, system_name, levels));
@@ -138,24 +151,80 @@ impl ContinuousCapture {
         Ok(Self {
             stop_tx,
             join: Some(join),
+            #[cfg(target_os = "macos")]
+            native_system_capture,
         })
     }
 
     pub fn stop_and_take_artifacts(mut self) -> Result<CaptureArtifacts, String> {
         let _ = self.stop_tx.send(());
-        let result = match self.join.take() {
+        let mic_result = match self.join.take() {
             Some(handle) => handle
                 .join()
-                .map_err(|_| "Audio capture thread panicked".to_string())??,
-            None => {
-                return Err("Audio capture thread is missing".to_string());
-            }
+                .map_err(|_| "Audio capture thread panicked".to_string()),
+            None => Err("Audio capture thread is missing".to_string()),
         };
-        Ok(result)
+
+        #[cfg(target_os = "macos")]
+        let system_result = self
+            .native_system_capture
+            .take()
+            .map(|capture| capture.stop());
+
+        #[cfg(target_os = "macos")]
+        {
+            match (mic_result, system_result) {
+                (Ok(Ok(mut artifacts)), Some(Ok(system_artifacts))) => {
+                    artifacts.system_path = Some(system_artifacts.path);
+                    artifacts.system_rate = system_artifacts.sample_rate;
+                    Ok(artifacts)
+                }
+                (Ok(Ok(artifacts)), Some(Err(err))) => {
+                    cleanup_artifacts(&artifacts);
+                    Err(err)
+                }
+                (Ok(Err(err)), Some(Ok(system_artifacts))) => {
+                    cleanup_system_artifact(&system_artifacts.path);
+                    Err(err)
+                }
+                (Ok(Err(err)), Some(Err(_))) => Err(err),
+                (Err(err), Some(Ok(system_artifacts))) => {
+                    cleanup_system_artifact(&system_artifacts.path);
+                    Err(err)
+                }
+                (Err(err), Some(Err(_))) => Err(err),
+                (Ok(Ok(artifacts)), None) => Ok(artifacts),
+                (Ok(Err(err)), None) => Err(err),
+                (Err(err), None) => Err(err),
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            mic_result?
+        }
     }
 }
 
 fn capture_until_stopped(
+    stop_rx: mpsc::Receiver<()>,
+    mic_name: Option<String>,
+    _system_name: Option<String>,
+    levels: SharedLevels,
+) -> Result<CaptureArtifacts, String> {
+    #[cfg(target_os = "macos")]
+    {
+        return capture_until_stopped_macos(stop_rx, mic_name, levels);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        return capture_until_stopped_device(stop_rx, mic_name, _system_name, levels);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_until_stopped_device(
     stop_rx: mpsc::Receiver<()>,
     mic_name: Option<String>,
     system_name: Option<String>,
@@ -231,6 +300,107 @@ fn capture_until_stopped(
         system_path,
         system_rate,
     })
+}
+
+#[cfg(target_os = "macos")]
+fn capture_until_stopped_macos(
+    stop_rx: mpsc::Receiver<()>,
+    mic_name: Option<String>,
+    levels: SharedLevels,
+) -> Result<CaptureArtifacts, String> {
+    let host = cpal::default_host();
+    levels.reset();
+
+    let mic_device = select_input_device(&host, mic_name.as_deref())
+        .or_else(|| host.default_input_device())
+        .ok_or_else(|| "No input device available for microphone".to_string())?;
+
+    let mic_path = temp_raw_path("mic");
+    let mic_file = File::create(&mic_path).map_err(|e| {
+        cleanup_temp_capture_paths(&mic_path, None);
+        e.to_string()
+    })?;
+    let mic_sink = Arc::new(Mutex::new(BufWriter::new(mic_file)));
+
+    let (mic_stream, mic_rate) =
+        match build_capture_stream(&mic_device, Arc::clone(&mic_sink), levels.mic_meter()) {
+            Ok(result) => result,
+            Err(err) => {
+                cleanup_temp_capture_paths(&mic_path, None);
+                return Err(err);
+            }
+        };
+    mic_stream.play().map_err(|e| {
+        cleanup_temp_capture_paths(&mic_path, None);
+        e.to_string()
+    })?;
+
+    loop {
+        match stop_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(_) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    drop(mic_stream);
+    levels.reset();
+
+    if let Ok(mut writer) = mic_sink.lock() {
+        writer.flush().map_err(|e| {
+            cleanup_temp_capture_paths(&mic_path, None);
+            e.to_string()
+        })?;
+    }
+
+    Ok(CaptureArtifacts {
+        mic_path,
+        mic_rate,
+        system_path: None,
+        system_rate: TARGET_RATE,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn start_macos_native_system_capture(
+) -> Result<crate::audio::macos_system_audio::NativeSystemAudioCapture, String> {
+    let path = temp_raw_path("sys");
+    let result = start_macos_native_system_capture_at(&path);
+    if result.is_err() {
+        cleanup_temp_capture_paths(&path, None);
+    }
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn start_macos_native_system_capture_at(
+    path: &PathBuf,
+) -> Result<crate::audio::macos_system_audio::NativeSystemAudioCapture, String> {
+    #[cfg(test)]
+    if let Some(err) = test_macos_system_audio_start_capture_error() {
+        return Err(err);
+    }
+
+    crate::audio::macos_system_audio::start_capture(path)
+}
+
+#[cfg(test)]
+fn test_macos_system_audio_start_capture_error() -> Option<String> {
+    TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_macos_system_audio_start_capture_result(result: Option<Result<(), String>>) {
+    if let Ok(mut guard) = TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
+        *guard = result.and_then(|outcome| outcome.err());
+    }
 }
 
 pub fn list_input_devices() -> Result<Vec<String>, String> {
@@ -729,6 +899,18 @@ fn temp_raw_path(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("bigecho_{}_{}.raw", prefix, Uuid::new_v4()))
 }
 
+fn cleanup_temp_capture_paths(mic_path: &PathBuf, system_path: Option<&PathBuf>) {
+    let _ = remove_file(mic_path);
+    if let Some(path) = system_path {
+        let _ = remove_file(path);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_system_artifact(path: &PathBuf) {
+    let _ = remove_file(path);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -815,5 +997,22 @@ mod tests {
         let high = normalize_signal_level(0.25);
         assert!(low < mid && mid < high);
         assert!(mid > 0.35);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_native_system_capture_start_failure_is_synchronous() {
+        let levels = SharedLevels::new();
+        set_test_macos_system_audio_start_capture_result(Some(Err(
+            "native system capture failed".to_string()
+        )));
+
+        let result = ContinuousCapture::start(None, None, levels);
+        set_test_macos_system_audio_start_capture_result(None);
+
+        assert!(matches!(
+            result,
+            Err(ref err) if err == "native system capture failed"
+        ));
     }
 }
