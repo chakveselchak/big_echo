@@ -468,12 +468,12 @@ mod tests {
         meta.status = SessionStatus::Done;
         meta.artifacts.audio_file = "audio.mp3".to_string();
         meta.artifacts.transcript_file = "transcript.txt".to_string();
-        meta.artifacts.summary_file = "summary.txt".to_string();
+        meta.artifacts.summary_file = "summary.md".to_string();
 
         save_meta(&meta_path, &meta).expect("save meta");
         std::fs::write(session_dir.join("transcript.txt"), "mock transcript")
             .expect("write transcript");
-        std::fs::write(session_dir.join("summary.txt"), "mock summary").expect("write summary");
+        std::fs::write(session_dir.join("summary.md"), "mock summary").expect("write summary");
         upsert_session(dir.path(), &meta, &session_dir, &meta_path).expect("upsert session");
 
         let sessions = list_sessions(dir.path()).expect("list sessions");

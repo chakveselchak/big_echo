@@ -33,6 +33,110 @@ pub fn detect_system_source_device() -> Result<Option<String>, String> {
     crate::audio::capture::detect_system_source_device()
 }
 
+#[tauri::command]
+pub fn pick_recording_root() -> Result<Option<String>, String> {
+    pick_directory_with_system_dialog()
+}
+
+#[cfg(target_os = "macos")]
+fn pick_directory_with_system_dialog() -> Result<Option<String>, String> {
+    let script = r#"
+try
+  set chosenFolder to POSIX path of (choose folder with prompt "Choose recording root")
+  return chosenFolder
+on error number -128
+  return ""
+end try
+"#;
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Failed to choose folder".to_string()
+        } else {
+            stderr
+        });
+    }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if selected.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(selected))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn pick_directory_with_system_dialog() -> Result<Option<String>, String> {
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Choose recording root'
+$dialog.ShowNewFolderButton = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($dialog.SelectedPath)
+}
+"#;
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Failed to choose folder".to_string()
+        } else {
+            stderr
+        });
+    }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if selected.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(selected))
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn pick_directory_with_system_dialog() -> Result<Option<String>, String> {
+    if command_exists("zenity") {
+        let output = Command::new("zenity")
+            .args(["--file-selection", "--directory", "--title=Choose recording root"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if output.status.success() {
+            let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return if selected.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(selected))
+            };
+        }
+        return Ok(None);
+    }
+
+    if command_exists("kdialog") {
+        let output = Command::new("kdialog")
+            .args(["--getexistingdirectory", ".", "--title", "Choose recording root"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if output.status.success() {
+            let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return if selected.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(selected))
+            };
+        }
+        return Ok(None);
+    }
+
+    Err("Folder picker is not available on this platform".to_string())
+}
+
 fn command_exists(program: &str) -> bool {
     let lookup_cmd = if cfg!(target_os = "windows") {
         "where"

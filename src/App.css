@@ -399,6 +399,47 @@ select {
   color: #1d2026;
 }
 
+.input-with-action {
+  position: relative;
+}
+
+.input-with-action input {
+  width: 100%;
+  padding-right: 42px;
+}
+
+.input-action-button {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #55606f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.input-action-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.input-action-button:hover {
+  background: #eef3fb;
+  color: #2d5f9d;
+}
+
+.input-action-button:focus-visible {
+  border-color: #5f8dd3;
+  outline: 2px solid rgba(95, 141, 211, 0.22);
+}
+
 .opener-dropdown {
   position: relative;
 }
@@ -568,21 +609,32 @@ select {
 
 .tray-meta-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 30% minmax(0, 1fr);
   gap: 6px;
 }
 
 .tray-shell .field input,
 .tray-shell .field select {
-  height: 34px;
-  min-height: 34px;
+  height: 24px;
+  min-height: 24px;
   border-color: rgba(168, 178, 191, 0.82);
   background: rgba(247, 249, 252, 0.92);
-  padding: 6px 10px;
+  padding: 2px 8px;
+  line-height: 20px;
+  font-size: 12px;
 }
 
 .tray-shell .field {
   color: rgba(63, 75, 92, 0.9);
+  font-size: 11px;
+}
+
+.tray-level-device {
+  font-size: 11px;
+}
+
+.tray-topic-field {
+  min-width: 0;
 }
 
 .tray-levels {
@@ -621,14 +673,15 @@ select {
 
 .tray-level-device select {
   width: 100%;
-  height: 28px;
-  min-height: 28px;
+  height: 24px;
+  min-height: 24px;
   border: 1px solid rgba(168, 178, 191, 0.82);
   background: rgba(247, 249, 252, 0.92);
   border-radius: 8px;
-  padding: 4px 8px;
+  padding: 2px 8px;
   color: rgba(63, 75, 92, 0.95);
   font-size: 12px;
+  line-height: 20px;
 }
 
 .sr-only {

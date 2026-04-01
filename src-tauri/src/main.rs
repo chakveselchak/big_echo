@@ -25,7 +25,7 @@ use commands::sessions::{
 };
 use commands::settings::{
     detect_system_source_device, get_settings, list_audio_input_devices, list_text_editor_apps,
-    open_settings_window, open_tray_window, save_public_settings,
+    open_settings_window, open_tray_window, pick_recording_root, save_public_settings,
 };
 #[cfg(test)]
 use domain::session::SessionMeta;
@@ -904,6 +904,7 @@ mod ipc_runtime_tests {
             .invoke_handler(tauri::generate_handler![
                 get_settings,
                 save_public_settings,
+                pick_recording_root,
                 list_text_editor_apps,
                 list_sessions,
                 search_session_artifacts,
@@ -1030,7 +1031,7 @@ mod ipc_runtime_tests {
         meta.artifacts.audio_file =
             crate::audio::file_writer::audio_file_name(&settings.audio_format);
         meta.artifacts.transcript_file = "transcript.txt".to_string();
-        meta.artifacts.summary_file = "summary.txt".to_string();
+        meta.artifacts.summary_file = "summary.md".to_string();
         save_meta(&meta_path, &meta).expect("save meta");
         std::fs::write(session_dir.join(&meta.artifacts.audio_file), b"OggS")
             .expect("write audio fixture");
@@ -1081,7 +1082,7 @@ mod ipc_runtime_tests {
         );
         meta.artifacts.audio_file = "audio.opus".to_string();
         meta.artifacts.transcript_file = "transcript.txt".to_string();
-        meta.artifacts.summary_file = "summary.txt".to_string();
+        meta.artifacts.summary_file = "summary.md".to_string();
         save_meta(&meta_path, &meta).expect("save meta");
         upsert_session(app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
     }
@@ -1203,8 +1204,7 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-success");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        let summary =
-            std::fs::read_to_string(session_dir.join("summary.txt")).expect("read summary");
+        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
         assert_eq!(transcript, "mock transcript");
         assert_eq!(summary, "mock summary");
         let api_log =
@@ -1269,8 +1269,7 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-retry-success");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        let summary =
-            std::fs::read_to_string(session_dir.join("summary.txt")).expect("read summary");
+        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
         assert_eq!(transcript, "mock transcript");
         assert_eq!(summary, "mock summary");
 
@@ -1306,7 +1305,7 @@ mod ipc_runtime_tests {
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
         assert_eq!(transcript, "mock transcript");
-        assert!(!session_dir.join("summary.txt").exists());
+        assert!(!session_dir.join("summary.md").exists());
 
         let listed = list_sessions(&app_data_dir).expect("list sessions");
         assert_eq!(listed[0].status, "transcribed");
@@ -1334,8 +1333,7 @@ mod ipc_runtime_tests {
             "done".to_string()
         );
 
-        let summary =
-            std::fs::read_to_string(session_dir.join("summary.txt")).expect("read summary");
+        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
         assert_eq!(summary, "mock summary");
     }
 
@@ -1793,6 +1791,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_public_settings,
+            pick_recording_root,
             list_text_editor_apps,
             list_audio_input_devices,
             detect_system_source_device,

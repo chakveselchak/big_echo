@@ -55,6 +55,16 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     setStatus(`system_source_detected:${detected}`);
   }
 
+  async function pickRecordingRoot() {
+    try {
+      const picked = await tauriInvoke<string | null>("pick_recording_root");
+      if (!picked) return;
+      setSettings((prev) => (prev ? { ...prev, recording_root: picked } : prev));
+    } catch (err) {
+      setStatus(`error: не удалось выбрать каталог (${String(err)})`);
+    }
+  }
+
   async function saveApiKeys() {
     let hasSecretError = false;
     let nextNexaraState: SecretSaveState = "unchanged";
@@ -186,6 +196,7 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     nexaraSecretState,
     openaiKey,
     openaiSecretState,
+    pickRecordingRoot,
     salutSpeechAuthKey,
     salutSpeechSecretState,
     saveApiKeys,

@@ -15,7 +15,7 @@ pub fn transcript_name(started_at: DateTime<Local>) -> String {
 }
 
 pub fn summary_name(started_at: DateTime<Local>) -> String {
-    format!("summary_{}.txt", started_at.format("%d.%m.%Y"))
+    format!("summary_{}.md", started_at.format("%d.%m.%Y"))
 }
 
 pub fn sanitize_tag(input: &str) -> String {
@@ -61,6 +61,6 @@ mod tests {
             .with_timezone(&Local);
 
         assert_eq!(transcript_name(dt), "transcript_10.03.2026.txt");
-        assert_eq!(summary_name(dt), "summary_10.03.2026.txt");
+        assert_eq!(summary_name(dt), "summary_10.03.2026.md");
     }
 }

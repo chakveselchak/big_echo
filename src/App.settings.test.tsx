@@ -43,6 +43,9 @@ const { invokeMock } = vi.hoisted(() => ({
         default_app_id: "textedit",
       };
     }
+    if (cmd === "pick_recording_root") {
+      return "/Users/test/BigEcho Recordings";
+    }
     return null;
   }),
 }));
@@ -299,6 +302,45 @@ describe("App settings window", () => {
       expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
         payload: expect.objectContaining({
           artifact_open_app: "visual_studio_code",
+        }),
+      });
+    });
+  });
+
+  it("picks recording root folder and only saves it on Save settings", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Generals" }));
+    const recordingRootInput = screen.getByLabelText("Recording root");
+    expect(recordingRootInput).toHaveValue("./recordings");
+
+    await user.click(screen.getByRole("button", { name: "Choose recording root folder" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("pick_recording_root");
+    });
+
+    expect(recordingRootInput).toHaveValue("/Users/test/BigEcho Recordings");
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "save_public_settings",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          recording_root: "/Users/test/BigEcho Recordings",
+        }),
+      })
+    );
+
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
+        payload: expect.objectContaining({
+          recording_root: "/Users/test/BigEcho Recordings",
         }),
       });
     });
