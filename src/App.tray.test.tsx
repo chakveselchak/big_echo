@@ -96,12 +96,16 @@ describe("Tray window", () => {
     render(<App />);
 
     expect(screen.queryByText("Recorder")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Source")).toBeInTheDocument();
-    expect(screen.getByLabelText("Topic (optional)")).toBeInTheDocument();
+    const sourceField = screen.getByLabelText("Source");
+    const topicField = screen.getByLabelText("Topic (optional)");
+    expect(sourceField).toBeInTheDocument();
+    expect(topicField).toBeInTheDocument();
+    expect(sourceField.closest("label")).toHaveClass("tray-source-field");
+    expect(topicField.closest("label")).toHaveClass("tray-topic-field");
     expect(screen.getByRole("button", { name: "Rec" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
 
-    await user.type(screen.getByLabelText("Topic (optional)"), "Daily sync");
+    await user.type(topicField, "Daily sync");
     await user.click(screen.getByRole("button", { name: "Rec" }));
 
     await waitFor(() => {

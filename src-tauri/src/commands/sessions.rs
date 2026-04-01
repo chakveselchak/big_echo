@@ -398,7 +398,7 @@ mod tests {
         meta.artifacts = SessionArtifacts {
             audio_file: "audio.opus".to_string(),
             transcript_file: "transcript.txt".to_string(),
-            summary_file: "summary.txt".to_string(),
+            summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
         };
         meta
@@ -428,7 +428,7 @@ mod tests {
             "Обсудили ACME renewal risk и дедлайн поставки",
         )
         .expect("write transcript");
-        fs::write(dir.join("summary.txt"), "Decision: postpone rollout").expect("write summary");
+        fs::write(dir.join("summary.md"), "Decision: postpone rollout").expect("write summary");
         let hit = search_session_artifacts_in_dir(&dir, &sample_meta(), "acme renewal risk");
         assert_eq!(
             hit,
@@ -444,6 +444,23 @@ mod tests {
             SessionArtifactSearchHit {
                 transcript_match: false,
                 summary_match: true
+            }
+        );
+    }
+
+    #[test]
+    fn search_artifacts_ignores_legacy_summary_txt_when_summary_md_is_missing() {
+        let tmp = tempdir().expect("tempdir");
+        let dir = tmp.path().join("s1");
+        fs::create_dir_all(&dir).expect("create session dir");
+        fs::write(dir.join("summary.txt"), "Decision: postpone rollout").expect("write summary");
+
+        let hit = search_session_artifacts_in_dir(&dir, &sample_meta(), "postpone");
+        assert_eq!(
+            hit,
+            SessionArtifactSearchHit {
+                transcript_match: false,
+                summary_match: false
             }
         );
     }

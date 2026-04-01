@@ -25,7 +25,7 @@ impl Default for SessionArtifacts {
         Self {
             audio_file: "audio.opus".to_string(),
             transcript_file: "transcript.txt".to_string(),
-            summary_file: "summary.txt".to_string(),
+            summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
         }
     }

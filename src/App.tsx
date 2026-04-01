@@ -82,6 +82,7 @@ export function App() {
     nexaraSecretState,
     openaiKey,
     openaiSecretState,
+    pickRecordingRoot,
     salutSpeechAuthKey,
     salutSpeechSecretState,
     saveApiKeys,
@@ -447,10 +448,31 @@ export function App() {
             <div className="settings-tab-grid">
               <label className="field">
                 Recording root
-                <input
-                  value={settings.recording_root}
-                  onChange={(e) => setSettings({ ...settings, recording_root: e.target.value })}
-                />
+                <div className="input-with-action">
+                  <input
+                    value={settings.recording_root}
+                    onChange={(e) => setSettings({ ...settings, recording_root: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="input-action-button"
+                    aria-label="Choose recording root folder"
+                    onClick={() => {
+                      void pickRecordingRoot();
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.1a2.25 2.25 0 0 1 1.59.66l.84.84h6.47a2.25 2.25 0 0 1 2.25 2.25v7.5A2.25 2.25 0 0 1 18 18H6a2.25 2.25 0 0 1-2.25-2.25v-6a3 3 0 0 1 0-3Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </label>
               <div className="field">
                 <span>Artifact opener app (optional)</span>
@@ -649,7 +671,7 @@ export function App() {
       <main className="tray-shell">
         <p className="status-line">Status: {formatAppStatus(status)}</p>
         <div className="tray-meta-grid">
-          <label className="field">
+          <label className="field tray-source-field">
             Source
             <select value={source} onChange={(e) => setSource(e.target.value)}>
               {fixedSources.map((s) => (
@@ -659,7 +681,7 @@ export function App() {
               ))}
             </select>
           </label>
-          <label className="field">
+          <label className="field tray-topic-field">
             Topic (optional)
             <input value={topic} onChange={(e) => setTopic(e.target.value)} />
           </label>
