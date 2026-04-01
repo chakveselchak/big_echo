@@ -78,10 +78,13 @@ export function App() {
     audioDevices,
     autoDetectSystemSource,
     canSaveSettings,
+    macosSystemAudioPermission,
+    macosSystemAudioPermissionLoadState,
     nexaraKey,
     nexaraSecretState,
     openaiKey,
     openaiSecretState,
+    openMacosSystemAudioSettings,
     pickRecordingRoot,
     salutSpeechAuthKey,
     salutSpeechSecretState,
@@ -206,6 +209,10 @@ export function App() {
     const selectedOpenerApp = openerOptions.find((app) => app.id === settings.artifact_open_app) ?? null;
     const snapshot = savedSettingsSnapshot;
     const isDirty = (field: keyof PublicSettings) => Boolean(snapshot && settings[field] !== snapshot[field]);
+    const isMacosPermissionLoading = macosSystemAudioPermissionLoadState === "loading";
+    const isMacosPermissionLookupFailed = macosSystemAudioPermissionLoadState === "error";
+    const isMacosPermissionUnsupported =
+      macosSystemAudioPermissionLoadState === "ready" && macosSystemAudioPermission?.kind === "unsupported";
     const dirtyByTab: Record<SettingsTab, boolean> = {
       audiototext:
         isDirty("transcription_provider") ||
@@ -597,43 +604,84 @@ export function App() {
                   onChange={(e) => setSettings({ ...settings, mic_device_name: e.target.value })}
                 />
               </label>
-              <label className="field">
-                System source device name
-                <input
-                  value={settings.system_device_name}
-                  onChange={(e) => setSettings({ ...settings, system_device_name: e.target.value })}
-                />
-              </label>
-              <div className="button-row">
-                <button className="secondary-button" onClick={autoDetectSystemSource}>
-                  Auto-detect system source
-                </button>
-              </div>
-              {audioDevices.length > 0 && (
-                <div className="device-card">
-                  <strong>Available input devices</strong>
-                  <div className="device-list">
-                    {audioDevices.map((dev) => (
-                      <button
-                        key={dev}
-                        type="button"
-                        className="secondary-button"
-                        onClick={() =>
-                          setSettings((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  mic_device_name: prev.mic_device_name || dev,
-                                  system_device_name: prev.system_device_name || dev,
-                                }
-                              : prev
-                          )
-                        }
-                      >
-                        {dev}
-                      </button>
-                    ))}
+              {isMacosPermissionLoading ? (
+                <div className="device-card permission-card">
+                  <strong>Checking macOS permission status</strong>
+                  <div>Native system audio controls will appear once the status is available.</div>
+                </div>
+              ) : isMacosPermissionUnsupported ? (
+                <>
+                  <label className="field">
+                    System source device name
+                    <input
+                      value={settings.system_device_name}
+                      onChange={(e) => setSettings({ ...settings, system_device_name: e.target.value })}
+                    />
+                  </label>
+                  <div className="button-row">
+                    <button className="secondary-button" onClick={autoDetectSystemSource}>
+                      Auto-detect system source
+                    </button>
                   </div>
+                  {audioDevices.length > 0 && (
+                    <div className="device-card">
+                      <strong>Available input devices</strong>
+                      <div className="device-list">
+                        {audioDevices.map((dev) => (
+                          <button
+                            key={dev}
+                            type="button"
+                            className="secondary-button"
+                            onClick={() =>
+                              setSettings((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      mic_device_name: prev.mic_device_name || dev,
+                                      system_device_name: prev.system_device_name || dev,
+                                    }
+                                  : prev
+                              )
+                            }
+                          >
+                            {dev}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="device-card permission-card">
+                  {macosSystemAudioPermission?.kind === "granted" ? (
+                    <>
+                      <strong>Permission granted</strong>
+                      <div>System audio is captured natively by macOS.</div>
+                    </>
+                  ) : isMacosPermissionLookupFailed ? (
+                    <>
+                      <strong>System audio is captured natively by macOS</strong>
+                      <div>
+                        Could not load permission status. Open System Settings to review Screen &amp; System Audio
+                        Recording permission.
+                      </div>
+                      <div className="button-row">
+                        <button className="secondary-button" onClick={() => void openMacosSystemAudioSettings()}>
+                          Open System Settings
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>System audio is captured natively by macOS</strong>
+                      <div>Grant Screen & System Audio Recording permission in System Settings.</div>
+                      <div className="button-row">
+                        <button className="secondary-button" onClick={() => void openMacosSystemAudioSettings()}>
+                          Open System Settings
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

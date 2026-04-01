@@ -117,10 +117,8 @@ describe("useSettingsForm", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.macosSystemAudioPermission).toEqual({
-        kind: "unsupported",
-        can_request: false,
-      });
+      expect(result.current.macosSystemAudioPermissionLoadState).toBe("error");
+      expect(result.current.macosSystemAudioPermission).toBeNull();
     });
 
     expect(setStatus).toHaveBeenCalledWith(
@@ -153,6 +151,23 @@ describe("useSettingsForm", () => {
         can_request: false,
       });
     });
+  });
+
+  it("opens macOS system audio settings through the tauri adapter", async () => {
+    const setStatus = vi.fn();
+    const { result } = renderHook(() =>
+      useSettingsForm({ isTrayWindow: false, setStatus })
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await act(async () => {
+      await result.current.openMacosSystemAudioSettings();
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("open_macos_system_audio_settings");
   });
 
   it("saves SalutSpeech authorization key through the tauri adapter", async () => {

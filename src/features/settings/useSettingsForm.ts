@@ -15,6 +15,8 @@ type UseSettingsFormOptions = {
   setStatus: (status: string) => void;
 };
 
+type MacosSystemAudioPermissionLoadState = "loading" | "ready" | "error";
+
 const frontendFallbackEditors: TextEditorAppOption[] = [
   { id: "TextEdit", name: "TextEdit", icon_fallback: "📝", icon_data_url: null },
   { id: "Visual Studio Code", name: "Visual Studio Code", icon_fallback: "💠", icon_data_url: null },
@@ -66,6 +68,8 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
   const [salutSpeechSecretState, setSalutSpeechSecretState] = useState<SecretSaveState>("unknown");
   const [openaiSecretState, setOpenaiSecretState] = useState<SecretSaveState>("unknown");
   const [audioDevices, setAudioDevices] = useState<string[]>([]);
+  const [macosSystemAudioPermissionLoadState, setMacosSystemAudioPermissionLoadState] =
+    useState<MacosSystemAudioPermissionLoadState>("loading");
   const [macosSystemAudioPermission, setMacosSystemAudioPermission] =
     useState<MacosSystemAudioPermissionStatus | null>(null);
   const [textEditorApps, setTextEditorApps] = useState<TextEditorAppOption[]>([]);
@@ -90,8 +94,10 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     try {
       const status = await tauriInvoke<unknown>("get_macos_system_audio_permission_status");
       setMacosSystemAudioPermission(normalizeMacosSystemAudioPermissionStatus(status));
+      setMacosSystemAudioPermissionLoadState("ready");
     } catch {
-      setMacosSystemAudioPermission(fallbackMacosSystemAudioPermission);
+      setMacosSystemAudioPermission(null);
+      setMacosSystemAudioPermissionLoadState("error");
       setStatus("error: не удалось загрузить статус разрешения macOS system audio");
     }
   }
@@ -104,6 +110,14 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     }
     setSettings((prev) => (prev ? { ...prev, system_device_name: detected } : prev));
     setStatus(`system_source_detected:${detected}`);
+  }
+
+  async function openMacosSystemAudioSettings() {
+    try {
+      await tauriInvoke("open_macos_system_audio_settings");
+    } catch (err) {
+      setStatus(`error: не удалось открыть системные настройки macOS (${String(err)})`);
+    }
   }
 
   async function pickRecordingRoot() {
@@ -248,8 +262,10 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     nexaraKey,
     nexaraSecretState,
     macosSystemAudioPermission,
+    macosSystemAudioPermissionLoadState,
     openaiKey,
     openaiSecretState,
+    openMacosSystemAudioSettings,
     pickRecordingRoot,
     salutSpeechAuthKey,
     salutSpeechSecretState,

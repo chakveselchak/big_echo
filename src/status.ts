@@ -12,6 +12,8 @@ const APP_STATUS_RU: Record<string, string> = {
 
 const ERROR_MESSAGE_RU: Record<string, string> = {
   "Topic is too long (max 200 chars)": "тема слишком длинная (максимум 200 символов)",
+  "Screen & System Audio Recording permission is required":
+    "требуется разрешение на запись экрана и системного аудио",
 };
 
 const SESSION_STATUS_RU: Record<string, string> = {

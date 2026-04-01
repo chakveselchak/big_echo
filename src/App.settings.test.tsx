@@ -65,6 +65,31 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 
+function mockSettings() {
+  return {
+    recording_root: "./recordings",
+    artifact_open_app: "",
+    transcription_provider: "nexara",
+    transcription_url: "",
+    transcription_task: "transcribe",
+    transcription_diarization_setting: "general",
+    salute_speech_scope: "SALUTE_SPEECH_CORP",
+    salute_speech_model: "general",
+    salute_speech_language: "ru-RU",
+    salute_speech_sample_rate: 48000,
+    salute_speech_channels_count: 1,
+    summary_url: "",
+    summary_prompt: "",
+    openai_model: "gpt-4.1-mini",
+    audio_format: "opus",
+    opus_bitrate_kbps: 24,
+    mic_device_name: "",
+    system_device_name: "",
+    auto_run_pipeline_on_stop: false,
+    api_call_logging_enabled: false,
+  };
+}
+
 describe("App settings window", () => {
   beforeEach(() => {
     invokeMock.mockClear();
@@ -89,6 +114,151 @@ describe("App settings window", () => {
 
     const input = screen.getByDisplayValue("BlackHole 2ch");
     expect(input).toBeInTheDocument();
+  });
+
+  it("shows a pending macOS permission state before lookup resolves", async () => {
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return mockSettings();
+      }
+      return null;
+    });
+    invokeMock.mockImplementationOnce(
+      () =>
+        new Promise(() => {
+          // keep the permission lookup pending for this assertion
+        })
+    );
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_macos_system_audio_permission_status");
+    });
+
+    await user.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    expect(screen.getByText(/checking macos permission status/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("System source device name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Auto-detect system source" })).not.toBeInTheDocument();
+  });
+
+  it("keeps legacy system source controls when macOS permission status is unsupported", async () => {
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return mockSettings();
+      }
+      return null;
+    });
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return { kind: "unsupported", can_request: false };
+      }
+      return null;
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_macos_system_audio_permission_status");
+    });
+
+    await user.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    expect(screen.getByLabelText("System source device name")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Auto-detect system source" })).toBeInTheDocument();
+    expect(screen.queryByText(/system audio is captured natively/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
+  });
+
+  it("shows the native macOS permission card when system audio permission is not granted", async () => {
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return mockSettings();
+      }
+      return null;
+    });
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return { kind: "denied", can_request: false };
+      }
+      return null;
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_macos_system_audio_permission_status");
+    });
+
+    await user.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    expect(screen.getByText(/system audio is captured natively/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open System Settings" }));
+    expect(invokeMock).toHaveBeenCalledWith("open_macos_system_audio_settings");
+    expect(screen.queryByLabelText("System source device name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Auto-detect system source" })).not.toBeInTheDocument();
+  });
+
+  it("shows native macOS permission UI when permission lookup fails", async () => {
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return mockSettings();
+      }
+      return null;
+    });
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_macos_system_audio_permission_status") {
+        throw new Error("bridge unavailable");
+      }
+      return null;
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_macos_system_audio_permission_status");
+    });
+
+    await user.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    expect(screen.getByText(/could not load permission status/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("System source device name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Auto-detect system source" })).not.toBeInTheDocument();
+  });
+
+  it("shows a granted macOS permission state without the permission-required guidance", async () => {
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return mockSettings();
+      }
+      return null;
+    });
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return { kind: "granted", can_request: false };
+      }
+      return null;
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_macos_system_audio_permission_status");
+    });
+
+    await user.click(await screen.findByRole("tab", { name: "Audio" }));
+
+    expect(screen.getByText(/permission granted/i)).toBeInTheDocument();
+    expect(screen.queryByText(/grant screen & system audio recording permission/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });
 
   it("disables saving when settings are invalid", async () => {
