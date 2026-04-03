@@ -41,12 +41,39 @@ vi.mock("../../lib/tauri", () => ({
 import { StartResponse } from "../../appTypes";
 import { useRecordingController } from "./useRecordingController";
 
+function getDefaultInvokeResponse(cmd: string) {
+  if (cmd === "get_ui_sync_state") {
+    return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+  }
+  if (cmd === "start_recording") {
+    return { session_id: "s1", session_dir: "/tmp/s1", status: "recording" };
+  }
+  if (cmd === "stop_recording") {
+    return "recorded";
+  }
+  if (cmd === "get_live_input_levels") {
+    return { mic: 0.2, system: 0.5 };
+  }
+  if (cmd === "update_session_details") {
+    return "updated";
+  }
+  if (cmd === "run_pipeline") {
+    return "done";
+  }
+  return null;
+}
+
+function setDefaultInvokeMockImplementation() {
+  invokeMock.mockImplementation(async (cmd: string) => getDefaultInvokeResponse(cmd));
+}
+
 describe("useRecordingController", () => {
   beforeEach(() => {
     listeners.clear();
     invokeMock.mockClear();
     emitMock.mockClear();
     listenMock.mockClear();
+    setDefaultInvokeMockImplementation();
   });
 
   afterEach(() => {
@@ -102,6 +129,192 @@ describe("useRecordingController", () => {
       },
     });
     expect(loadSessions).toHaveBeenCalled();
+  });
+
+  it("rejects start when recording permission is denied without mutating session state", async () => {
+    const permissionError = "Screen & System Audio Recording permission is required";
+    const loadSessions = vi.fn(async () => undefined);
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "start_recording") {
+        throw permissionError;
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: false,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        session,
+        lastSessionId,
+        status,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    let startError: unknown;
+    await act(async () => {
+      startError = await result.current.controller.start().catch((error) => error);
+    });
+
+    expect(startError).toBe(permissionError);
+
+    expect(result.current.session).toBeNull();
+    expect(result.current.lastSessionId).toBeNull();
+    expect(result.current.status).toBe("idle");
+    expect(loadSessions).not.toHaveBeenCalled();
+  });
+
+  it("surfaces permission errors from the tray start listener without mutating session state", async () => {
+    const permissionError = "Screen & System Audio Recording permission is required";
+    const loadSessions = vi.fn(async () => undefined);
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: false,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        session,
+        lastSessionId,
+        status,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "start_recording") {
+        throw permissionError;
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const trayStartHandler = listeners.get("tray:start");
+    expect(trayStartHandler).toBeDefined();
+
+    await act(async () => {
+      await trayStartHandler?.();
+    });
+
+    expect(result.current.status).toBe(`error: ${permissionError}`);
+    expect(result.current.session).toBeNull();
+    expect(result.current.lastSessionId).toBeNull();
+    expect(loadSessions).not.toHaveBeenCalled();
+  });
+
+  it("surfaces permission errors from direct startFromTray without mutating session state", async () => {
+    const permissionError = "Screen & System Audio Recording permission is required";
+    const loadSessions = vi.fn(async () => undefined);
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "start_recording") {
+        throw permissionError;
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: false,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        session,
+        lastSessionId,
+        status,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await act(async () => {
+      await result.current.controller.startFromTray();
+    });
+
+    expect(result.current.status).toBe(`error: ${permissionError}`);
+    expect(result.current.session).toBeNull();
+    expect(result.current.lastSessionId).toBeNull();
+    expect(loadSessions).not.toHaveBeenCalled();
   });
 
   it("debounces shared ui sync writes while source and topic are changing", async () => {

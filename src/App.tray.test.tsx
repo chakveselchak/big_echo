@@ -1,54 +1,56 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+async function defaultInvokeImplementation(cmd: string) {
+  if (cmd === "get_ui_sync_state") {
+    return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+  }
+  if (cmd === "set_ui_sync_state") {
+    return "updated";
+  }
+  if (cmd === "start_recording") {
+    return { session_id: "tray-session", session_dir: "/tmp/tray-session", status: "recording" };
+  }
+  if (cmd === "stop_recording") {
+    return "recorded";
+  }
+  if (cmd === "list_sessions") {
+    return [];
+  }
+  if (cmd === "get_settings") {
+    return {
+      recording_root: "./recordings",
+      artifact_open_app: "",
+      transcription_url: "",
+      transcription_task: "transcribe",
+      transcription_diarization_setting: "general",
+      summary_url: "",
+      summary_prompt: "",
+      openai_model: "gpt-4.1-mini",
+      audio_format: "opus",
+      opus_bitrate_kbps: 24,
+      mic_device_name: "",
+      system_device_name: "",
+      auto_run_pipeline_on_stop: false,
+      api_call_logging_enabled: false,
+    };
+  }
+  if (cmd === "list_audio_input_devices") {
+    return ["Built-in Microphone", "BlackHole 2ch"];
+  }
+  if (cmd === "save_public_settings") {
+    return null;
+  }
+  if (cmd === "get_live_input_levels") {
+    return { mic: 0.42, system: 0.73 };
+  }
+  return null;
+}
 
 const { listeners, invokeMock } = vi.hoisted(() => ({
   listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
-  invokeMock: vi.fn(async (cmd: string) => {
-    if (cmd === "get_ui_sync_state") {
-      return { source: "slack", topic: "", is_recording: false, active_session_id: null };
-    }
-    if (cmd === "set_ui_sync_state") {
-      return "updated";
-    }
-    if (cmd === "start_recording") {
-      return { session_id: "tray-session", session_dir: "/tmp/tray-session", status: "recording" };
-    }
-    if (cmd === "stop_recording") {
-      return "recorded";
-    }
-    if (cmd === "list_sessions") {
-      return [];
-    }
-    if (cmd === "get_settings") {
-      return {
-        recording_root: "./recordings",
-        artifact_open_app: "",
-        transcription_url: "",
-        transcription_task: "transcribe",
-        transcription_diarization_setting: "general",
-        summary_url: "",
-        summary_prompt: "",
-        openai_model: "gpt-4.1-mini",
-        audio_format: "opus",
-        opus_bitrate_kbps: 24,
-        mic_device_name: "",
-        system_device_name: "",
-        auto_run_pipeline_on_stop: false,
-        api_call_logging_enabled: false,
-      };
-    }
-    if (cmd === "list_audio_input_devices") {
-      return ["Built-in Microphone", "BlackHole 2ch"];
-    }
-    if (cmd === "save_public_settings") {
-      return null;
-    }
-    if (cmd === "get_live_input_levels") {
-      return { mic: 0.42, system: 0.73 };
-    }
-    return null;
-  }),
+  invokeMock: vi.fn(defaultInvokeImplementation),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -70,6 +72,13 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { App } from "./App";
 
 describe("Tray window", () => {
+  afterEach(() => {
+    listeners.clear();
+    invokeMock.mockClear();
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(defaultInvokeImplementation);
+  });
+
   it("applies shared ui sync updates", async () => {
     render(<App />);
 
@@ -150,7 +159,118 @@ describe("Tray window", () => {
     });
   });
 
-  it("polls live mic and system levels in tray popover even while idle", async () => {
+  it("shows a neutral loading status without legacy system controls while macOS permission loads", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          summary_url: "",
+          summary_prompt: "",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return new Promise(() => undefined);
+      }
+      return defaultInvokeImplementation(cmd);
+    });
+
+    await act(async () => {
+      render(<App />);
+    });
+
+    expect(screen.getByText("Checking macOS system audio status")).toBeInTheDocument();
+    expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
+  });
+
+  it("shows a permission status error without legacy system controls when the macOS lookup fails", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          summary_url: "",
+          summary_prompt: "",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "get_macos_system_audio_permission_status") {
+        throw new Error("lookup failed");
+      }
+      return defaultInvokeImplementation(cmd);
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Could not load macOS system audio status. Open System Settings to review the permission.")
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
+  });
+
+  it("shows native macOS system audio status without legacy system controls when permission is available", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          summary_url: "",
+          summary_prompt: "",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return { kind: "granted", can_request: false };
+      }
+      return defaultInvokeImplementation(cmd);
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("System audio is captured natively by macOS.")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Mic level")).toBeInTheDocument();
+    expect(screen.getByLabelText("Mic device")).toBeInTheDocument();
+  });
+
+  it("keeps legacy system device controls when macOS system audio is unsupported", async () => {
     render(<App />);
 
     expect(screen.getByText("Mic")).toBeInTheDocument();

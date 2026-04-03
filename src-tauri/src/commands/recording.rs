@@ -11,7 +11,14 @@ use crate::{
     stop_active_recording_internal,
 };
 use chrono::{DateTime, Local};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
+
+#[cfg(test)]
+static TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS: OnceLock<
+    Mutex<Option<crate::commands::settings::MacosSystemAudioPermissionStatus>>,
+> = OnceLock::new();
 
 #[tauri::command]
 pub fn set_api_secret(
@@ -39,6 +46,14 @@ pub fn start_recording(
     state: tauri::State<AppState>,
     payload: StartRecordingRequest,
 ) -> Result<StartRecordingResponse, String> {
+    start_recording_impl(dirs.inner(), state.inner(), payload)
+}
+
+fn start_recording_impl(
+    dirs: &AppDirs,
+    state: &AppState,
+    payload: StartRecordingRequest,
+) -> Result<StartRecordingResponse, String> {
     validate_start_request(&payload.topic, &payload.participants)?;
 
     let mut guard = state
@@ -48,6 +63,12 @@ pub fn start_recording(
 
     if guard.is_some() {
         return Err("Recording already active".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let permission_status = current_macos_system_audio_permission_status();
+        ensure_macos_system_audio_permission(&permission_status)?;
     }
 
     let session_id = Uuid::new_v4().to_string();
@@ -64,15 +85,13 @@ pub fn start_recording(
         payload.participants,
     );
 
-    let settings = get_settings_from_dirs(dirs.inner())?;
+    let settings = get_settings_from_dirs(dirs)?;
     let started_at: DateTime<Local> = DateTime::parse_from_rfc3339(&meta.started_at_iso)
         .map_err(|e| e.to_string())?
         .with_timezone(&Local);
 
     let rel_dir = build_session_relative_dir(&meta.primary_tag, started_at);
     let abs_dir = root_recordings_dir(&dirs.app_data_dir, &settings)?.join(&rel_dir);
-    std::fs::create_dir_all(&abs_dir).map_err(|e| e.to_string())?;
-
     let mut meta = meta;
     meta.artifacts = SessionArtifacts {
         audio_file: crate::audio::file_writer::audio_file_name(&settings.audio_format),
@@ -81,34 +100,49 @@ pub fn start_recording(
         meta_file: "meta.json".to_string(),
     };
 
-    save_meta(&abs_dir.join("meta.json"), &meta)?;
-    let data_dir = dirs.app_data_dir.clone();
-    upsert_session(&data_dir, &meta, &abs_dir, &abs_dir.join("meta.json"))?;
-    add_event(
-        &data_dir,
-        &meta.session_id,
-        "recording_started",
-        "Session created",
-    )?;
-
-    std::fs::write(abs_dir.join(&meta.artifacts.transcript_file), "").map_err(|e| e.to_string())?;
-    std::fs::write(abs_dir.join(&meta.artifacts.summary_file), "").map_err(|e| e.to_string())?;
-
+    let mic_name = if settings.mic_device_name.trim().is_empty() {
+        None
+    } else {
+        Some(settings.mic_device_name.clone())
+    };
+    #[cfg(not(target_os = "macos"))]
     let system_source = if settings.system_device_name.trim().is_empty() {
         crate::audio::capture::detect_system_source_device()?
     } else {
         Some(settings.system_device_name.clone())
     };
 
+    #[cfg(target_os = "macos")]
+    let system_source = None;
+
     let capture = crate::audio::capture::ContinuousCapture::start(
-        if settings.mic_device_name.trim().is_empty() {
-            None
-        } else {
-            Some(settings.mic_device_name.clone())
-        },
+        mic_name,
         system_source,
         state.live_levels.clone(),
     )?;
+
+    let persist_result = (|| -> Result<(), String> {
+        std::fs::create_dir_all(&abs_dir).map_err(|e| e.to_string())?;
+        save_meta(&abs_dir.join("meta.json"), &meta)?;
+        let data_dir = dirs.app_data_dir.clone();
+        upsert_session(&data_dir, &meta, &abs_dir, &abs_dir.join("meta.json"))?;
+        add_event(
+            &data_dir,
+            &meta.session_id,
+            "recording_started",
+            "Session created",
+        )?;
+        std::fs::write(abs_dir.join(&meta.artifacts.transcript_file), "")
+            .map_err(|e| e.to_string())?;
+        std::fs::write(abs_dir.join(&meta.artifacts.summary_file), "")
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if let Err(err) = persist_result {
+        stop_and_cleanup_started_capture(capture);
+        return Err(err);
+    }
+
     let mut cap_guard = state
         .active_capture
         .lock()
@@ -120,12 +154,18 @@ pub fn start_recording(
         ui.source = source_from_payload;
         ui.topic = topic_from_payload;
     }
-    set_tray_indicator_from_state(state.inner(), true);
+    set_tray_indicator_from_state(state, true);
     Ok(StartRecordingResponse {
         session_id,
         session_dir: abs_dir.to_string_lossy().to_string(),
         status: "recording".to_string(),
     })
+}
+
+fn stop_and_cleanup_started_capture(capture: crate::audio::capture::ContinuousCapture) {
+    if let Ok(artifacts) = capture.stop_and_take_artifacts() {
+        crate::audio::capture::cleanup_artifacts(&artifacts);
+    }
 }
 
 #[tauri::command]
@@ -199,4 +239,155 @@ pub async fn run_summary(
         PipelineMode::SummaryOnly,
     )
     .await
+}
+
+fn ensure_macos_system_audio_permission(
+    status: &crate::commands::settings::MacosSystemAudioPermissionStatus,
+) -> Result<(), String> {
+    if matches!(
+        status.kind,
+        crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Granted
+    ) {
+        Ok(())
+    } else {
+        Err("Screen & System Audio Recording permission is required".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn current_macos_system_audio_permission_status(
+) -> crate::commands::settings::MacosSystemAudioPermissionStatus {
+    #[cfg(test)]
+    if let Some(status) = test_macos_system_audio_permission_status() {
+        return status;
+    }
+
+    crate::audio::macos_system_audio::permission_status()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn current_macos_system_audio_permission_status(
+) -> crate::commands::settings::MacosSystemAudioPermissionStatus {
+    crate::audio::macos_system_audio::permission_status()
+}
+
+#[cfg(test)]
+fn test_macos_system_audio_permission_status(
+) -> Option<crate::commands::settings::MacosSystemAudioPermissionStatus> {
+    TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+#[cfg(test)]
+fn set_test_macos_system_audio_permission_status(
+    status: Option<crate::commands::settings::MacosSystemAudioPermissionStatus>,
+) {
+    if let Ok(mut guard) = TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
+        *guard = status;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn rejects_non_granted_macos_system_audio_permission() {
+        let status = crate::commands::settings::MacosSystemAudioPermissionStatus {
+            kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Denied,
+            can_request: false,
+        };
+
+        let err = ensure_macos_system_audio_permission(&status).unwrap_err();
+        assert_eq!(
+            err,
+            "Screen & System Audio Recording permission is required"
+        );
+    }
+
+    #[test]
+    fn accepts_granted_macos_system_audio_permission() {
+        let status = crate::commands::settings::MacosSystemAudioPermissionStatus {
+            kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Granted,
+            can_request: false,
+        };
+
+        assert!(
+            ensure_macos_system_audio_permission(&status).is_ok(),
+            "granted permission should pass"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn denied_macos_permission_prevents_session_side_effects() {
+        let temp = tempdir().expect("tempdir");
+        let dirs = AppDirs {
+            app_data_dir: temp.path().to_path_buf(),
+        };
+        let state = AppState::default();
+        let payload = StartRecordingRequest {
+            tags: vec!["zoom".to_string()],
+            topic: String::new(),
+            participants: vec![],
+        };
+        let denied = crate::commands::settings::MacosSystemAudioPermissionStatus {
+            kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Denied,
+            can_request: false,
+        };
+
+        set_test_macos_system_audio_permission_status(Some(denied));
+        let result = start_recording_impl(&dirs, &state, payload);
+        set_test_macos_system_audio_permission_status(None);
+
+        assert!(matches!(
+            result,
+            Err(ref err) if err == "Screen & System Audio Recording permission is required"
+        ));
+        assert!(!temp.path().join("recordings").exists());
+        assert!(state.active_session.lock().expect("session lock").is_none());
+        assert!(state.active_capture.lock().expect("capture lock").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_native_capture_start_failure_prevents_session_side_effects() {
+        let temp = tempdir().expect("tempdir");
+        let dirs = AppDirs {
+            app_data_dir: temp.path().to_path_buf(),
+        };
+        let state = AppState::default();
+        let payload = StartRecordingRequest {
+            tags: vec!["zoom".to_string()],
+            topic: String::new(),
+            participants: vec![],
+        };
+        let granted = crate::commands::settings::MacosSystemAudioPermissionStatus {
+            kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Granted,
+            can_request: false,
+        };
+
+        set_test_macos_system_audio_permission_status(Some(granted));
+        crate::audio::capture::set_test_macos_system_audio_start_capture_result(Some(Err(
+            "native system capture failed".to_string(),
+        )));
+        let result = start_recording_impl(&dirs, &state, payload);
+        crate::audio::capture::set_test_macos_system_audio_start_capture_result(None);
+        set_test_macos_system_audio_permission_status(None);
+
+        assert!(matches!(
+            result,
+            Err(ref err) if err == "native system capture failed"
+        ));
+        assert!(!temp.path().join("recordings").exists());
+        assert!(state.active_session.lock().expect("session lock").is_none());
+        assert!(state.active_capture.lock().expect("capture lock").is_none());
+    }
 }

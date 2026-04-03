@@ -24,7 +24,8 @@ use commands::sessions::{
     set_ui_sync_state, update_session_details,
 };
 use commands::settings::{
-    detect_system_source_device, get_settings, list_audio_input_devices, list_text_editor_apps,
+    detect_system_source_device, get_macos_system_audio_permission_status, get_settings,
+    list_audio_input_devices, list_text_editor_apps, open_macos_system_audio_settings,
     open_settings_window, open_tray_window, pick_recording_root, save_public_settings,
 };
 #[cfg(test)]
@@ -905,6 +906,8 @@ mod ipc_runtime_tests {
                 get_settings,
                 save_public_settings,
                 pick_recording_root,
+                get_macos_system_audio_permission_status,
+                open_macos_system_audio_settings,
                 list_text_editor_apps,
                 list_sessions,
                 search_session_artifacts,
@@ -1792,6 +1795,8 @@ fn main() {
             get_settings,
             save_public_settings,
             pick_recording_root,
+            get_macos_system_audio_permission_status,
+            open_macos_system_audio_settings,
             list_text_editor_apps,
             list_audio_input_devices,
             detect_system_source_device,

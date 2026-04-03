@@ -21,6 +21,11 @@ export type PublicSettings = {
   api_call_logging_enabled: boolean;
 };
 
+export type MacosSystemAudioPermissionStatus = {
+  kind: "granted" | "not_determined" | "denied" | "unsupported";
+  can_request: boolean;
+};
+
 export type StartResponse = {
   session_id: string;
   session_dir: string;

@@ -11,6 +11,9 @@ describe("status formatters", () => {
     expect(formatAppStatus("system_source_detected:BlackHole 2ch")).toBe(
       "системный источник: BlackHole 2ch",
     );
+    expect(formatAppStatus("error: Screen & System Audio Recording permission is required")).toBe(
+      "ошибка: требуется разрешение на запись экрана и системного аудио",
+    );
     expect(formatAppStatus("error: Topic is too long (max 200 chars)")).toBe(
       "ошибка: тема слишком длинная (максимум 200 символов)",
     );

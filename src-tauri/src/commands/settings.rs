@@ -1,4 +1,5 @@
 use crate::app_state::AppDirs;
+pub use crate::audio::macos_system_audio::MacosSystemAudioPermissionStatus;
 use crate::settings::public_settings::{save_settings, PublicSettings};
 use crate::{get_settings_from_dirs, open_settings_window_internal, open_tray_window_internal};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -31,6 +32,49 @@ pub fn list_audio_input_devices() -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn detect_system_source_device() -> Result<Option<String>, String> {
     crate::audio::capture::detect_system_source_device()
+}
+
+#[tauri::command]
+pub fn get_macos_system_audio_permission_status() -> Result<MacosSystemAudioPermissionStatus, String>
+{
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(crate::audio::macos_system_audio::permission_status());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(crate::audio::macos_system_audio::permission_status())
+    }
+}
+
+#[tauri::command]
+pub fn open_macos_system_audio_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::audio::macos_system_audio::open_system_settings()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("macOS system audio settings are unavailable on this platform".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_permission_kind_using_snake_case() {
+        let payload = MacosSystemAudioPermissionStatus {
+            kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::NotDetermined,
+            can_request: true,
+        };
+        let json = serde_json::to_value(payload).expect("serialize permission payload");
+        assert_eq!(json["kind"], "not_determined");
+        assert_eq!(json["can_request"], true);
+    }
 }
 
 #[tauri::command]
@@ -104,7 +148,11 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 fn pick_directory_with_system_dialog() -> Result<Option<String>, String> {
     if command_exists("zenity") {
         let output = Command::new("zenity")
-            .args(["--file-selection", "--directory", "--title=Choose recording root"])
+            .args([
+                "--file-selection",
+                "--directory",
+                "--title=Choose recording root",
+            ])
             .output()
             .map_err(|e| e.to_string())?;
         if output.status.success() {
@@ -120,7 +168,12 @@ fn pick_directory_with_system_dialog() -> Result<Option<String>, String> {
 
     if command_exists("kdialog") {
         let output = Command::new("kdialog")
-            .args(["--getexistingdirectory", ".", "--title", "Choose recording root"])
+            .args([
+                "--getexistingdirectory",
+                ".",
+                "--title",
+                "Choose recording root",
+            ])
             .output()
             .map_err(|e| e.to_string())?;
         if output.status.success() {
