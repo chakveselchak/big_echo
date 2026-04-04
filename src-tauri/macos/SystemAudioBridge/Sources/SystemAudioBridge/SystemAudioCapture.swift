@@ -11,6 +11,7 @@ private var nextCaptureHandle: Int64 = 1
 private var activeCaptures: [Int64: AnyObject] = [:]
 private let permissionRequestAttemptedKey = "com.bigecho.system_audio.permission_requested"
 private let permissionRequestTccDbMtimeKey = "com.bigecho.system_audio.permission_requested_tcc_db_mtime"
+private let confirmedPermissionTccDbMtimeKey = "com.bigecho.system_audio.permission_confirmed_tcc_db_mtime"
 private let nativeCaptureSampleRate = 48_000
 private let nativeCaptureChannelCount = 2
 
@@ -78,16 +79,44 @@ private func isDeniedStateStillCurrent() -> Bool {
     return recordedMtime == nil || currentMtime == recordedMtime
 }
 
-private func openScreenCapturePrivacySettings() -> Bool {
-    guard
-        let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-        )
-    else {
+private func hasConfirmedPermissionState() -> Bool {
+    guard let recordedMtime = UserDefaults.standard.object(forKey: confirmedPermissionTccDbMtimeKey) as? Double else {
         return false
     }
 
-    return NSWorkspace.shared.open(url)
+    guard let currentMtime = currentTccDatabaseMtime() else {
+        return true
+    }
+
+    return currentMtime == recordedMtime
+}
+
+private func recordConfirmedPermissionState() {
+    if let modifiedAt = currentTccDatabaseMtime() {
+        UserDefaults.standard.set(modifiedAt, forKey: confirmedPermissionTccDbMtimeKey)
+    } else {
+        UserDefaults.standard.removeObject(forKey: confirmedPermissionTccDbMtimeKey)
+    }
+}
+
+private func openSystemAudioPrivacySettings() -> Bool {
+    let candidates = [
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy",
+    ]
+
+    for candidate in candidates {
+        guard let url = URL(string: candidate) else {
+            continue
+        }
+
+        if NSWorkspace.shared.open(url) {
+            return true
+        }
+    }
+
+    return false
 }
 
 private func logSystemAudioError(_ message: String, error: Error? = nil) {
@@ -476,6 +505,10 @@ public func bigecho_system_audio_permission_status() -> Int32 {
     }
 
     if #available(macOS 10.15, *) {
+        if hasConfirmedPermissionState() {
+            return 1
+        }
+
         if CGPreflightScreenCaptureAccess() {
             return 1
         }
@@ -489,17 +522,8 @@ public func bigecho_system_audio_permission_status() -> Int32 {
 @_cdecl("bigecho_open_system_audio_settings")
 public func bigecho_open_system_audio_settings() -> Bool {
     if #available(macOS 10.15, *) {
-        if CGPreflightScreenCaptureAccess() {
-            return openScreenCapturePrivacySettings()
-        }
-
-        if CGRequestScreenCaptureAccess() {
-            return true
-        }
-
         recordPermissionRequestState()
-
-        return openScreenCapturePrivacySettings()
+        return openSystemAudioPrivacySettings()
     }
 
     return false
@@ -526,6 +550,7 @@ public func bigecho_start_system_audio_capture(path: SRString) -> Int64 {
     captureRegistryLock.lock()
     defer { captureRegistryLock.unlock() }
 
+    recordConfirmedPermissionState()
     let handle = nextCaptureHandle
     nextCaptureHandle += 1
     activeCaptures[handle] = captureSession

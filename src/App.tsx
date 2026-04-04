@@ -719,9 +719,21 @@ export function App() {
       macosSystemAudioPermissionLoadState === "ready" && macosSystemAudioPermission?.kind === "unsupported";
     const isMacosSystemAudioLoading = macosSystemAudioPermissionLoadState === "loading";
     const isMacosSystemAudioLookupFailed = macosSystemAudioPermissionLoadState === "error";
+    const isMacosSystemAudioPermissionPendingReview =
+      macosSystemAudioPermissionLoadState === "ready" &&
+      macosSystemAudioPermission?.kind !== "granted" &&
+      macosSystemAudioPermission?.kind !== "unsupported";
+    const showMacosSystemAudioSettingsShortcut = isMacosSystemAudioPermissionPendingReview;
     return (
       <main className="tray-shell">
-        <p className="status-line">Status: {formatAppStatus(status)}</p>
+        <div className="tray-top-bar">
+          <p className="status-line">Status: {formatAppStatus(status)}</p>
+          {showMacosSystemAudioSettingsShortcut && (
+            <button className="tray-settings-link" onClick={() => void openMacosSystemAudioSettings()}>
+              Open System Settings
+            </button>
+          )}
+        </div>
         <div className="tray-meta-grid">
           <label className="field tray-source-field">
             Source
@@ -806,13 +818,18 @@ export function App() {
                 </select>
               </label>
             </div>
+          ) : isMacosSystemAudioPermissionPendingReview ? (
+            <div className="tray-level-row">
+              <span className="tray-level-name">System</span>
+              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
+                Open System Settings to review macOS system audio access.
+              </div>
+            </div>
           ) : (
             <div className="tray-level-row">
               <span className="tray-level-name">System</span>
               <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
-                {macosSystemAudioPermission?.kind === "granted"
-                  ? "System audio is captured natively by macOS."
-                  : "System audio is captured natively by macOS. Open System Settings to review the permission."}
+                System audio is captured natively by macOS.
               </div>
             </div>
           )}

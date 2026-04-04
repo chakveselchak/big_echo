@@ -242,16 +242,9 @@ pub async fn run_summary(
 }
 
 fn ensure_macos_system_audio_permission(
-    status: &crate::commands::settings::MacosSystemAudioPermissionStatus,
+    _status: &crate::commands::settings::MacosSystemAudioPermissionStatus,
 ) -> Result<(), String> {
-    if matches!(
-        status.kind,
-        crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Granted
-    ) {
-        Ok(())
-    } else {
-        Err("Screen & System Audio Recording permission is required".to_string())
-    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -299,16 +292,15 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn rejects_non_granted_macos_system_audio_permission() {
+    fn allows_start_attempt_for_non_granted_macos_system_audio_permission_state() {
         let status = crate::commands::settings::MacosSystemAudioPermissionStatus {
             kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Denied,
             can_request: false,
         };
 
-        let err = ensure_macos_system_audio_permission(&status).unwrap_err();
-        assert_eq!(
-            err,
-            "Screen & System Audio Recording permission is required"
+        assert!(
+            ensure_macos_system_audio_permission(&status).is_ok(),
+            "permission status should not short-circuit a native capture start attempt"
         );
     }
 
@@ -327,7 +319,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn denied_macos_permission_prevents_session_side_effects() {
+    fn denied_macos_permission_does_not_short_circuit_native_capture_start_attempt() {
         let temp = tempdir().expect("tempdir");
         let dirs = AppDirs {
             app_data_dir: temp.path().to_path_buf(),
@@ -344,12 +336,16 @@ mod tests {
         };
 
         set_test_macos_system_audio_permission_status(Some(denied));
+        crate::audio::capture::set_test_macos_system_audio_start_capture_result(Some(Err(
+            "native system capture failed".to_string(),
+        )));
         let result = start_recording_impl(&dirs, &state, payload);
+        crate::audio::capture::set_test_macos_system_audio_start_capture_result(None);
         set_test_macos_system_audio_permission_status(None);
 
         assert!(matches!(
             result,
-            Err(ref err) if err == "Screen & System Audio Recording permission is required"
+            Err(ref err) if err == "native system capture failed"
         ));
         assert!(!temp.path().join("recordings").exists());
         assert!(state.active_session.lock().expect("session lock").is_none());
