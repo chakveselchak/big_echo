@@ -23,6 +23,7 @@ pub struct SessionListItem {
     pub display_date_ru: String,
     pub started_at_iso: String,
     pub session_dir: String,
+    pub audio_file: String,
     pub audio_format: String,
     pub audio_duration_hms: String,
     pub has_transcript_text: bool,
@@ -242,6 +243,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                 display_date_ru: row.get(4)?,
                 started_at_iso: row.get(5)?,
                 session_dir: row.get(6)?,
+                audio_file: String::new(),
                 audio_format: "unknown".to_string(),
                 audio_duration_hms: "00:00:00".to_string(),
                 has_transcript_text: false,
@@ -261,6 +263,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     file_has_non_empty_text(&session_dir.join(&meta.artifacts.transcript_file));
                 let summary_ok =
                     file_has_non_empty_text(&session_dir.join(&meta.artifacts.summary_file));
+                item.audio_file = meta.artifacts.audio_file.clone();
                 item.audio_format = audio_format_from_file_name(&meta.artifacts.audio_file);
                 item.audio_duration_hms = audio_duration_hms(&meta);
                 item.has_transcript_text = transcript_ok

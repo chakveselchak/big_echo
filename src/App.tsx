@@ -4,6 +4,7 @@ import {
   fixedSources,
   diarizationSettingOptions,
   PublicSettings,
+  SessionListItem,
   saluteSpeechRecognitionModelOptions,
   saluteSpeechScopeOptions,
   SessionMetaView,
@@ -15,8 +16,8 @@ import {
 import { useRecordingController } from "./features/recording/useRecordingController";
 import { useSessions } from "./features/sessions/useSessions";
 import { useSettingsForm } from "./features/settings/useSettingsForm";
-import { formatSecretSaveState, splitParticipants } from "./lib/appUtils";
-import { getCurrentWindowLabel } from "./lib/tauri";
+import { formatSecretSaveState, getErrorMessage, splitParticipants } from "./lib/appUtils";
+import { getCurrentWindowLabel, tauriConvertFileSrc } from "./lib/tauri";
 import { formatAppStatus, formatSessionStatus } from "./status";
 import vscodeIcon from "./assets/editor-icons/vscode.svg";
 import cursorIcon from "./assets/editor-icons/cursor.svg";
@@ -58,6 +59,154 @@ function renderHighlightedText(text: string, query: string) {
     }
     return <span key={`t-${index}`}>{part}</span>;
   });
+}
+
+function parseDurationHms(value: string | undefined): number {
+  if (typeof value !== "string") return 0;
+  const parts = value.split(":").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) return 0;
+  return parts[0] * 3600 + parts[1] * 60 + parts[2];
+}
+
+function joinSessionAudioPath(sessionDir: string, audioFile: string): string {
+  const normalizedDir = sessionDir.trim().replace(/[\\/]+$/, "");
+  const normalizedFile = audioFile.trim().replace(/^[\\/]+/, "");
+  if (!normalizedDir) return normalizedFile;
+  if (normalizedDir.includes("\\")) {
+    return `${normalizedDir}\\${normalizedFile.replace(/\//g, "\\")}`;
+  }
+  return `${normalizedDir}/${normalizedFile.replace(/\\/g, "/")}`;
+}
+
+function resolveSessionAudioPath(item: SessionListItem): string | null {
+  const fallbackAudioFile =
+    item.audio_format && item.audio_format !== "unknown" ? `audio.${item.audio_format}` : "";
+  const audioFile = (item.audio_file ?? fallbackAudioFile).trim();
+  if (!audioFile) return null;
+  return joinSessionAudioPath(item.session_dir, audioFile);
+}
+
+function pauseAudioElement(audio: HTMLAudioElement | null, force = false) {
+  if (!audio) return;
+  if (!force && audio.paused) return;
+  try {
+    audio.pause();
+  } catch {
+    // jsdom does not fully implement media playback APIs.
+  }
+}
+
+function SessionAudioPlayer({
+  item,
+  setStatus,
+}: {
+  item: SessionListItem;
+  setStatus: (status: string) => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioPath = resolveSessionAudioPath(item);
+  const audioSrc = audioPath ? tauriConvertFileSrc(audioPath) : "";
+  const fallbackDuration = parseDurationHms(item.audio_duration_hms);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState(fallbackDuration);
+  const isDisabled = !audioSrc || item.status === "recording";
+
+  useEffect(() => {
+    setIsPlaying(false);
+    setProgressPercent(0);
+    setDurationSeconds(fallbackDuration);
+    if (!audioRef.current) return;
+    pauseAudioElement(audioRef.current);
+    audioRef.current.currentTime = 0;
+  }, [audioSrc, fallbackDuration]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    return () => {
+      pauseAudioElement(audio);
+    };
+  }, []);
+
+  function syncProgressFromAudio() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const nextDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : fallbackDuration;
+    const nextTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    setDurationSeconds(nextDuration);
+    setProgressPercent(nextDuration > 0 ? Math.min(100, (nextTime / nextDuration) * 100) : 0);
+  }
+
+  async function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio || isDisabled) return;
+    try {
+      if (!isPlaying) {
+        await audio.play();
+      } else {
+        pauseAudioElement(audio, true);
+      }
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
+    }
+  }
+
+  function handleSeek(nextPercent: number) {
+    const audio = audioRef.current;
+    setProgressPercent(nextPercent);
+    if (!audio) return;
+    const effectiveDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : durationSeconds;
+    if (effectiveDuration <= 0) return;
+    audio.currentTime = (nextPercent / 100) * effectiveDuration;
+  }
+
+  return (
+    <div className={`session-audio-player${isDisabled ? " is-disabled" : ""}`}>
+      <button
+        type="button"
+        className="session-audio-toggle"
+        aria-label={isPlaying ? "Пауза" : "Воспроизвести аудио"}
+        onClick={() => void togglePlayback()}
+        disabled={isDisabled}
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          {isPlaying ? (
+            <>
+              <line x1="6.5" y1="4.5" x2="6.5" y2="15.5" />
+              <line x1="13.5" y1="4.5" x2="13.5" y2="15.5" />
+            </>
+          ) : (
+            <path d="M6 4.5 14.5 10 6 15.5Z" />
+          )}
+        </svg>
+      </button>
+      <input
+        className="session-audio-slider"
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        aria-label="Позиция аудио"
+        value={Math.round(progressPercent)}
+        onChange={(e) => handleSeek(Number(e.target.value))}
+        disabled={isDisabled || durationSeconds <= 0}
+      />
+      <audio
+        data-session-id={item.session_id}
+        ref={audioRef}
+        src={audioSrc || undefined}
+        preload="metadata"
+        onLoadedMetadata={syncProgressFromAudio}
+        onTimeUpdate={syncProgressFromAudio}
+        onEnded={() => {
+          setIsPlaying(false);
+          setProgressPercent(100);
+        }}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+      />
+    </div>
+  );
 }
 
 export function App() {
@@ -1068,58 +1217,66 @@ export function App() {
                       />
                     </label>
                   </div>
-                  <div className="button-row">
-                    <button
-                      className="secondary-button"
-                      onClick={() => getText(item.session_id)}
-                      disabled={item.status === "recording" || textPending || summaryPending}
-                    >
-                      {textPending ? (
-                        <span className="button-loading-content">
-                          <span className="inline-loader" aria-hidden="true" />
-                          Getting text...
+                  <div className="session-card-footer">
+                    <div className="button-row">
+                      <button
+                        className="secondary-button"
+                        onClick={() => getText(item.session_id)}
+                        disabled={item.status === "recording" || textPending || summaryPending}
+                      >
+                        {textPending ? (
+                          <span className="button-loading-content">
+                            <span className="inline-loader" aria-hidden="true" />
+                            Getting text...
+                          </span>
+                        ) : (
+                          "Get text"
+                        )}
+                      </button>
+                      {textPending && (
+                        <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
+                          Loading text
                         </span>
-                      ) : (
-                        "Get text"
                       )}
-                    </button>
-                    {textPending && (
-                      <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
-                        Loading text
-                      </span>
-                    )}
-                    <button
-                      className="secondary-button"
-                      onClick={() => getSummary(item.session_id)}
-                      disabled={
-                        item.status === "recording" || !item.has_transcript_text || summaryPending || textPending
-                      }
-                    >
-                      {summaryPending ? (
-                        <span className="button-loading-content">
-                          <span className="inline-loader" aria-hidden="true" />
-                          Getting summary...
-                        </span>
-                      ) : (
-                        "Get Summary"
-                      )}
-                    </button>
-                    {summaryPending && (
-                      <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading summary">
-                        Loading summary
-                      </span>
-                    )}
-                    {pipelineState && (
-                      <span
-                        className={
-                          pipelineState.kind === "error"
-                            ? "retry-state retry-state-error"
-                            : "retry-state retry-state-success"
+                      <button
+                        className="secondary-button"
+                        onClick={() => getSummary(item.session_id)}
+                        disabled={
+                          item.status === "recording" || !item.has_transcript_text || summaryPending || textPending
                         }
                       >
-                        {pipelineState.text}
-                      </span>
-                    )}
+                        {summaryPending ? (
+                          <span className="button-loading-content">
+                            <span className="inline-loader" aria-hidden="true" />
+                            Getting summary...
+                          </span>
+                        ) : (
+                          "Get Summary"
+                        )}
+                      </button>
+                      {summaryPending && (
+                        <span
+                          className="visually-hidden"
+                          role="status"
+                          aria-live="polite"
+                          aria-label="Loading summary"
+                        >
+                          Loading summary
+                        </span>
+                      )}
+                      {pipelineState && (
+                        <span
+                          className={
+                            pipelineState.kind === "error"
+                              ? "retry-state retry-state-error"
+                              : "retry-state retry-state-success"
+                          }
+                        >
+                          {pipelineState.text}
+                        </span>
+                      )}
+                    </div>
+                    <SessionAudioPlayer item={item} setStatus={setStatus} />
                   </div>
                 </article>
               );

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -7,6 +7,14 @@ export function tauriInvoke<T>(cmd: string, args?: unknown): Promise<T> {
     return invoke<T>(cmd);
   }
   return invoke<T>(cmd, args as Record<string, unknown>);
+}
+
+export function tauriConvertFileSrc(filePath: string): string {
+  try {
+    return convertFileSrc(filePath);
+  } catch {
+    return filePath;
+  }
 }
 
 export function tauriEmit(event: string, payload?: unknown): Promise<void> {
