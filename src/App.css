@@ -1032,6 +1032,133 @@ select {
   gap: 6px;
 }
 
+.session-card-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-card-footer .button-row {
+  flex: 1 1 auto;
+}
+
+.session-audio-player {
+  flex: 0 1 200px;
+  min-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.session-audio-player.is-disabled {
+  opacity: 0.52;
+}
+
+.session-audio-toggle {
+  border: 0;
+  background: transparent;
+  color: #6e6b6c;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.session-audio-toggle:hover {
+  color: #504d4f;
+}
+
+.session-audio-toggle:focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.28);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.session-audio-toggle:disabled {
+  cursor: not-allowed;
+}
+
+.session-audio-toggle svg {
+  width: 22px;
+  height: 22px;
+}
+
+.session-audio-toggle line,
+.session-audio-toggle path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.session-audio-toggle path {
+  fill: currentColor;
+  stroke-width: 1.2;
+}
+
+.session-audio-slider {
+  flex: 1 1 auto;
+  min-width: 160px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.session-audio-slider:focus {
+  outline: none;
+}
+
+.session-audio-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #d6d7da;
+}
+
+.session-audio-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #767173;
+  margin-top: -5px;
+  border: 0;
+}
+
+.session-audio-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #d6d7da;
+}
+
+.session-audio-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: #d6d7da;
+}
+
+.session-audio-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #767173;
+}
+
+.session-audio-slider:disabled::-webkit-slider-thumb,
+.session-audio-slider:disabled::-moz-range-thumb {
+  background: #9e9ca0;
+}
+
+.session-audio-slider:disabled {
+  cursor: not-allowed;
+}
+
 .confirm-overlay {
   position: fixed;
   inset: 0;
@@ -1198,5 +1325,15 @@ select {
   .settings-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .session-card-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-audio-player {
+    width: 100%;
+    min-width: 0;
   }
 }

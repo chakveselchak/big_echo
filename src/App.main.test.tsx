@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -49,6 +49,7 @@ const { listeners, invokeMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (filePath: string) => `asset://${filePath}`,
   invoke: invokeMock,
 }));
 
@@ -719,6 +720,100 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("open_session_folder", { sessionDir: "/tmp/s6" });
     });
+  });
+
+  it("renders an inline audio player for a session and supports play, pause, and seek", async () => {
+    const user = userEvent.setup();
+    const playMock = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function () {
+      this.dispatchEvent(new Event("play"));
+      return Promise.resolve();
+    });
+    const pauseMock = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function () {
+      this.dispatchEvent(new Event("pause"));
+    });
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-audio",
+            status: "done",
+            primary_tag: "slack",
+            topic: "Audio demo",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T13:00:00+03:00",
+            session_dir: "/tmp/s-audio",
+            audio_file: "capture.final.mp3",
+            audio_format: "mp3",
+            audio_duration_hms: "00:02:00",
+            has_transcript_text: false,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-audio",
+          source: "slack",
+          custom_tag: "",
+          topic: "Audio demo",
+          participants: [],
+        };
+      }
+      return null;
+    });
+
+    const { container } = render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Audio demo")).toBeInTheDocument();
+    });
+
+    const audio = container.querySelector('audio[data-session-id="s-audio"]');
+    expect(audio).toBeInTheDocument();
+    expect(audio).toHaveAttribute("src", "asset:///tmp/s-audio/capture.final.mp3");
+
+    Object.defineProperty(audio, "duration", {
+      configurable: true,
+      value: 120,
+    });
+    act(() => {
+      audio?.dispatchEvent(new Event("loadedmetadata"));
+    });
+
+    const toggleButton = screen.getByRole("button", { name: "Воспроизвести аудио" });
+    await user.click(toggleButton);
+    expect(playMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Пауза" })).toBeInTheDocument();
+
+    const seekSlider = screen.getByRole("slider", { name: "Позиция аудио" });
+    expect(seekSlider).toHaveValue("0");
+
+    act(() => {
+      if (audio) {
+        audio.currentTime = 30;
+        audio.dispatchEvent(new Event("timeupdate"));
+      }
+    });
+    await waitFor(() => {
+      expect(seekSlider).toHaveValue("25");
+    });
+
+    fireEvent.change(seekSlider, { target: { value: "50" } });
+    expect(seekSlider).toHaveValue("50");
+    expect(audio?.currentTime).toBe(60);
+
+    await user.click(screen.getByRole("button", { name: "Пауза" }));
+    expect(pauseMock).toHaveBeenCalledTimes(1);
+
+    playMock.mockRestore();
+    pauseMock.mockRestore();
   });
 
   it("deletes session only after confirmation", async () => {
