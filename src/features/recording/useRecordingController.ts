@@ -29,6 +29,13 @@ type UseRecordingControllerOptions = {
   loadSessions: () => Promise<void>;
 };
 
+function formatRecordingError(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
+
 export function useRecordingController({
   isSettingsWindow,
   isTrayWindow,
@@ -95,7 +102,7 @@ export function useRecordingController({
         participants: [],
       });
     } catch (err) {
-      setStatus(`error: ${String(err)}`);
+      setStatus(`error: ${formatRecordingError(err)}`);
     }
   }
 
@@ -197,7 +204,7 @@ export function useRecordingController({
           participants: [],
         });
       } catch (err) {
-        setStatus(`error: ${String(err)}`);
+        setStatus(`error: ${formatRecordingError(err)}`);
       }
     }).then((fn) => {
       unlistenStart = fn;
@@ -211,7 +218,7 @@ export function useRecordingController({
         setSession(null);
         await loadSessions();
       } catch (err) {
-        setStatus(`error: ${String(err)}`);
+        setStatus(`error: ${formatRecordingError(err)}`);
       }
     }).then((fn) => {
       unlistenStop = fn;

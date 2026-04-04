@@ -192,6 +192,7 @@ describe("Tray window", () => {
     expect(screen.getByText("Checking macOS system audio status")).toBeInTheDocument();
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });
 
   it("shows a permission status error without legacy system controls when the macOS lookup fails", async () => {
@@ -230,6 +231,51 @@ describe("Tray window", () => {
 
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
+  });
+
+  it("shows an Open System Settings link when macOS system audio permission is missing", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return { kind: "denied", can_request: false };
+      }
+      return defaultInvokeImplementation(cmd);
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Open System Settings" })).toHaveClass("tray-settings-link");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open System Settings" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("open_macos_system_audio_settings");
+    });
+  });
+
+  it("keeps the settings link hidden when tray recording fails but permission state is granted", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return { kind: "granted", can_request: false };
+      }
+      if (cmd === "start_recording") {
+        throw new Error("Screen & System Audio Recording permission is required");
+      }
+      return defaultInvokeImplementation(cmd);
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Rec" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Status: ошибка: требуется разрешение на запись экрана и системного аудио")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
+    });
   });
 
   it("shows native macOS system audio status without legacy system controls when permission is available", async () => {
@@ -268,6 +314,7 @@ describe("Tray window", () => {
     expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Mic level")).toBeInTheDocument();
     expect(screen.getByLabelText("Mic device")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });
 
   it("keeps legacy system device controls when macOS system audio is unsupported", async () => {

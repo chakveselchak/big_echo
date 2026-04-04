@@ -52,9 +52,9 @@ impl Default for PublicSettings {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
-            summary_url: String::new(),
+            summary_url: "http://127.0.0.1:8317/v1/chat/completions".to_string(),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
-            openai_model: "gpt-4.1-mini".to_string(),
+            openai_model: "gpt-5.1-codex-mini".to_string(),
             audio_format: "opus".to_string(),
             opus_bitrate_kbps: 24,
             mic_device_name: String::new(),
@@ -189,6 +189,17 @@ mod tests {
     }
 
     #[test]
+    fn summary_defaults_point_to_local_codex_endpoint() {
+        let settings = PublicSettings::default();
+
+        assert_eq!(
+            settings.summary_url,
+            "http://127.0.0.1:8317/v1/chat/completions"
+        );
+        assert_eq!(settings.openai_model, "gpt-5.1-codex-mini");
+    }
+
+    #[test]
     fn missing_auto_run_pipeline_on_stop_uses_default() {
         let body = r#"{
             "recording_root":"./recordings",
@@ -293,6 +304,34 @@ mod tests {
             parsed.summary_prompt,
             "Есть стенограмма встречи. Подготовь краткое саммари."
         );
+    }
+
+    #[test]
+    fn missing_summary_endpoint_fields_use_defaults() {
+        let body = r#"{
+            "recording_root":"./recordings",
+            "artifact_open_app":"",
+            "transcription_provider":"nexara",
+            "transcription_url":"",
+            "transcription_task":"transcribe",
+            "transcription_diarization_setting":"general",
+            "salute_speech_scope":"SALUTE_SPEECH_CORP",
+            "salute_speech_model":"general",
+            "salute_speech_language":"ru-RU",
+            "salute_speech_sample_rate":48000,
+            "salute_speech_channels_count":1,
+            "summary_prompt":"Есть стенограмма встречи. Подготовь краткое саммари.",
+            "audio_format":"opus",
+            "opus_bitrate_kbps":24,
+            "mic_device_name":"",
+            "system_device_name":""
+        }"#;
+        let parsed: PublicSettings = serde_json::from_str(body).expect("settings should parse");
+        assert_eq!(
+            parsed.summary_url,
+            "http://127.0.0.1:8317/v1/chat/completions"
+        );
+        assert_eq!(parsed.openai_model, "gpt-5.1-codex-mini");
     }
 
     #[test]
