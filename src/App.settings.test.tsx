@@ -2,8 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
+
 const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(async (cmd: string) => {
+  invokeMock: vi.fn<InvokeMock>(async (cmd: string, _args?: unknown) => {
     if (cmd === "get_settings") {
       return {
         recording_root: "./recordings",
@@ -464,8 +466,11 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Generals" }));
-    await user.click(screen.getByRole("button", { name: "Artifact opener app (optional)" }));
-    await user.click(screen.getByRole("button", { name: "Visual Studio Code" }));
+    const trigger = screen.getByRole("button", { name: /Artifact opener app \(optional\)/ });
+    expect(trigger).toHaveAccessibleName("Artifact opener app (optional) TextEdit");
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: "Visual Studio Code" }));
+    expect(trigger).toHaveAccessibleName("Artifact opener app (optional) Visual Studio Code");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => {
@@ -474,6 +479,74 @@ describe("App settings window", () => {
           artifact_open_app: "visual_studio_code",
         }),
       });
+    });
+  });
+
+  it("supports keyboard selection and Escape on the artifact opener popup", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Generals" }));
+    const trigger = screen.getByRole("button", { name: /Artifact opener app \(optional\)/ });
+    await user.click(trigger);
+
+    const listbox = screen.getByRole("listbox", { name: "Artifact opener app options" });
+    expect(listbox).toBeInTheDocument();
+
+    const textEditOption = screen.getByRole("option", { name: "TextEdit" });
+    expect(textEditOption).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => {
+      expect(textEditOption).toHaveFocus();
+    });
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Visual Studio Code" })).toHaveFocus();
+    });
+
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox", { name: "Artifact opener app options" })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    await user.click(trigger);
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Visual Studio Code" })).toHaveAttribute("aria-selected", "true");
+    });
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox", { name: "Artifact opener app options" })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it("closes the artifact opener popup when focus tabs away", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Generals" }));
+    await user.click(screen.getByRole("button", { name: /Artifact opener app \(optional\)/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "TextEdit" })).toHaveFocus();
+    });
+
+    await user.tab();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox", { name: "Artifact opener app options" })).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Auto-run pipeline on Stop")).toHaveFocus();
     });
   });
 

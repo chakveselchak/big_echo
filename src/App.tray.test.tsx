@@ -2,7 +2,9 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-async function defaultInvokeImplementation(cmd: string) {
+type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
+
+async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promise<unknown> {
   if (cmd === "get_ui_sync_state") {
     return { source: "slack", topic: "", is_recording: false, active_session_id: null };
   }
@@ -50,7 +52,7 @@ async function defaultInvokeImplementation(cmd: string) {
 
 const { listeners, invokeMock } = vi.hoisted(() => ({
   listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
-  invokeMock: vi.fn(defaultInvokeImplementation),
+  invokeMock: vi.fn<InvokeMock>(defaultInvokeImplementation),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -125,6 +127,37 @@ describe("Tray window", () => {
           participants: [],
         },
       });
+    });
+  });
+
+  it("keeps source/topic and tray actions in single rows and hides the pending-review system message", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_macos_system_audio_permission_status") {
+        return { kind: "denied", can_request: false };
+      }
+      return defaultInvokeImplementation(cmd);
+    });
+
+    let container: HTMLElement;
+    await act(async () => {
+      ({ container } = render(<App />));
+    });
+
+    const sourceField = screen.getByLabelText("Source");
+    const topicField = screen.getByLabelText("Topic (optional)");
+    const trayMetaGrid = container!.querySelector(".tray-meta-grid");
+    const trayButtonRow = container!.querySelector(".tray-shell .button-row");
+
+    await waitFor(() => {
+      expect(trayMetaGrid).not.toBeNull();
+      expect(sourceField.closest(".tray-meta-grid")).toBe(trayMetaGrid);
+      expect(topicField.closest(".tray-meta-grid")).toBe(trayMetaGrid);
+
+      expect(trayButtonRow).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Rec" }).closest(".button-row")).toBe(trayButtonRow);
+      expect(screen.getByRole("button", { name: "Stop" }).closest(".button-row")).toBe(trayButtonRow);
+
+      expect(screen.queryByText("Open System Settings to review macOS system audio access.")).not.toBeInTheDocument();
     });
   });
 
@@ -227,11 +260,11 @@ describe("Tray window", () => {
       expect(
         screen.getByText("Could not load macOS system audio status. Open System Settings to review the permission.")
       ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
     });
 
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });
 
   it("shows an Open System Settings link when macOS system audio permission is missing", async () => {
@@ -307,12 +340,12 @@ describe("Tray window", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText("System audio is captured natively by macOS.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Mic level")).toBeInTheDocument();
     });
 
+    expect(screen.queryByText("System audio is captured natively by macOS.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Mic level")).toBeInTheDocument();
     expect(screen.getByLabelText("Mic device")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });

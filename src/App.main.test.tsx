@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
+
 const { listeners, invokeMock } = vi.hoisted(() => ({
   listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
-  invokeMock: vi.fn(async (cmd: string) => {
+  invokeMock: vi.fn<InvokeMock>(async (cmd: string, _args?: unknown) => {
     if (cmd === "get_ui_sync_state") {
       return { source: "slack", topic: "", is_recording: false, active_session_id: null };
     }
@@ -91,6 +93,22 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("list_sessions");
     });
+  });
+
+  it("renders the sessions empty state without a live status announcement", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("list_sessions");
+    });
+
+    expect(screen.getByText("No sessions yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "New recordings will appear here with search, transcript, summary, and audio actions."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("syncs source/topic from shared ui events and uses it on tray start", async () => {
@@ -241,7 +259,7 @@ describe("App main window", () => {
 
   it("shows audio format in session title meta instead of source", async () => {
     const user = userEvent.setup();
-    invokeMock.mockImplementation(async (cmd: string) => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "list_sessions") {
         return [
           {
@@ -289,6 +307,19 @@ describe("App main window", () => {
     expect(refreshButton).toHaveClass("refresh-icon-button");
     expect(refreshButton).not.toHaveClass("icon-button");
     expect(refreshButton.textContent?.trim()).toBe("");
+  });
+
+  it("renders a search icon inside the session search input", async () => {
+    const { container } = render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("list_sessions");
+    });
+
+    const searchInput = screen.getByLabelText("Search sessions");
+    const searchField = searchInput.closest(".session-toolbar-search");
+    expect(searchField).not.toBeNull();
+    expect(searchField?.querySelector(".session-search-icon svg")).not.toBeNull();
   });
 
   it("calls transcription command from Get text and keeps Get Summary disabled without text", async () => {
@@ -351,7 +382,7 @@ describe("App main window", () => {
 
   it("searches sessions by one query and highlights matched fields", async () => {
     const user = userEvent.setup();
-    invokeMock.mockImplementation(async (cmd: string) => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "get_ui_sync_state") {
         return { source: "slack", topic: "", is_recording: false, active_session_id: null };
       }
@@ -428,15 +459,18 @@ describe("App main window", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
     await waitFor(() => {
-      expect(screen.getByText("/tmp/project-alpha/s4")).toBeInTheDocument();
-      expect(screen.getByText("/tmp/project-beta/s5")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("project-alpha")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("project-beta")).toBeInTheDocument();
     });
 
     await user.type(screen.getByLabelText("Search sessions"), "project-alpha");
 
     expect(screen.getByDisplayValue("Budget planning")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Roadmap")).not.toBeInTheDocument();
-    expect(screen.getByText("/tmp/project-alpha/s4")).toHaveClass("match-hit");
+    const matchedCustomTagInput = screen
+      .getAllByDisplayValue("project-alpha")
+      .find((element) => element.closest(".session-edit-grid"));
+    expect(matchedCustomTagInput?.closest("label")).toHaveClass("match-hit");
   });
 
   it("searches sessions by transcript/summary text via global session search", async () => {
@@ -651,8 +685,7 @@ describe("App main window", () => {
     expect(searchInput).toHaveFocus();
   });
 
-  it("opens session folder from session row link", async () => {
-    const user = userEvent.setup();
+  it("does not render session path row content in session cards", async () => {
     invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "get_ui_sync_state") {
         return { source: "slack", topic: "", is_recording: false, active_session_id: null };
@@ -703,32 +736,25 @@ describe("App main window", () => {
           participants: [],
         };
       }
-      if (cmd === "open_session_folder") {
-        expect(args).toEqual({ sessionDir: "/tmp/s6" });
-        return "opened";
-      }
       return null;
     });
 
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh sessions" }));
     await waitFor(() => {
-      expect(screen.getByText("/tmp/s6")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("button", { name: "открыть" }));
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("open_session_folder", { sessionDir: "/tmp/s6" });
+      expect(screen.queryByText("/tmp/s6")).not.toBeInTheDocument();
+      expect(screen.queryByText("Path")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "открыть" })).not.toBeInTheDocument();
     });
   });
 
   it("renders an inline audio player for a session and supports play, pause, and seek", async () => {
     const user = userEvent.setup();
-    const playMock = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function () {
+    const playMock = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
       this.dispatchEvent(new Event("play"));
       return Promise.resolve();
     });
-    const pauseMock = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function () {
+    const pauseMock = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: HTMLMediaElement) {
       this.dispatchEvent(new Event("pause"));
     });
 
@@ -775,7 +801,15 @@ describe("App main window", () => {
       expect(screen.getByDisplayValue("Audio demo")).toBeInTheDocument();
     });
 
-    const audio = container.querySelector('audio[data-session-id="s-audio"]');
+    const sessionCard = screen.getByDisplayValue("Audio demo").closest(".session-card");
+    expect(sessionCard?.querySelector(".session-title-line .session-duration-label")).toBeNull();
+
+    const footerMedia = sessionCard?.querySelector(".session-card-footer-media");
+    expect(footerMedia).not.toBeNull();
+    expect(footerMedia?.querySelector(".session-audio-player")).not.toBeNull();
+    expect(footerMedia?.querySelector(".session-duration-label")?.textContent).toBe("00:02:00");
+
+    const audio = container.querySelector('audio[data-session-id="s-audio"]') as HTMLAudioElement | null;
     expect(audio).toBeInTheDocument();
     expect(audio).toHaveAttribute("src", "asset:///tmp/s-audio/capture.final.mp3");
 
@@ -794,6 +828,7 @@ describe("App main window", () => {
 
     const seekSlider = screen.getByRole("slider", { name: "Позиция аудио" });
     expect(seekSlider).toHaveValue("0");
+    expect(seekSlider).toHaveStyle({ "--session-audio-progress": "0%" });
 
     act(() => {
       if (audio) {
@@ -804,9 +839,11 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(seekSlider).toHaveValue("25");
     });
+    expect(seekSlider).toHaveStyle({ "--session-audio-progress": "25%" });
 
     fireEvent.change(seekSlider, { target: { value: "50" } });
     expect(seekSlider).toHaveValue("50");
+    expect(seekSlider).toHaveStyle({ "--session-audio-progress": "50%" });
     expect(audio?.currentTime).toBe(60);
 
     await user.click(screen.getByRole("button", { name: "Пауза" }));
@@ -880,14 +917,14 @@ describe("App main window", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
     await waitFor(() => {
-      expect(screen.getByText("/tmp/s7")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Delete me" })).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
     expect(screen.getByText("Удалить сессию и все связанные файлы?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Отмена" }));
     expect(invokeMock).not.toHaveBeenCalledWith("delete_session", { sessionId: "s7", force: false });
-    expect(screen.getByText("/tmp/s7")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Delete me" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
     await user.click(screen.getByRole("button", { name: "Удалить" }));
@@ -895,7 +932,163 @@ describe("App main window", () => {
       expect(invokeMock).toHaveBeenCalledWith("delete_session", { sessionId: "s7", force: false });
     });
     await waitFor(() => {
-      expect(screen.queryByText("/tmp/s7")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Delete me" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("restores focus to a stable app control after confirmed delete removes the trigger row", async () => {
+    const user = userEvent.setup();
+    let sessions = [
+      {
+        session_id: "s7",
+        status: "recorded",
+        primary_tag: "zoom",
+        topic: "Delete me",
+        display_date_ru: "11.03.2026",
+        started_at_iso: "2026-03-11T11:30:00+03:00",
+        session_dir: "/tmp/s7",
+        audio_duration_hms: "00:05:10",
+        has_transcript_text: false,
+        has_summary_text: false,
+      },
+    ];
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          summary_url: "",
+          summary_prompt: "",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "list_sessions") {
+        return sessions;
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s7",
+          source: "zoom",
+          custom_tag: "",
+          topic: "Delete me",
+          participants: [],
+        };
+      }
+      if (cmd === "delete_session") {
+        expect(args).toEqual({ sessionId: "s7", force: false });
+        sessions = [];
+        return "deleted";
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Delete me" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Delete me" })).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Search sessions")).toHaveFocus();
+    });
+  });
+
+  it("moves focus into the delete confirmation dialog and keeps tab focus inside it", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          summary_url: "",
+          summary_prompt: "",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-dialog",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Dialog focus",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T11:30:00+03:00",
+            session_dir: "/tmp/s-dialog",
+            audio_duration_hms: "00:05:10",
+            has_transcript_text: false,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-dialog",
+          source: "zoom",
+          custom_tag: "",
+          topic: "Dialog focus",
+          participants: [],
+        };
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Dialog focus" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
+
+    const cancelButton = screen.getByRole("button", { name: "Отмена" });
+    const deleteButton = screen.getByRole("button", { name: "Удалить" });
+    await waitFor(() => {
+      expect(cancelButton).toHaveFocus();
+    });
+
+    await user.tab();
+    await waitFor(() => {
+      expect(deleteButton).toHaveFocus();
+    });
+
+    await user.tab();
+    await waitFor(() => {
+      expect(cancelButton).toHaveFocus();
     });
   });
 
@@ -945,7 +1138,7 @@ describe("App main window", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
     await waitFor(() => {
-      expect(screen.getByText("/tmp/s8")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Stuck recording" })).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
