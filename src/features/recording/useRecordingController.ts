@@ -63,6 +63,7 @@ export function useRecordingController({
   const [liveLevels, setLiveLevels] = useState<LiveInputLevels>({ mic: 0, system: 0 });
   const [muteState, setMuteState] = useState<RecordingMuteState>(defaultRecordingMuteState);
   const [uiSyncReady, setUiSyncReady] = useState(isSettingsWindow);
+  const muteStateRef = useRef<RecordingMuteState>(defaultRecordingMuteState);
   const topicRef = useRef(topic);
   const sourceRef = useRef(source);
   const sessionRef = useRef<StartResponse | null>(session);
@@ -77,6 +78,25 @@ export function useRecordingController({
     sessionRef.current = session;
   }, [session, source, topic]);
 
+  useEffect(() => {
+    muteStateRef.current = muteState;
+  }, [muteState]);
+
+  function resetMuteState() {
+    muteStateRef.current = defaultRecordingMuteState;
+    setMuteState(defaultRecordingMuteState);
+  }
+
+  function setRecordingSession(sessionId: string) {
+    resetMuteState();
+    setSession({
+      session_id: sessionId,
+      session_dir: "",
+      status: "recording",
+    });
+    setLastSessionId(sessionId);
+  }
+
   async function startRecording(payload: { source: string; customTag?: string; topic?: string; participants?: string[] }) {
     const tags = [payload.source];
     if (payload.customTag && payload.customTag.trim()) tags.push(payload.customTag.trim());
@@ -89,6 +109,7 @@ export function useRecordingController({
     });
     setSession(response);
     setLastSessionId(response.session_id);
+    resetMuteState();
     setStatus("recording");
     await loadSessions();
   }
@@ -131,13 +152,18 @@ export function useRecordingController({
 
   async function toggleInputMuted(channel: RecordingInputChannel) {
     if (status !== "recording") return;
-    const muted = channel === "mic" ? !muteState.micMuted : !muteState.systemMuted;
-    const optimisticState = nextRecordingMuteState(muteState, channel, muted);
+    const currentMuteState = muteStateRef.current;
+    const muted = channel === "mic" ? !currentMuteState.micMuted : !currentMuteState.systemMuted;
+    const optimisticState = nextRecordingMuteState(currentMuteState, channel, muted);
+    muteStateRef.current = optimisticState;
+    setMuteState(optimisticState);
     const next = await tauriInvoke<RecordingMuteState>("set_recording_input_muted", {
       channel,
       muted,
     });
-    setMuteState(next ?? optimisticState);
+    const resolvedState = next ?? optimisticState;
+    muteStateRef.current = resolvedState;
+    setMuteState(resolvedState);
   }
 
   useEffect(() => {
@@ -189,14 +215,10 @@ export function useRecordingController({
         if (current.source?.trim()) setSource(syncedSource);
         setTopic(syncedTopic);
         if (current.is_recording) {
+          resetMuteState();
           setStatus("recording");
           if (current.active_session_id) {
-            setSession({
-              session_id: current.active_session_id,
-              session_dir: "",
-              status: "recording",
-            });
-            setLastSessionId(current.active_session_id);
+            setRecordingSession(current.active_session_id);
           }
         }
       })
@@ -272,11 +294,11 @@ export function useRecordingController({
       const payload = parseEventPayload<{ recording?: boolean; sessionId?: string | null }>(event);
       if (!payload || typeof payload.recording !== "boolean") return;
       if (payload.recording) {
+        resetMuteState();
         setStatus("recording");
         const sessionId = payload.sessionId;
         if (!sessionId) return;
-        setSession((prev) => prev ?? { session_id: sessionId, session_dir: "", status: "recording" });
-        setLastSessionId(sessionId);
+        setRecordingSession(sessionId);
       } else {
         setSession(null);
         setStatus((prev) => (prev === "recording" ? "recorded" : prev));

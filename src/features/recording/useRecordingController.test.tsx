@@ -336,6 +336,143 @@ describe("useRecordingController", () => {
       const [lastSessionId, setLastSessionId] = useState<string | null>(null);
       const [status, setStatus] = useState("idle");
 
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        session,
+        lastSessionId,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await act(async () => {
+      await result.current.controller.startFromTray();
+    });
+
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
+
+    await act(async () => {
+      await result.current.controller.toggleInputMuted("mic");
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_recording_input_muted", {
+      channel: "mic",
+      muted: true,
+    });
+    expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
+
+    await act(async () => {
+      await result.current.controller.stop();
+    });
+
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
+  });
+
+  it("resets mute state when a new recording session is hydrated while already recording", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        session,
+        lastSessionId,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await act(async () => {
+      await result.current.controller.startFromTray();
+    });
+
+    await act(async () => {
+      await result.current.controller.toggleInputMuted("mic");
+    });
+
+    expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
+
+    const uiRecordingHandler = listeners.get("ui:recording");
+    expect(uiRecordingHandler).toBeDefined();
+
+    await act(async () => {
+      await uiRecordingHandler?.({ payload: { recording: true, sessionId: "s2" } });
+    });
+
+    expect(result.current.session?.session_id).toBe("s2");
+    expect(result.current.lastSessionId).toBe("s2");
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
+  });
+
+  it("uses the system mute branch and falls back to the optimistic state on null responses", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+    const muteCalls: Array<{ channel: string; muted: boolean }> = [];
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "set_recording_input_muted") {
+        muteCalls.push(args as { channel: string; muted: boolean });
+        await Promise.resolve();
+        return null;
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
       return useRecordingController({
         isSettingsWindow: false,
         isTrayWindow: true,
@@ -365,22 +502,16 @@ describe("useRecordingController", () => {
       await result.current.startFromTray();
     });
 
-    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
-
     await act(async () => {
-      await result.current.toggleInputMuted("mic");
+      const firstToggle = result.current.toggleInputMuted("system");
+      const secondToggle = result.current.toggleInputMuted("system");
+      await Promise.all([firstToggle, secondToggle]);
     });
 
-    expect(invokeMock).toHaveBeenCalledWith("set_recording_input_muted", {
-      channel: "mic",
-      muted: true,
-    });
-    expect(result.current.muteState).toEqual({ micMuted: true, systemMuted: false });
-
-    await act(async () => {
-      await result.current.stop();
-    });
-
+    expect(muteCalls).toEqual([
+      { channel: "system", muted: true },
+      { channel: "system", muted: false },
+    ]);
     expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
   });
 
