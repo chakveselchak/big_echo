@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   audioFormatOptions,
   fixedSources,
@@ -96,6 +103,15 @@ function pauseAudioElement(audio: HTMLAudioElement | null, force = false) {
   }
 }
 
+function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => !element.hasAttribute("disabled") && element.tabIndex >= 0);
+}
+
 function SessionAudioPlayer({
   item,
   setStatus,
@@ -188,6 +204,7 @@ function SessionAudioPlayer({
         step="1"
         aria-label="Позиция аудио"
         value={Math.round(progressPercent)}
+        style={{ "--session-audio-progress": `${Math.round(progressPercent)}%` } as CSSProperties}
         onChange={(e) => handleSeek(Number(e.target.value))}
         disabled={isDisabled || durationSeconds <= 0}
       />
@@ -219,9 +236,18 @@ export function App() {
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
   const [isOpenerDropdownOpen, setIsOpenerDropdownOpen] = useState(false);
+  const [openerActiveIndex, setOpenerActiveIndex] = useState(0);
+  const appMainRef = useRef<HTMLElement | null>(null);
   const openerDropdownRef = useRef<HTMLDivElement | null>(null);
+  const openerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const openerOptionRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const wasOpenerDropdownOpenRef = useRef(false);
   const sessionSearchInputRef = useRef<HTMLInputElement | null>(null);
   const artifactPreviewBodyRef = useRef<HTMLPreElement | null>(null);
+  const deleteDialogRef = useRef<HTMLDivElement | null>(null);
+  const artifactDialogRef = useRef<HTMLDivElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const wasDialogOpenRef = useRef(false);
   const loadSessionsRef = useRef<(() => Promise<void>) | null>(null);
   const {
     audioDevices,
@@ -254,6 +280,17 @@ export function App() {
     settingsTab,
     textEditorApps,
   } = useSettingsForm({ isTrayWindow, setStatus });
+  const openerOptions = textEditorApps.length > 0 ? textEditorApps : openerUiFallback;
+  const openerMenuOptions = [
+    { id: "", name: "System default", icon_fallback: "", icon_data_url: null },
+    ...openerOptions,
+  ];
+  const selectedOpenerLabel =
+    openerMenuOptions.find((app) => app.id === settings?.artifact_open_app)?.name ?? "System default";
+  const selectedOpenerIndex = Math.max(
+    0,
+    openerMenuOptions.findIndex((app) => app.id === settings?.artifact_open_app)
+  );
   const {
     artifactPreview,
     closeArtifactPreview,
@@ -263,9 +300,9 @@ export function App() {
     filteredSessions,
     getSummary,
     getText,
+    importAudioSession,
     loadSessions,
     openSessionArtifact,
-    openSessionFolder,
     pipelineStateBySession,
     requestDeleteSession,
     sessionArtifactSearchHits,
@@ -278,6 +315,19 @@ export function App() {
     summaryPendingBySession,
     textPendingBySession,
   } = useSessions({ setStatus, lastSessionId, setLastSessionId });
+  const hasSessions = sessions.length > 0;
+  const normalizedSessionSearchQuery = sessionSearchQuery.trim();
+  const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
+  const emptyStateTitle = hasSessions
+    ? hasSessionSearchQuery
+      ? `No results for "${normalizedSessionSearchQuery}"`
+      : "No matching sessions"
+    : "No sessions yet";
+  const emptyStateCopy = hasSessions
+    ? hasSessionSearchQuery
+      ? "Try a different search or clear the query to see all sessions."
+      : "No sessions matched the current filters."
+    : "New recordings will appear here with search, transcript, summary, and audio actions.";
   const { liveLevels, start, startFromTray, stop } = useRecordingController({
     isSettingsWindow,
     isTrayWindow,
@@ -317,7 +367,7 @@ export function App() {
       if (!isOpenerDropdownOpen) return;
       if (!openerDropdownRef.current) return;
       if (openerDropdownRef.current.contains(event.target as Node)) return;
-      setIsOpenerDropdownOpen(false);
+      closeOpenerDropdown({ restoreFocus: false });
     };
     document.addEventListener("mousedown", onDocumentMouseDown);
     return () => document.removeEventListener("mousedown", onDocumentMouseDown);
@@ -325,7 +375,7 @@ export function App() {
 
   useEffect(() => {
     if (isTrayWindow || isSettingsWindow) return;
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key.toLowerCase() !== "f") return;
       if (!event.metaKey && !event.ctrlKey) return;
       event.preventDefault();
@@ -344,6 +394,157 @@ export function App() {
   }, [artifactPreview]);
 
   useEffect(() => {
+    const isDialogOpen = Boolean(deleteTarget || artifactPreview);
+    const dialogRef = deleteTarget ? deleteDialogRef : artifactPreview ? artifactDialogRef : null;
+    const dialogElement = dialogRef ? dialogRef.current : null;
+
+    if (isDialogOpen && !wasDialogOpenRef.current) {
+      restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const focusables = getFocusableElements(dialogElement);
+      (focusables[0] ?? dialogElement)?.focus();
+    }
+
+    if (!isDialogOpen && wasDialogOpenRef.current) {
+      if (restoreFocusRef.current && document.contains(restoreFocusRef.current)) {
+        restoreFocusRef.current.focus();
+      } else {
+        const fallbackFocusTarget =
+          sessionSearchInputRef.current && document.contains(sessionSearchInputRef.current)
+            ? sessionSearchInputRef.current
+            : getFocusableElements(appMainRef.current)[0] ?? appMainRef.current;
+        fallbackFocusTarget?.focus();
+      }
+      restoreFocusRef.current = null;
+    }
+
+    wasDialogOpenRef.current = isDialogOpen;
+  }, [artifactPreview, deleteTarget]);
+
+  function closeOpenerDropdown({ restoreFocus = true }: { restoreFocus?: boolean } = {}) {
+    setIsOpenerDropdownOpen(false);
+    if (restoreFocus) {
+      openerTriggerRef.current?.focus();
+    }
+  }
+
+  function focusOpenerIndex(index: number) {
+    const nextIndex = Math.max(0, Math.min(index, openerMenuOptions.length - 1));
+    setOpenerActiveIndex(nextIndex);
+    openerOptionRefs.current[nextIndex]?.focus();
+  }
+
+  function openOpenerDropdown() {
+    setOpenerActiveIndex(selectedOpenerIndex);
+    setIsOpenerDropdownOpen(true);
+  }
+
+  function selectOpenerApp(appId: string) {
+    if (!settings) return;
+    setSettings({ ...settings, artifact_open_app: appId });
+    closeOpenerDropdown();
+  }
+
+  function handleOpenerDropdownBlur(event: ReactFocusEvent<HTMLDivElement>) {
+    if (!isOpenerDropdownOpen) return;
+    const nextFocused = event.relatedTarget;
+    if (!(nextFocused instanceof Node)) {
+      closeOpenerDropdown({ restoreFocus: false });
+      return;
+    }
+    if (openerDropdownRef.current?.contains(nextFocused)) return;
+    closeOpenerDropdown({ restoreFocus: false });
+  }
+
+  function handleOpenerTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Escape" && isOpenerDropdownOpen) {
+      event.preventDefault();
+      closeOpenerDropdown();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openOpenerDropdown();
+    }
+  }
+
+  function handleOpenerMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeOpenerDropdown();
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusOpenerIndex((openerActiveIndex + 1) % openerMenuOptions.length);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusOpenerIndex((openerActiveIndex - 1 + openerMenuOptions.length) % openerMenuOptions.length);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusOpenerIndex(0);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      focusOpenerIndex(openerMenuOptions.length - 1);
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectOpenerApp(openerMenuOptions[openerActiveIndex]?.id ?? "");
+    }
+  }
+
+  function handleDialogKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+    dialogNode: HTMLElement | null,
+    closeDialog: () => void
+  ) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDialog();
+      return;
+    }
+
+    if (event.key !== "Tab") return;
+
+    const focusables = getFocusableElements(dialogNode);
+    if (focusables.length === 0) {
+      event.preventDefault();
+      dialogNode?.focus();
+      return;
+    }
+
+    const currentIndex = focusables.findIndex((element) => element === document.activeElement);
+    const nextIndex = event.shiftKey
+      ? currentIndex <= 0
+        ? focusables.length - 1
+        : currentIndex - 1
+      : currentIndex === focusables.length - 1
+        ? 0
+        : currentIndex + 1;
+
+    event.preventDefault();
+    (focusables[nextIndex] ?? dialogNode)?.focus();
+  }
+
+  useEffect(() => {
+    if (isOpenerDropdownOpen && !wasOpenerDropdownOpenRef.current) {
+      focusOpenerIndex(selectedOpenerIndex);
+    }
+    wasOpenerDropdownOpenRef.current = isOpenerDropdownOpen;
+  }, [isOpenerDropdownOpen, selectedOpenerIndex]);
+
+  useEffect(() => {
     if (isTrayWindow || isSettingsWindow || mainTab !== "sessions") return;
     loadSessionsRef.current?.().catch((err) => {
       setStatus(`error: ${String(err)}`);
@@ -356,6 +557,8 @@ export function App() {
     const isNexaraProvider = settings.transcription_provider === "nexara";
     const openerOptions = textEditorApps.length > 0 ? textEditorApps : openerUiFallback;
     const selectedOpenerApp = openerOptions.find((app) => app.id === settings.artifact_open_app) ?? null;
+    const artifactOpenerLabelId = "artifact-opener-label";
+    const artifactOpenerValueId = "artifact-opener-value";
     const snapshot = savedSettingsSnapshot;
     const isDirty = (field: keyof PublicSettings) => Boolean(snapshot && settings[field] !== snapshot[field]);
     const isMacosPermissionLoading = macosSystemAudioPermissionLoadState === "loading";
@@ -631,15 +834,24 @@ export function App() {
                 </div>
               </label>
               <div className="field">
-                <span>Artifact opener app (optional)</span>
-                <div className="opener-dropdown" ref={openerDropdownRef}>
+                <span id={artifactOpenerLabelId}>Artifact opener app (optional)</span>
+                <div className="opener-dropdown" ref={openerDropdownRef} onBlur={handleOpenerDropdownBlur}>
                   <button
+                    ref={openerTriggerRef}
                     type="button"
                     className="opener-dropdown-trigger"
-                    aria-label="Artifact opener app (optional)"
+                    aria-labelledby={`${artifactOpenerLabelId} ${artifactOpenerValueId}`}
                     aria-haspopup="listbox"
                     aria-expanded={isOpenerDropdownOpen}
-                    onClick={() => setIsOpenerDropdownOpen((prev) => !prev)}
+                    aria-controls="artifact-opener-listbox"
+                    onClick={() => {
+                      if (isOpenerDropdownOpen) {
+                        closeOpenerDropdown();
+                        return;
+                      }
+                      openOpenerDropdown();
+                    }}
+                    onKeyDown={handleOpenerTriggerKeyDown}
                   >
                     {selectedOpenerApp ? (
                       <>
@@ -655,49 +867,50 @@ export function App() {
                             {selectedOpenerApp.icon_fallback}
                           </span>
                         )}
-                        <span>{selectedOpenerApp.name}</span>
+                        <span id={artifactOpenerValueId}>{selectedOpenerApp.name}</span>
                       </>
                     ) : (
-                      <span>System default</span>
+                      <span id={artifactOpenerValueId}>{selectedOpenerLabel}</span>
                     )}
                   </button>
 
                   {isOpenerDropdownOpen && (
-                    <div className="opener-dropdown-menu" role="listbox" aria-label="Artifact opener app options">
-                      <button
-                        type="button"
-                        className={`opener-dropdown-option${settings.artifact_open_app === "" ? " is-active" : ""}`}
-                        onClick={() => {
-                          setSettings({ ...settings, artifact_open_app: "" });
-                          setIsOpenerDropdownOpen(false);
-                        }}
-                      >
-                        <span>System default</span>
-                      </button>
-                      {openerOptions.map((editor) => (
-                        <button
-                          key={editor.id}
-                          type="button"
-                          className={`opener-dropdown-option${settings.artifact_open_app === editor.id ? " is-active" : ""}`}
-                          onClick={() => {
-                            setSettings({ ...settings, artifact_open_app: editor.id });
-                            setIsOpenerDropdownOpen(false);
+                    <div
+                      id="artifact-opener-listbox"
+                      className="opener-dropdown-menu"
+                      role="listbox"
+                      aria-label="Artifact opener app options"
+                      onKeyDown={handleOpenerMenuKeyDown}
+                    >
+                      {openerMenuOptions.map((editor, index) => (
+                        <div
+                          key={editor.id || "system-default"}
+                          ref={(node) => {
+                            openerOptionRefs.current[index] = node;
                           }}
+                          role="option"
+                          tabIndex={-1}
+                          aria-selected={settings.artifact_open_app === editor.id}
+                          className={`opener-dropdown-option${
+                            settings.artifact_open_app === editor.id ? " is-active" : ""
+                          }`}
+                          onClick={() => selectOpenerApp(editor.id)}
+                          onMouseEnter={() => setOpenerActiveIndex(index)}
                         >
-                          {(editor.icon_data_url || localIconForEditor(editor.name)) ? (
+                          {editor.id && (editor.icon_data_url || localIconForEditor(editor.name)) ? (
                             <img
                               className="opener-app-icon"
                               src={editor.icon_data_url || localIconForEditor(editor.name) || ""}
                               alt=""
                               aria-hidden="true"
                             />
-                          ) : (
+                          ) : editor.id ? (
                             <span className="opener-app-fallback-icon" aria-hidden="true">
                               {editor.icon_fallback}
                             </span>
-                          )}
+                          ) : null}
                           <span>{editor.name}</span>
-                        </button>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -872,9 +1085,10 @@ export function App() {
       macosSystemAudioPermissionLoadState === "ready" &&
       macosSystemAudioPermission?.kind !== "granted" &&
       macosSystemAudioPermission?.kind !== "unsupported";
-    const showMacosSystemAudioSettingsShortcut = isMacosSystemAudioPermissionPendingReview;
+    const showMacosSystemAudioSettingsShortcut =
+      isMacosSystemAudioPermissionPendingReview || isMacosSystemAudioLookupFailed;
     return (
-      <main className="tray-shell">
+      <main className="tray-shell" ref={appMainRef}>
         <div className="tray-top-bar">
           <p className="status-line">Status: {formatAppStatus(status)}</p>
           {showMacosSystemAudioSettingsShortcut && (
@@ -929,14 +1143,14 @@ export function App() {
           {isMacosSystemAudioLoading ? (
             <div className="tray-level-row">
               <span className="tray-level-name">System</span>
-              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
+              <div className="tray-level-value tray-level-status">
                 Checking macOS system audio status
               </div>
             </div>
           ) : isMacosSystemAudioLookupFailed ? (
             <div className="tray-level-row">
               <span className="tray-level-name">System</span>
-              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
+              <div className="tray-level-value tray-level-status">
                 Could not load macOS system audio status. Open System Settings to review the permission.
               </div>
             </div>
@@ -968,20 +1182,8 @@ export function App() {
               </label>
             </div>
           ) : isMacosSystemAudioPermissionPendingReview ? (
-            <div className="tray-level-row">
-              <span className="tray-level-name">System</span>
-              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
-                Open System Settings to review macOS system audio access.
-              </div>
-            </div>
-          ) : (
-            <div className="tray-level-row">
-              <span className="tray-level-name">System</span>
-              <div className="tray-level-value" style={{ gridColumn: "2 / span 2" }}>
-                System audio is captured natively by macOS.
-              </div>
-            </div>
-          )}
+            null
+          ) : null}
         </div>
         <div className="button-row">
           <button className="primary-button rec-button" onClick={startFromTray} disabled={status === "recording"}>
@@ -999,7 +1201,7 @@ export function App() {
 
   if (isSettingsWindow) {
     return (
-      <main className="app-shell settings-shell mac-window settings-layout">
+      <main className="app-shell settings-shell mac-window settings-layout" ref={appMainRef}>
         <section className="panel">
           {renderSettingsFields()}
         </section>
@@ -1008,7 +1210,7 @@ export function App() {
   }
 
   return (
-    <main className="app-shell mac-window mac-content">
+    <main className="app-shell mac-window mac-content" ref={appMainRef}>
       <div className="main-tabs" role="tablist" aria-label="Main sections">
         <button
           type="button"
@@ -1041,31 +1243,40 @@ export function App() {
               <label className="field session-search-label" htmlFor="session-search-input">
                 Search sessions
               </label>
-              <button
-                type="button"
-                className="refresh-icon-button"
-                aria-label="Refresh sessions"
-                title="Refresh sessions"
-                onClick={() => void loadSessions()}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M20 12a8 8 0 1 1-2.34-5.66"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M20 4v5h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+              <div className="session-toolbar-actions">
+                <button
+                  type="button"
+                  className="secondary-button session-import-button"
+                  onClick={() => void importAudioSession()}
+                >
+                  Загрузить аудио
+                </button>
+                <button
+                  type="button"
+                  className="refresh-icon-button"
+                  aria-label="Refresh sessions"
+                  title="Refresh sessions"
+                  onClick={() => void loadSessions()}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M20 12a8 8 0 1 1-2.34-5.66"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M20 4v5h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
             <div className="session-toolbar-search">
               <input
@@ -1075,6 +1286,25 @@ export function App() {
                 value={sessionSearchQuery}
                 onChange={(e) => setSessionSearchQuery(e.target.value)}
               />
+              <span className="session-search-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20">
+                  <circle
+                    cx="8.5"
+                    cy="8.5"
+                    r="4.75"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                  />
+                  <path
+                    d="M12 12l4.25 4.25"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
             </div>
           </div>
           <div className="sessions-grid">
@@ -1102,20 +1332,19 @@ export function App() {
               const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
               return (
                 <article key={item.session_id} className="session-card">
-                  <div className="session-header">
-                    <div className="session-title-block">
+                  <div className="session-card-header">
+                    <div className="session-card-heading">
                       <div className="session-title-line">
-                        <strong>{detail.topic || "Без темы"}</strong>
+                        <h3 className="session-title-heading">{detail.topic || "Без темы"}</h3>
                         <span className="session-title-meta">
                           ({item.audio_format}) - {item.display_date_ru}
                         </span>
-                        <span className="session-duration-label">{item.audio_duration_hms}</span>
                       </div>
                       <div className={statusMatch ? "session-status match-hit" : "session-status"}>
                         Status: {formatSessionStatus(item.status)}
                       </div>
                     </div>
-                    <div className="session-header-right">
+                    <div className="session-card-actions">
                       <div className="session-labels">
                         {item.has_transcript_text && (
                           <button
@@ -1151,12 +1380,6 @@ export function App() {
                         </svg>
                       </button>
                     </div>
-                  </div>
-                  <div className="session-path-row">
-                    <div className={`session-path${pathMatch ? " match-hit" : ""}`}>{item.session_dir}</div>
-                    <button className="link-button" type="button" onClick={() => void openSessionFolder(item.session_dir)}>
-                      открыть
-                    </button>
                   </div>
                   <div className="session-edit-grid">
                     <label className={`field${sourceMatch ? " match-hit" : ""}`}>
@@ -1218,74 +1441,90 @@ export function App() {
                     </label>
                   </div>
                   <div className="session-card-footer">
-                    <div className="button-row">
-                      <button
-                        className="secondary-button"
-                        onClick={() => getText(item.session_id)}
-                        disabled={item.status === "recording" || textPending || summaryPending}
-                      >
-                        {textPending ? (
-                          <span className="button-loading-content">
-                            <span className="inline-loader" aria-hidden="true" />
-                            Getting text...
-                          </span>
-                        ) : (
-                          "Get text"
-                        )}
-                      </button>
-                      {textPending && (
-                        <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
-                          Loading text
-                        </span>
-                      )}
-                      <button
-                        className="secondary-button"
-                        onClick={() => getSummary(item.session_id)}
-                        disabled={
-                          item.status === "recording" || !item.has_transcript_text || summaryPending || textPending
-                        }
-                      >
-                        {summaryPending ? (
-                          <span className="button-loading-content">
-                            <span className="inline-loader" aria-hidden="true" />
-                            Getting summary...
-                          </span>
-                        ) : (
-                          "Get Summary"
-                        )}
-                      </button>
-                      {summaryPending && (
-                        <span
-                          className="visually-hidden"
-                          role="status"
-                          aria-live="polite"
-                          aria-label="Loading summary"
+                    <div className="session-card-footer-actions">
+                      <div className="button-row">
+                        <button
+                          className="secondary-button"
+                          onClick={() => getText(item.session_id)}
+                          disabled={item.status === "recording" || textPending || summaryPending}
                         >
-                          Loading summary
-                        </span>
-                      )}
-                      {pipelineState && (
-                        <span
-                          className={
-                            pipelineState.kind === "error"
-                              ? "retry-state retry-state-error"
-                              : "retry-state retry-state-success"
+                          {textPending ? (
+                            <span className="button-loading-content">
+                              <span className="inline-loader" aria-hidden="true" />
+                              Getting text...
+                            </span>
+                          ) : (
+                            "Get text"
+                          )}
+                        </button>
+                        {textPending && (
+                          <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
+                            Loading text
+                          </span>
+                        )}
+                        <button
+                          className="secondary-button"
+                          onClick={() => getSummary(item.session_id)}
+                          disabled={
+                            item.status === "recording" || !item.has_transcript_text || summaryPending || textPending
                           }
                         >
-                          {pipelineState.text}
-                        </span>
-                      )}
+                          {summaryPending ? (
+                            <span className="button-loading-content">
+                              <span className="inline-loader" aria-hidden="true" />
+                              Getting summary...
+                            </span>
+                          ) : (
+                            "Get Summary"
+                          )}
+                        </button>
+                        {summaryPending && (
+                          <span
+                            className="visually-hidden"
+                            role="status"
+                            aria-live="polite"
+                            aria-label="Loading summary"
+                          >
+                            Loading summary
+                          </span>
+                        )}
+                        {pipelineState && (
+                          <span
+                            className={
+                              pipelineState.kind === "error"
+                                ? "retry-state retry-state-error"
+                                : "retry-state retry-state-success"
+                            }
+                          >
+                            {pipelineState.text}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <SessionAudioPlayer item={item} setStatus={setStatus} />
+                    <div className="session-card-footer-media">
+                      <SessionAudioPlayer item={item} setStatus={setStatus} />
+                      <span className="session-duration-label">{item.audio_duration_hms}</span>
+                    </div>
                   </div>
                 </article>
               );
             })}
-            {!filteredSessions.length && <div>No sessions yet</div>}
+            {!filteredSessions.length && (
+              <div className="sessions-empty-state">
+                <div className="sessions-empty-state-title">{emptyStateTitle}</div>
+                <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
+              </div>
+            )}
           </div>
-          {deleteTarget && (
-            <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Подтверждение удаления">
-              <div className="confirm-card">
+        {deleteTarget && (
+            <div
+              className="confirm-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Подтверждение удаления"
+              onKeyDown={(event) => handleDialogKeyDown(event, deleteDialogRef.current, () => setDeleteTarget(null))}
+            >
+              <div className="confirm-card" ref={deleteDialogRef} tabIndex={-1}>
                 <p>
                   {deleteTarget.force
                     ? "Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?"
@@ -1311,10 +1550,16 @@ export function App() {
                 </div>
               </div>
             </div>
-          )}
-          {artifactPreview && (
-            <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Просмотр артефакта">
-              <div className="confirm-card artifact-preview-card">
+        )}
+        {artifactPreview && (
+            <div
+              className="confirm-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Просмотр артефакта"
+              onKeyDown={(event) => handleDialogKeyDown(event, artifactDialogRef.current, closeArtifactPreview)}
+            >
+              <div className="confirm-card artifact-preview-card" ref={artifactDialogRef} tabIndex={-1}>
                 <div className="session-title-line">
                   <strong>{artifactPreview.artifactKind === "transcript" ? "Текст" : "Саммари"}</strong>
                 </div>

@@ -110,4 +110,68 @@ describe("useSessions", () => {
 
     expect(invokeMock).not.toHaveBeenCalledWith("get_session_meta", { sessionId: "s-inline" });
   });
+
+  it("imports an audio file as a native session and reloads the list", async () => {
+    let listCalls = 0;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") {
+        listCalls += 1;
+        if (listCalls === 1) {
+          return [];
+        }
+        return [
+          {
+            session_id: "s-imported",
+            status: "recorded",
+            primary_tag: "other",
+            topic: "Dictaphone note",
+            display_date_ru: "06.04.2026",
+            started_at_iso: "2026-04-06T09:00:00+03:00",
+            session_dir: "/tmp/recordings/other/06.04.2026/meeting_09-00-00",
+            audio_duration_hms: "00:02:14",
+            has_transcript_text: false,
+            has_summary_text: false,
+            meta: {
+              session_id: "s-imported",
+              source: "other",
+              custom_tag: "",
+              topic: "Dictaphone note",
+              participants: [],
+            },
+          },
+        ];
+      }
+      if (cmd === "import_audio_session") {
+        return {
+          session_id: "s-imported",
+          session_dir: "/tmp/recordings/other/06.04.2026/meeting_09-00-00",
+          status: "recorded",
+        };
+      }
+      return null;
+    });
+
+    const setStatus = vi.fn();
+    const setLastSessionId = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    await act(async () => {
+      await result.current.importAudioSession();
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("import_audio_session");
+      expect(result.current.sessions).toHaveLength(1);
+      expect(result.current.sessionDetails["s-imported"]?.source).toBe("other");
+    });
+
+    expect(setLastSessionId).toHaveBeenCalledWith("s-imported");
+    expect(setStatus).toHaveBeenCalledWith("audio_imported");
+  });
 });

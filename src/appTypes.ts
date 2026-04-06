@@ -89,7 +89,7 @@ export type SessionArtifactPreview = {
   query: string;
 };
 
-export const fixedSources = ["slack", "zoom", "telemost", "telegram", "browser", "facetime"];
+export const fixedSources = ["slack", "zoom", "telemost", "telegram", "browser", "facetime", "other"];
 export const transcriptionProviderOptions = ["nexara", "salute_speech"];
 export const transcriptionTaskOptions = ["transcribe", "diarize"];
 export const diarizationSettingOptions = ["general", "meeting", "telephonic"];
