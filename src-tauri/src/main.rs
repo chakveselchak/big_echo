@@ -16,7 +16,7 @@ use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
-    start_recording, stop_active_recording, stop_recording,
+    set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
 };
 use commands::sessions::{
     delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state,
@@ -577,6 +577,7 @@ pub(crate) fn stop_active_recording_internal(
         finalize_error = Some(format!("Audio encoding failed: {err}"));
     }
     state.live_levels.reset();
+    state.recording_control.reset();
 
     if let Some(app) = app {
         let _ = set_tray_indicator(app, false);
@@ -922,6 +923,7 @@ mod ipc_runtime_tests {
                 start_recording,
                 stop_recording,
                 stop_active_recording,
+                set_recording_input_muted,
                 run_pipeline,
                 retry_pipeline,
                 run_transcription,
@@ -1820,6 +1822,7 @@ fn main() {
             start_recording,
             stop_recording,
             stop_active_recording,
+            set_recording_input_muted,
             run_pipeline,
             retry_pipeline,
             run_transcription,

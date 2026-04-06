@@ -49,6 +49,24 @@ pub fn start_recording(
     start_recording_impl(dirs.inner(), state.inner(), payload)
 }
 
+fn apply_recording_input_mute(
+    control: &crate::audio::capture::SharedRecordingControl,
+    channel: &str,
+    muted: bool,
+) -> Result<crate::audio::capture::RecordingMuteState, String> {
+    control.set_channel(channel, muted)?;
+    Ok(control.snapshot())
+}
+
+#[tauri::command]
+pub fn set_recording_input_muted(
+    state: tauri::State<AppState>,
+    channel: String,
+    muted: bool,
+) -> Result<crate::audio::capture::RecordingMuteState, String> {
+    apply_recording_input_mute(&state.recording_control, channel.trim(), muted)
+}
+
 fn start_recording_impl(
     dirs: &AppDirs,
     state: &AppState,
@@ -64,6 +82,8 @@ fn start_recording_impl(
     if guard.is_some() {
         return Err("Recording already active".to_string());
     }
+
+    state.recording_control.reset();
 
     #[cfg(target_os = "macos")]
     {
@@ -315,6 +335,13 @@ mod tests {
             ensure_macos_system_audio_permission(&status).is_ok(),
             "granted permission should pass"
         );
+    }
+
+    #[test]
+    fn apply_recording_input_mute_rejects_unknown_channel() {
+        let control = crate::audio::capture::SharedRecordingControl::new();
+        let error = apply_recording_input_mute(&control, "other", true).unwrap_err();
+        assert_eq!(error, "Unsupported recording input channel");
     }
 
     #[cfg(target_os = "macos")]

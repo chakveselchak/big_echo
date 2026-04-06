@@ -1,9 +1,10 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
+use serde::Serialize;
 use std::fs::{remove_file, File};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
 #[cfg(test)]
 use std::sync::OnceLock;
@@ -27,10 +28,23 @@ pub struct LiveLevels {
     pub system: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingMuteState {
+    pub mic_muted: bool,
+    pub system_muted: bool,
+}
+
 #[derive(Clone)]
 pub struct SharedLevels {
     mic: Arc<AtomicU32>,
     system: Arc<AtomicU32>,
+}
+
+#[derive(Clone, Default)]
+pub struct SharedRecordingControl {
+    mic_muted: Arc<AtomicBool>,
+    system_muted: Arc<AtomicBool>,
 }
 
 impl Default for SharedLevels {
@@ -74,6 +88,51 @@ impl SharedLevels {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn system_meter(&self) -> Arc<AtomicU32> {
         Arc::clone(&self.system)
+    }
+}
+
+impl SharedRecordingControl {
+    pub fn new() -> Self {
+        Self {
+            mic_muted: Arc::new(AtomicBool::new(false)),
+            system_muted: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn reset(&self) {
+        self.mic_muted.store(false, Ordering::Relaxed);
+        self.system_muted.store(false, Ordering::Relaxed);
+    }
+
+    pub fn set_channel(&self, channel: &str, muted: bool) -> Result<(), String> {
+        match channel {
+            "mic" => {
+                self.mic_muted.store(muted, Ordering::Relaxed);
+                Ok(())
+            }
+            "system" => {
+                self.system_muted.store(muted, Ordering::Relaxed);
+                Ok(())
+            }
+            _ => Err("Unsupported recording input channel".to_string()),
+        }
+    }
+
+    pub fn snapshot(&self) -> RecordingMuteState {
+        RecordingMuteState {
+            mic_muted: self.mic_muted.load(Ordering::Relaxed),
+            system_muted: self.system_muted.load(Ordering::Relaxed),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn mic_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.mic_muted)
+    }
+
+    #[allow(dead_code)]
+    pub fn system_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.system_muted)
     }
 }
 
@@ -997,6 +1056,23 @@ mod tests {
         let high = normalize_signal_level(0.25);
         assert!(low < mid && mid < high);
         assert!(mid > 0.35);
+    }
+
+    #[test]
+    fn shared_recording_control_tracks_and_resets_channel_mutes() {
+        let control = SharedRecordingControl::new();
+        assert_eq!(control.snapshot(), RecordingMuteState::default());
+        control.set_channel("mic", true).expect("mute mic");
+        control.set_channel("system", true).expect("mute system");
+        assert_eq!(
+            control.snapshot(),
+            RecordingMuteState {
+                mic_muted: true,
+                system_muted: true,
+            }
+        );
+        control.reset();
+        assert_eq!(control.snapshot(), RecordingMuteState::default());
     }
 
     #[cfg(target_os = "macos")]

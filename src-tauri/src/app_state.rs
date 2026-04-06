@@ -10,6 +10,7 @@ pub struct AppState {
     pub active_capture: Mutex<Option<audio::capture::ContinuousCapture>>,
     pub ui_sync: Mutex<UiSyncState>,
     pub live_levels: audio::capture::SharedLevels,
+    pub recording_control: audio::capture::SharedRecordingControl,
     pub tray_app: Mutex<Option<AppHandle>>,
 }
 
@@ -20,6 +21,7 @@ impl Default for AppState {
             active_capture: Mutex::new(None),
             ui_sync: Mutex::new(UiSyncState::default()),
             live_levels: audio::capture::SharedLevels::new(),
+            recording_control: audio::capture::SharedRecordingControl::new(),
             tray_app: Mutex::new(None),
         }
     }
