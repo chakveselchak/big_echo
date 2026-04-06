@@ -24,6 +24,9 @@ const { invokeMock, emitMock, listenMock, listeners } = vi.hoisted(() => ({
     if (cmd === "run_pipeline") {
       return "done";
     }
+    if (cmd === "set_recording_input_muted") {
+      return { micMuted: true, systemMuted: false };
+    }
     return null;
   }),
   listenMock: vi.fn(async (event: string, handler: (payload?: unknown) => void | Promise<void>) => {
@@ -39,6 +42,7 @@ vi.mock("../../lib/tauri", () => ({
 }));
 
 import { StartResponse } from "../../appTypes";
+import { shouldAnimateTrayAudio } from "./trayAudio";
 import { useRecordingController } from "./useRecordingController";
 
 function getDefaultInvokeResponse(cmd: string) {
@@ -59,6 +63,9 @@ function getDefaultInvokeResponse(cmd: string) {
   }
   if (cmd === "run_pipeline") {
     return "done";
+  }
+  if (cmd === "set_recording_input_muted") {
+    return { micMuted: true, systemMuted: false };
   }
   return null;
 }
@@ -315,6 +322,72 @@ describe("useRecordingController", () => {
     expect(result.current.session).toBeNull();
     expect(result.current.lastSessionId).toBeNull();
     expect(loadSessions).not.toHaveBeenCalled();
+  });
+
+  it("toggles recording input mute and resets it after stop", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return useRecordingController({
+        isSettingsWindow: false,
+        isTrayWindow: true,
+        topic,
+        setTopic,
+        participants,
+        setParticipants,
+        source,
+        setSource,
+        customTag,
+        setCustomTag,
+        session,
+        setSession,
+        lastSessionId,
+        setLastSessionId,
+        status,
+        setStatus,
+        loadSessions,
+      });
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await act(async () => {
+      await result.current.startFromTray();
+    });
+
+    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
+
+    await act(async () => {
+      await result.current.toggleInputMuted("mic");
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_recording_input_muted", {
+      channel: "mic",
+      muted: true,
+    });
+    expect(result.current.muteState).toEqual({ micMuted: true, systemMuted: false });
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
+  });
+
+  it("treats muted or sub-threshold levels as inactive", () => {
+    expect(shouldAnimateTrayAudio(0.02, false)).toBe(false);
+    expect(shouldAnimateTrayAudio(0.12, false)).toBe(true);
+    expect(shouldAnimateTrayAudio(0.9, true)).toBe(false);
   });
 
   it("debounces shared ui sync writes while source and topic are changing", async () => {

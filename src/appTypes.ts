@@ -32,6 +32,12 @@ export type StartResponse = {
   status: string;
 };
 
+export type RecordingInputChannel = "mic" | "system";
+export type RecordingMuteState = {
+  micMuted: boolean;
+  systemMuted: boolean;
+};
+
 export type SessionListItem = {
   session_id: string;
   status: string;

@@ -1,7 +1,14 @@
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
-import { LiveInputLevels, StartResponse, UiSyncStateView } from "../../appTypes";
+import {
+  LiveInputLevels,
+  RecordingInputChannel,
+  RecordingMuteState,
+  StartResponse,
+  UiSyncStateView,
+} from "../../appTypes";
 import { clamp01, parseEventPayload, splitParticipants } from "../../lib/appUtils";
 import { tauriEmit, tauriInvoke, tauriListen } from "../../lib/tauri";
+import { defaultRecordingMuteState, nextRecordingMuteState } from "./trayAudio";
 
 const UI_SYNC_DEBOUNCE_MS = 150;
 const TRAY_LEVELS_IDLE_POLL_MS = 280;
@@ -54,6 +61,7 @@ export function useRecordingController({
   loadSessions,
 }: UseRecordingControllerOptions) {
   const [liveLevels, setLiveLevels] = useState<LiveInputLevels>({ mic: 0, system: 0 });
+  const [muteState, setMuteState] = useState<RecordingMuteState>(defaultRecordingMuteState);
   const [uiSyncReady, setUiSyncReady] = useState(isSettingsWindow);
   const topicRef = useRef(topic);
   const sourceRef = useRef(source);
@@ -119,6 +127,17 @@ export function useRecordingController({
     await tauriInvoke<string>("run_pipeline", { sessionId: lastSessionId });
     setStatus("done");
     await loadSessions();
+  }
+
+  async function toggleInputMuted(channel: RecordingInputChannel) {
+    if (status !== "recording") return;
+    const muted = channel === "mic" ? !muteState.micMuted : !muteState.systemMuted;
+    const optimisticState = nextRecordingMuteState(muteState, channel, muted);
+    const next = await tauriInvoke<RecordingMuteState>("set_recording_input_muted", {
+      channel,
+      muted,
+    });
+    setMuteState(next ?? optimisticState);
   }
 
   useEffect(() => {
@@ -189,6 +208,11 @@ export function useRecordingController({
       active = false;
     };
   }, [isSettingsWindow, setLastSessionId, setSession, setSource, setStatus, setTopic]);
+
+  useEffect(() => {
+    if (status === "recording") return;
+    setMuteState(defaultRecordingMuteState);
+  }, [status]);
 
   useEffect(() => {
     let unlistenStart: (() => void) | undefined;
@@ -328,9 +352,11 @@ export function useRecordingController({
 
   return {
     liveLevels,
+    muteState,
     runPipeline,
     start,
     startFromTray,
+    toggleInputMuted,
     stop,
     uiSyncReady,
   };
