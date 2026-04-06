@@ -74,6 +74,10 @@ impl SharedLevels {
         store_level(&self.system, value);
     }
 
+    pub fn update_system_meter(&self, measured_linear_rms: f32) {
+        update_meter_level(&self.system, measured_linear_rms);
+    }
+
     pub fn snapshot(&self) -> LiveLevels {
         LiveLevels {
             mic: load_level(&self.mic),
@@ -194,6 +198,7 @@ fn update_meter_level(target: &AtomicU32, measured_linear_rms: f32) {
 pub struct ContinuousCapture {
     stop_tx: Sender<()>,
     join: Option<thread::JoinHandle<Result<CaptureArtifacts, String>>>,
+    recording_control: SharedRecordingControl,
     #[cfg(target_os = "macos")]
     native_system_capture: Option<crate::audio::macos_system_audio::NativeSystemAudioCapture>,
 }
@@ -220,14 +225,16 @@ impl ContinuousCapture {
         #[cfg(target_os = "macos")]
         let native_system_capture = Some(start_macos_native_system_capture()?);
 
+        let thread_control = control.clone();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let join = thread::spawn(move || {
-            capture_until_stopped(stop_rx, mic_name, system_name, levels, control)
+            capture_until_stopped(stop_rx, mic_name, system_name, levels, thread_control)
         });
 
         Ok(Self {
             stop_tx,
             join: Some(join),
+            recording_control: control,
             #[cfg(target_os = "macos")]
             native_system_capture,
         })
@@ -248,7 +255,11 @@ impl ContinuousCapture {
     pub fn refresh_native_system_level(&self, levels: &SharedLevels) {
         #[cfg(target_os = "macos")]
         if let Some(native) = &self.native_system_capture {
-            levels.set_system(native.live_level());
+            if self.recording_control.system_flag().load(Ordering::Relaxed) {
+                levels.set_system(0.0);
+            } else {
+                levels.update_system_meter(native.live_level());
+            }
         }
 
         let _ = levels;
@@ -1150,6 +1161,17 @@ mod tests {
     fn muted_meter_level_is_forced_to_zero() {
         assert_eq!(effective_meter_rms(0.42, true), 0.0);
         assert_eq!(effective_meter_rms(0.42, false), 0.42);
+    }
+
+    #[test]
+    fn shared_levels_system_meter_refresh_uses_normalized_mapping() {
+        let levels = SharedLevels::new();
+
+        levels.update_system_meter(0.03);
+
+        let snapshot = levels.snapshot();
+        assert!(snapshot.system > 0.2, "expected perceptual boost, got {}", snapshot.system);
+        assert!(snapshot.system > 0.03, "expected mapped level above raw RMS, got {}", snapshot.system);
     }
 
     #[test]
