@@ -74,8 +74,13 @@ fn apply_recording_input_mute_for_state(
     if active_session.session_id != session_id {
         return Err("Recording session mismatch".to_string());
     }
-    state.recording_control.set_channel(channel, muted)?;
-    Ok(state.recording_control.snapshot())
+    let next = apply_recording_input_mute(&state.recording_control, channel, muted)?;
+    if let Ok(capture_guard) = state.active_capture.lock() {
+        if let Some(capture) = capture_guard.as_ref() {
+            let _ = capture.set_channel_muted(channel.trim(), muted);
+        }
+    }
+    Ok(next)
 }
 
 #[tauri::command]
@@ -160,6 +165,7 @@ fn start_recording_impl(
         mic_name,
         system_source,
         state.live_levels.clone(),
+        state.recording_control.clone(),
     )?;
 
     let persist_result = (|| -> Result<(), String> {
@@ -369,9 +375,8 @@ mod tests {
     fn apply_recording_input_mute_rejects_when_no_recording_is_active() {
         let state = AppState::default();
 
-        let error =
-            apply_recording_input_mute_for_state(&state, "missing-session", "mic", true)
-                .unwrap_err();
+        let error = apply_recording_input_mute_for_state(&state, "missing-session", "mic", true)
+            .unwrap_err();
 
         assert_eq!(error, "No active recording session");
         assert_eq!(
@@ -391,8 +396,7 @@ mod tests {
         ));
 
         let error =
-            apply_recording_input_mute_for_state(&state, "stale-session", "mic", true)
-                .unwrap_err();
+            apply_recording_input_mute_for_state(&state, "stale-session", "mic", true).unwrap_err();
 
         assert_eq!(error, "Recording session mismatch");
         assert_eq!(

@@ -1,7 +1,6 @@
 use crate::app_state::{
     AppDirs, AppState, LiveInputLevelsView, SessionMetaView, StartRecordingResponse,
-    UiSyncStateView,
-    UpdateSessionDetailsRequest,
+    UiSyncStateView, UpdateSessionDetailsRequest,
 };
 use crate::domain::session::{format_ru_date, SessionArtifacts, SessionMeta, SessionStatus};
 use crate::storage::fs_layout::{build_session_relative_dir, summary_name, transcript_name};
@@ -192,12 +191,7 @@ fn import_audio_session_from_path(
 
     fs::create_dir_all(&session_dir).map_err(|e| e.to_string())?;
 
-    let mut meta = SessionMeta::new(
-        session_id.clone(),
-        vec!["other".to_string()],
-        topic,
-        vec![],
-    );
+    let mut meta = SessionMeta::new(session_id.clone(), vec!["other".to_string()], topic, vec![]);
     meta.status = SessionStatus::Recorded;
     meta.created_at_iso = now.to_rfc3339();
     meta.started_at_iso = now.to_rfc3339();
@@ -554,6 +548,11 @@ pub fn get_ui_sync_state(state: tauri::State<AppState>) -> Result<UiSyncStateVie
 
 #[tauri::command]
 pub fn get_live_input_levels(state: tauri::State<AppState>) -> Result<LiveInputLevelsView, String> {
+    if let Ok(capture_guard) = state.active_capture.lock() {
+        if let Some(capture) = capture_guard.as_ref() {
+            capture.refresh_native_system_level(&state.live_levels);
+        }
+    }
     let levels = state.live_levels.snapshot();
     Ok(LiveInputLevelsView {
         mic: levels.mic,
@@ -769,16 +768,23 @@ mod tests {
         let dirs = AppDirs {
             app_data_dir: app_data_dir.clone(),
         };
-        let response = import_audio_session_from_path(&dirs, &selected_audio).expect("import audio");
+        let response =
+            import_audio_session_from_path(&dirs, &selected_audio).expect("import audio");
         let session_dir = PathBuf::from(&response.session_dir);
 
         assert_eq!(response.status, "recorded");
         assert!(session_dir.starts_with(recording_root.join("other")));
-        assert!(session_dir.to_string_lossy().contains(&Local::now().format("%d.%m.%Y").to_string()));
+        assert!(session_dir
+            .to_string_lossy()
+            .contains(&Local::now().format("%d.%m.%Y").to_string()));
         assert!(session_dir.join("audio.wav").exists());
         assert!(session_dir.join("meta.json").exists());
-        assert!(session_dir.join("transcript_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".txt").exists());
-        assert!(session_dir.join("summary_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".md").exists());
+        assert!(session_dir
+            .join("transcript_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".txt")
+            .exists());
+        assert!(session_dir
+            .join("summary_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".md")
+            .exists());
 
         let meta = load_meta(&session_dir.join("meta.json")).expect("load meta");
         assert_eq!(meta.primary_tag, "other");
@@ -790,6 +796,9 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].primary_tag, "other");
         assert_eq!(listed[0].audio_format, "wav");
-        assert_eq!(listed[0].meta.as_ref().map(|meta| meta.source.as_str()), Some("other"));
+        assert_eq!(
+            listed[0].meta.as_ref().map(|meta| meta.source.as_str()),
+            Some("other")
+        );
     }
 }

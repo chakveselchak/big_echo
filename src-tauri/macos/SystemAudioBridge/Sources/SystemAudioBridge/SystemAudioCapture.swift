@@ -136,6 +136,8 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
     private var runtimeError: Error?
     private var stream: SCStream?
     private var closedFile = false
+    private var latestLevel: Float = 0
+    private var isMuted = false
 
     init(outputURL: URL) throws {
         self.outputURL = outputURL
@@ -213,6 +215,21 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
         }
     }
 
+    func currentLevelThousandths() -> Int32 {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return Int32(max(0, min(1000, Int((latestLevel * 1000).rounded()))))
+    }
+
+    func setMuted(_ muted: Bool) {
+        stateLock.lock()
+        isMuted = muted
+        if muted {
+            latestLevel = 0
+        }
+        stateLock.unlock()
+    }
+
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         recordRuntimeError(error)
     }
@@ -226,11 +243,16 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
         }
 
         do {
-            let pcmData = try Self.extractMonoPCMData(from: sampleBuffer)
+            let (pcmData, level) = try Self.extractMonoPCMDataAndLevel(from: sampleBuffer)
             guard !pcmData.isEmpty else {
                 return
             }
-            try fileHandle.write(contentsOf: pcmData)
+            stateLock.lock()
+            let muted = isMuted
+            latestLevel = muted ? 0 : level
+            stateLock.unlock()
+            let dataToWrite = muted ? Data(count: pcmData.count) : pcmData
+            try fileHandle.write(contentsOf: dataToWrite)
         } catch {
             recordRuntimeError(error)
         }
@@ -448,6 +470,27 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
         return monoSamples.withUnsafeBytes { Data($0) }
     }
 
+    private static func extractMonoPCMDataAndLevel(from sampleBuffer: CMSampleBuffer) throws -> (Data, Float) {
+        let pcmData = try extractMonoPCMData(from: sampleBuffer)
+        guard !pcmData.isEmpty else {
+            return (pcmData, 0)
+        }
+
+        let samples = pcmData.withUnsafeBytes { rawBuffer in
+            Array(rawBuffer.bindMemory(to: Int16.self))
+        }
+        guard !samples.isEmpty else {
+            return (pcmData, 0)
+        }
+
+        let sumSquares = samples.reduce(Float(0)) { partial, sample in
+            let normalized = Float(sample) / Float(Int16.max)
+            return partial + (normalized * normalized)
+        }
+        let rms = sqrt(sumSquares / Float(samples.count))
+        return (pcmData, min(max(rms, 0), 1))
+    }
+
     private static func normalizedSample(
         from baseAddress: UnsafeMutableRawPointer,
         sampleIndex: Int,
@@ -577,4 +620,24 @@ public func bigecho_stop_system_audio_capture(handle: Int64) -> Bool {
         logSystemAudioError("Failed to stop native ScreenCaptureKit system audio capture", error: error)
         return false
     }
+}
+
+@_cdecl("bigecho_get_system_audio_capture_level")
+public func bigecho_get_system_audio_capture_level(handle: Int64) -> Int32 {
+    captureRegistryLock.lock()
+    let captureSession = activeCaptures[handle] as? SystemAudioCaptureSession
+    captureRegistryLock.unlock()
+    return captureSession?.currentLevelThousandths() ?? 0
+}
+
+@_cdecl("bigecho_set_system_audio_capture_muted")
+public func bigecho_set_system_audio_capture_muted(handle: Int64, muted: Bool) -> Bool {
+    captureRegistryLock.lock()
+    let captureSession = activeCaptures[handle] as? SystemAudioCaptureSession
+    captureRegistryLock.unlock()
+    guard let captureSession else {
+        return false
+    }
+    captureSession.setMuted(muted)
+    return true
 }

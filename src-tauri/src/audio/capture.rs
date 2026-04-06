@@ -165,6 +165,22 @@ fn normalize_signal_level(linear_rms: f32) -> f32 {
     normalized.powf(0.72)
 }
 
+fn sample_to_i16(sample: f32, muted: bool) -> i16 {
+    if muted {
+        0
+    } else {
+        (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16
+    }
+}
+
+fn effective_meter_rms(measured_linear_rms: f32, muted: bool) -> f32 {
+    if muted {
+        0.0
+    } else {
+        measured_linear_rms
+    }
+}
+
 fn update_meter_level(target: &AtomicU32, measured_linear_rms: f32) {
     let mapped = normalize_signal_level(measured_linear_rms);
     let prev = load_level(target);
@@ -194,6 +210,7 @@ impl ContinuousCapture {
         mic_name: Option<String>,
         system_name: Option<String>,
         levels: SharedLevels,
+        control: SharedRecordingControl,
     ) -> Result<Self, String> {
         let host = cpal::default_host();
         select_input_device(&host, mic_name.as_deref())
@@ -204,8 +221,9 @@ impl ContinuousCapture {
         let native_system_capture = Some(start_macos_native_system_capture()?);
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
-        let join =
-            thread::spawn(move || capture_until_stopped(stop_rx, mic_name, system_name, levels));
+        let join = thread::spawn(move || {
+            capture_until_stopped(stop_rx, mic_name, system_name, levels, control)
+        });
 
         Ok(Self {
             stop_tx,
@@ -213,6 +231,27 @@ impl ContinuousCapture {
             #[cfg(target_os = "macos")]
             native_system_capture,
         })
+    }
+
+    pub fn set_channel_muted(&self, channel: &str, muted: bool) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        if channel == "system" {
+            if let Some(native) = &self.native_system_capture {
+                native.set_muted(muted)?;
+            }
+        }
+
+        let _ = (channel, muted);
+        Ok(())
+    }
+
+    pub fn refresh_native_system_level(&self, levels: &SharedLevels) {
+        #[cfg(target_os = "macos")]
+        if let Some(native) = &self.native_system_capture {
+            levels.set_system(native.live_level());
+        }
+
+        let _ = levels;
     }
 
     pub fn stop_and_take_artifacts(mut self) -> Result<CaptureArtifacts, String> {
@@ -270,15 +309,16 @@ fn capture_until_stopped(
     mic_name: Option<String>,
     _system_name: Option<String>,
     levels: SharedLevels,
+    control: SharedRecordingControl,
 ) -> Result<CaptureArtifacts, String> {
     #[cfg(target_os = "macos")]
     {
-        return capture_until_stopped_macos(stop_rx, mic_name, levels);
+        return capture_until_stopped_macos(stop_rx, mic_name, levels, control);
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        return capture_until_stopped_device(stop_rx, mic_name, _system_name, levels);
+        return capture_until_stopped_device(stop_rx, mic_name, _system_name, levels, control);
     }
 }
 
@@ -288,6 +328,7 @@ fn capture_until_stopped_device(
     mic_name: Option<String>,
     system_name: Option<String>,
     levels: SharedLevels,
+    control: SharedRecordingControl,
 ) -> Result<CaptureArtifacts, String> {
     let host = cpal::default_host();
     levels.reset();
@@ -311,8 +352,12 @@ fn capture_until_stopped_device(
     let mic_file = File::create(&mic_path).map_err(|e| e.to_string())?;
     let mic_sink = Arc::new(Mutex::new(BufWriter::new(mic_file)));
 
-    let (mic_stream, mic_rate) =
-        build_capture_stream(&mic_device, Arc::clone(&mic_sink), levels.mic_meter())?;
+    let (mic_stream, mic_rate) = build_capture_stream(
+        &mic_device,
+        Arc::clone(&mic_sink),
+        levels.mic_meter(),
+        control.mic_flag(),
+    )?;
     mic_stream.play().map_err(|e| e.to_string())?;
 
     let mut system_path = None;
@@ -324,7 +369,12 @@ fn capture_until_stopped_device(
         let path = temp_raw_path("sys");
         let file = File::create(&path).map_err(|e| e.to_string())?;
         let sink = Arc::new(Mutex::new(BufWriter::new(file)));
-        let (stream, rate) = build_capture_stream(&dev, Arc::clone(&sink), levels.system_meter())?;
+        let (stream, rate) = build_capture_stream(
+            &dev,
+            Arc::clone(&sink),
+            levels.system_meter(),
+            control.system_flag(),
+        )?;
         stream.play().map_err(|e| e.to_string())?;
         system_path = Some(path);
         system_stream = Some(stream);
@@ -366,6 +416,7 @@ fn capture_until_stopped_macos(
     stop_rx: mpsc::Receiver<()>,
     mic_name: Option<String>,
     levels: SharedLevels,
+    control: SharedRecordingControl,
 ) -> Result<CaptureArtifacts, String> {
     let host = cpal::default_host();
     levels.reset();
@@ -381,14 +432,18 @@ fn capture_until_stopped_macos(
     })?;
     let mic_sink = Arc::new(Mutex::new(BufWriter::new(mic_file)));
 
-    let (mic_stream, mic_rate) =
-        match build_capture_stream(&mic_device, Arc::clone(&mic_sink), levels.mic_meter()) {
-            Ok(result) => result,
-            Err(err) => {
-                cleanup_temp_capture_paths(&mic_path, None);
-                return Err(err);
-            }
-        };
+    let (mic_stream, mic_rate) = match build_capture_stream(
+        &mic_device,
+        Arc::clone(&mic_sink),
+        levels.mic_meter(),
+        control.mic_flag(),
+    ) {
+        Ok(result) => result,
+        Err(err) => {
+            cleanup_temp_capture_paths(&mic_path, None);
+            return Err(err);
+        }
+    };
     mic_stream.play().map_err(|e| {
         cleanup_temp_capture_paths(&mic_path, None);
         e.to_string()
@@ -654,6 +709,7 @@ fn build_capture_stream(
     device: &Device,
     sink: I16Sink,
     level_output: Arc<AtomicU32>,
+    mute_flag: Arc<AtomicBool>,
 ) -> Result<(Stream, u32), String> {
     let default_cfg = device
         .default_input_config()
@@ -671,11 +727,12 @@ fn build_capture_stream(
         SampleFormat::F32 => {
             let sink = Arc::clone(&sink);
             let level_output = Arc::clone(&level_output);
+            let mute_flag = Arc::clone(&mute_flag);
             device
                 .build_input_stream(
                     &cfg,
                     move |data: &[f32], _| {
-                        append_mono_f32_as_i16(data, channels, &sink, &level_output)
+                        append_mono_f32_as_i16(data, channels, &sink, &level_output, &mute_flag)
                     },
                     err_fn,
                     None,
@@ -685,10 +742,13 @@ fn build_capture_stream(
         SampleFormat::I16 => {
             let sink = Arc::clone(&sink);
             let level_output = Arc::clone(&level_output);
+            let mute_flag = Arc::clone(&mute_flag);
             device
                 .build_input_stream(
                     &cfg,
-                    move |data: &[i16], _| append_mono_i16(data, channels, &sink, &level_output),
+                    move |data: &[i16], _| {
+                        append_mono_i16(data, channels, &sink, &level_output, &mute_flag)
+                    },
                     err_fn,
                     None,
                 )
@@ -697,11 +757,12 @@ fn build_capture_stream(
         SampleFormat::U16 => {
             let sink = Arc::clone(&sink);
             let level_output = Arc::clone(&level_output);
+            let mute_flag = Arc::clone(&mute_flag);
             device
                 .build_input_stream(
                     &cfg,
                     move |data: &[u16], _| {
-                        append_mono_u16_as_i16(data, channels, &sink, &level_output)
+                        append_mono_u16_as_i16(data, channels, &sink, &level_output, &mute_flag)
                     },
                     err_fn,
                     None,
@@ -771,6 +832,7 @@ fn append_mono_f32_as_i16(
     channels: usize,
     sink: &I16Sink,
     level_output: &Arc<AtomicU32>,
+    mute_flag: &Arc<AtomicBool>,
 ) {
     if channels == 0 {
         return;
@@ -783,7 +845,8 @@ fn append_mono_f32_as_i16(
             let v = (*first).clamp(-1.0, 1.0);
             sum_sq += v * v;
             samples += 1;
-            let s = (v * i16::MAX as f32) as i16;
+            let muted = mute_flag.load(Ordering::Relaxed);
+            let s = sample_to_i16(v, muted);
             bytes.extend_from_slice(&s.to_le_bytes());
         }
     }
@@ -792,13 +855,22 @@ fn append_mono_f32_as_i16(
     } else {
         0.0
     };
-    update_meter_level(level_output, rms);
+    update_meter_level(
+        level_output,
+        effective_meter_rms(rms, mute_flag.load(Ordering::Relaxed)),
+    );
     if let Ok(mut writer) = sink.lock() {
         let _ = writer.write_all(&bytes);
     }
 }
 
-fn append_mono_i16(data: &[i16], channels: usize, sink: &I16Sink, level_output: &Arc<AtomicU32>) {
+fn append_mono_i16(
+    data: &[i16],
+    channels: usize,
+    sink: &I16Sink,
+    level_output: &Arc<AtomicU32>,
+    mute_flag: &Arc<AtomicBool>,
+) {
     if channels == 0 {
         return;
     }
@@ -810,7 +882,9 @@ fn append_mono_i16(data: &[i16], channels: usize, sink: &I16Sink, level_output: 
             let v = *first as f32 / i16::MAX as f32;
             sum_sq += v * v;
             samples += 1;
-            bytes.extend_from_slice(&first.to_le_bytes());
+            let muted = mute_flag.load(Ordering::Relaxed);
+            let s = sample_to_i16(v, muted);
+            bytes.extend_from_slice(&s.to_le_bytes());
         }
     }
     let rms = if samples > 0 {
@@ -818,7 +892,10 @@ fn append_mono_i16(data: &[i16], channels: usize, sink: &I16Sink, level_output: 
     } else {
         0.0
     };
-    update_meter_level(level_output, rms);
+    update_meter_level(
+        level_output,
+        effective_meter_rms(rms, mute_flag.load(Ordering::Relaxed)),
+    );
     if let Ok(mut writer) = sink.lock() {
         let _ = writer.write_all(&bytes);
     }
@@ -829,6 +906,7 @@ fn append_mono_u16_as_i16(
     channels: usize,
     sink: &I16Sink,
     level_output: &Arc<AtomicU32>,
+    mute_flag: &Arc<AtomicBool>,
 ) {
     if channels == 0 {
         return;
@@ -841,7 +919,8 @@ fn append_mono_u16_as_i16(
             let f = (*first as f32 / u16::MAX as f32) * 2.0 - 1.0;
             sum_sq += f * f;
             samples += 1;
-            let s = (f.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+            let muted = mute_flag.load(Ordering::Relaxed);
+            let s = sample_to_i16(f, muted);
             bytes.extend_from_slice(&s.to_le_bytes());
         }
     }
@@ -850,7 +929,10 @@ fn append_mono_u16_as_i16(
     } else {
         0.0
     };
-    update_meter_level(level_output, rms);
+    update_meter_level(
+        level_output,
+        effective_meter_rms(rms, mute_flag.load(Ordering::Relaxed)),
+    );
     if let Ok(mut writer) = sink.lock() {
         let _ = writer.write_all(&bytes);
     }
@@ -1059,6 +1141,18 @@ mod tests {
     }
 
     #[test]
+    fn muted_mono_sample_writes_silence() {
+        assert_eq!(sample_to_i16(0.75, true), 0);
+        assert_ne!(sample_to_i16(0.75, false), 0);
+    }
+
+    #[test]
+    fn muted_meter_level_is_forced_to_zero() {
+        assert_eq!(effective_meter_rms(0.42, true), 0.0);
+        assert_eq!(effective_meter_rms(0.42, false), 0.42);
+    }
+
+    #[test]
     fn shared_recording_control_tracks_and_resets_channel_mutes() {
         let control = SharedRecordingControl::new();
         assert_eq!(control.snapshot(), RecordingMuteState::default());
@@ -1083,7 +1177,7 @@ mod tests {
             "native system capture failed".to_string()
         )));
 
-        let result = ContinuousCapture::start(None, None, levels);
+        let result = ContinuousCapture::start(None, None, levels, SharedRecordingControl::new());
         set_test_macos_system_audio_start_capture_result(None);
 
         assert!(matches!(
