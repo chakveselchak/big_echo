@@ -515,6 +515,82 @@ describe("useRecordingController", () => {
     expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
   });
 
+  it("ignores a late mute response after stop", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+    const muteCalls: Array<{ channel: string; muted: boolean }> = [];
+    let resolveMuteResponse: ((value: { micMuted: boolean; systemMuted: boolean } | null) => void) | undefined;
+    const muteResponse = new Promise<{ micMuted: boolean; systemMuted: boolean } | null>((resolve) => {
+      resolveMuteResponse = resolve;
+    });
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "set_recording_input_muted") {
+        muteCalls.push(args as { channel: string; muted: boolean });
+        return muteResponse;
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return useRecordingController({
+        isSettingsWindow: false,
+        isTrayWindow: true,
+        topic,
+        setTopic,
+        participants,
+        setParticipants,
+        source,
+        setSource,
+        customTag,
+        setCustomTag,
+        session,
+        setSession,
+        lastSessionId,
+        setLastSessionId,
+        status,
+        setStatus,
+        loadSessions,
+      });
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await act(async () => {
+      await result.current.startFromTray();
+    });
+
+    let togglePromise: Promise<void> | undefined;
+    await act(async () => {
+      togglePromise = result.current.toggleInputMuted("system");
+    });
+
+    expect(muteCalls).toEqual([{ channel: "system", muted: true }]);
+    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: true });
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
+
+    await act(async () => {
+      resolveMuteResponse?.(null);
+      await togglePromise;
+    });
+
+    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
+  });
+
   it("treats muted or sub-threshold levels as inactive", () => {
     expect(shouldAnimateTrayAudio(0.02, false)).toBe(false);
     expect(shouldAnimateTrayAudio(0.12, false)).toBe(true);
