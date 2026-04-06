@@ -309,6 +309,93 @@ describe("App main window", () => {
     expect(refreshButton.textContent?.trim()).toBe("");
   });
 
+  it("imports audio from the sessions header and reloads imported session as native", async () => {
+    const user = userEvent.setup();
+    let listCalls = 0;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_provider: "nexara",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          salute_speech_scope: "SALUTE_SPEECH_CORP",
+          salute_speech_model: "general",
+          salute_speech_language: "ru-RU",
+          salute_speech_sample_rate: 48000,
+          salute_speech_channels_count: 1,
+          summary_url: "",
+          summary_prompt: "",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "list_sessions") {
+        listCalls += 1;
+        if (listCalls === 1) {
+          return [];
+        }
+        return [
+          {
+            session_id: "s-imported",
+            status: "recorded",
+            primary_tag: "other",
+            topic: "Voice memo",
+            display_date_ru: "06.04.2026",
+            started_at_iso: "2026-04-06T10:15:00+03:00",
+            session_dir: "/tmp/recordings/other/06.04.2026/meeting_10-15-00",
+            audio_file: "audio.m4a",
+            audio_format: "m4a",
+            audio_duration_hms: "00:01:42",
+            has_transcript_text: false,
+            has_summary_text: false,
+            meta: {
+              session_id: "s-imported",
+              source: "other",
+              custom_tag: "",
+              topic: "Voice memo",
+              participants: [],
+            },
+          },
+        ];
+      }
+      if (cmd === "import_audio_session") {
+        return {
+          session_id: "s-imported",
+          session_dir: "/tmp/recordings/other/06.04.2026/meeting_10-15-00",
+          status: "recorded",
+        };
+      }
+      return null;
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("list_sessions");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Загрузить аудио" }));
+
+    expect(invokeMock).toHaveBeenCalledWith("import_audio_session");
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Voice memo")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("other")).toBeInTheDocument();
+    });
+  });
+
   it("renders a search icon inside the session search input", async () => {
     const { container } = render(<App />);
 

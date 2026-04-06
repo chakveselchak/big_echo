@@ -19,9 +19,9 @@ use commands::recording::{
     start_recording, stop_active_recording, stop_recording,
 };
 use commands::sessions::{
-    delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state, list_sessions,
-    open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
-    set_ui_sync_state, update_session_details,
+    delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state,
+    import_audio_session, list_sessions, open_session_artifact, open_session_folder,
+    read_session_artifact, search_session_artifacts, set_ui_sync_state, update_session_details,
 };
 use commands::settings::{
     detect_system_source_device, get_macos_system_audio_permission_status, get_settings,
@@ -911,6 +911,7 @@ mod ipc_runtime_tests {
                 list_text_editor_apps,
                 list_sessions,
                 search_session_artifacts,
+                import_audio_session,
                 get_live_input_levels,
                 open_session_folder,
                 open_session_artifact,
@@ -1808,6 +1809,7 @@ fn main() {
             delete_session,
             list_sessions,
             search_session_artifacts,
+            import_audio_session,
             get_ui_sync_state,
             set_ui_sync_state,
             get_live_input_levels,

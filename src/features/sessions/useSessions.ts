@@ -5,6 +5,7 @@ import {
   SessionArtifactPreview,
   SessionListItem,
   SessionMetaView,
+  StartResponse,
 } from "../../appTypes";
 import { getErrorMessage } from "../../lib/appUtils";
 import { tauriInvoke } from "../../lib/tauri";
@@ -143,6 +144,18 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       setStatus(`error: ${message}`);
     } finally {
       setSummaryPendingBySession((prev) => ({ ...prev, [sessionId]: false }));
+    }
+  }
+
+  async function importAudioSession() {
+    try {
+      const imported = await tauriInvoke<StartResponse | null>("import_audio_session");
+      if (!imported) return;
+      setLastSessionId(imported.session_id);
+      setStatus("audio_imported");
+      await loadSessions();
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
     }
   }
 
@@ -350,6 +363,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     filteredSessions,
     getSummary,
     getText,
+    importAudioSession,
     loadSessions,
     openSessionFolder,
     openSessionArtifact,

@@ -1,18 +1,23 @@
 use crate::app_state::{
-    AppDirs, AppState, LiveInputLevelsView, SessionMetaView, UiSyncStateView,
+    AppDirs, AppState, LiveInputLevelsView, SessionMetaView, StartRecordingResponse,
+    UiSyncStateView,
     UpdateSessionDetailsRequest,
 };
-use crate::domain::session::SessionMeta;
+use crate::domain::session::{format_ru_date, SessionArtifacts, SessionMeta, SessionStatus};
+use crate::storage::fs_layout::{build_session_relative_dir, summary_name, transcript_name};
 use crate::storage::session_store::{load_meta, save_meta};
 use crate::storage::sqlite_repo::{
     add_event, delete_session as repo_delete_session, get_meta_path, get_session_dir,
     list_sessions as repo_list_sessions, upsert_session, SessionListItem,
 };
-use crate::{get_settings_from_dirs, set_tray_indicator_from_state};
+use crate::{get_settings_from_dirs, root_recordings_dir, set_tray_indicator_from_state};
+use chrono::{Duration, Local};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use uuid::Uuid;
 
 fn open_path_in_file_manager(path: &Path, preferred_app: Option<&str>) -> Result<(), String> {
     let target = path
@@ -95,6 +100,265 @@ fn remove_session_catalog(path: &Path) -> Result<(), String> {
     } else {
         fs::remove_file(path).map_err(|e| e.to_string())
     }
+}
+
+fn supported_audio_extension(path: &Path) -> Result<String, String> {
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Unsupported audio file".to_string())?;
+    match ext.as_str() {
+        "opus" | "mp3" | "m4a" | "ogg" | "wav" => Ok(ext),
+        _ => Err("Unsupported audio file".to_string()),
+    }
+}
+
+fn imported_topic_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Imported audio")
+        .to_string()
+}
+
+fn unique_session_dir(root_dir: &Path, primary_tag: &str) -> PathBuf {
+    let now = Local::now();
+    let relative = build_session_relative_dir(primary_tag, now);
+    let candidate = root_dir.join(&relative);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let parent = candidate
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| root_dir.to_path_buf());
+    let stem = candidate
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("meeting");
+    for suffix in 2.. {
+        let next = parent.join(format!("{stem}_{suffix}"));
+        if !next.exists() {
+            return next;
+        }
+    }
+    unreachable!()
+}
+
+fn probe_audio_duration_seconds(path: &Path) -> Option<i64> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let seconds = stdout.trim().parse::<f64>().ok()?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    Some(seconds.round() as i64)
+}
+
+fn import_audio_session_from_path(
+    dirs: &AppDirs,
+    selected_audio: &Path,
+) -> Result<StartRecordingResponse, String> {
+    if !selected_audio.exists() || !selected_audio.is_file() {
+        return Err("Selected audio file was not found".to_string());
+    }
+
+    let audio_extension = supported_audio_extension(selected_audio)?;
+    let settings = get_settings_from_dirs(dirs)?;
+    let recordings_root = root_recordings_dir(&dirs.app_data_dir, &settings)?;
+    let now = Local::now();
+    let session_id = Uuid::new_v4().to_string();
+    let session_dir = unique_session_dir(&recordings_root, "other");
+    let topic = imported_topic_from_path(selected_audio);
+    let duration_seconds = probe_audio_duration_seconds(selected_audio).unwrap_or(0);
+
+    fs::create_dir_all(&session_dir).map_err(|e| e.to_string())?;
+
+    let mut meta = SessionMeta::new(
+        session_id.clone(),
+        vec!["other".to_string()],
+        topic,
+        vec![],
+    );
+    meta.status = SessionStatus::Recorded;
+    meta.created_at_iso = now.to_rfc3339();
+    meta.started_at_iso = now.to_rfc3339();
+    meta.ended_at_iso = Some((now + Duration::seconds(duration_seconds)).to_rfc3339());
+    meta.display_date_ru = format_ru_date(now);
+    meta.artifacts = SessionArtifacts {
+        audio_file: format!("audio.{audio_extension}"),
+        transcript_file: transcript_name(now),
+        summary_file: summary_name(now),
+        meta_file: "meta.json".to_string(),
+    };
+
+    let audio_dst = session_dir.join(&meta.artifacts.audio_file);
+    fs::copy(selected_audio, &audio_dst).map_err(|e| e.to_string())?;
+
+    let meta_path = session_dir.join(&meta.artifacts.meta_file);
+    save_meta(&meta_path, &meta)?;
+    fs::write(session_dir.join(&meta.artifacts.transcript_file), "").map_err(|e| e.to_string())?;
+    fs::write(session_dir.join(&meta.artifacts.summary_file), "").map_err(|e| e.to_string())?;
+    upsert_session(&dirs.app_data_dir, &meta, &session_dir, &meta_path)?;
+    add_event(
+        &dirs.app_data_dir,
+        &meta.session_id,
+        "audio_imported",
+        "Imported external audio into native session",
+    )?;
+
+    Ok(StartRecordingResponse {
+        session_id,
+        session_dir: session_dir.to_string_lossy().to_string(),
+        status: "recorded".to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn import_audio_session(
+    dirs: tauri::State<AppDirs>,
+) -> Result<Option<StartRecordingResponse>, String> {
+    let Some(selected_audio) = pick_audio_file_with_system_dialog()? else {
+        return Ok(None);
+    };
+    import_audio_session_from_path(dirs.inner(), &selected_audio).map(Some)
+}
+
+#[cfg(target_os = "macos")]
+fn pick_audio_file_with_system_dialog() -> Result<Option<PathBuf>, String> {
+    let script = r#"
+try
+  set chosenFile to POSIX path of (choose file with prompt "Choose audio file")
+  return chosenFile
+on error number -128
+  return ""
+end try
+"#;
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Failed to choose audio file".to_string()
+        } else {
+            stderr
+        });
+    }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if selected.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(PathBuf::from(selected)))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn pick_audio_file_with_system_dialog() -> Result<Option<PathBuf>, String> {
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = 'Choose audio file'
+$dialog.Filter = 'Audio Files|*.opus;*.mp3;*.m4a;*.ogg;*.wav'
+$dialog.Multiselect = $false
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($dialog.FileName)
+}
+"#;
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Failed to choose audio file".to_string()
+        } else {
+            stderr
+        });
+    }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if selected.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(PathBuf::from(selected)))
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn pick_audio_file_with_system_dialog() -> Result<Option<PathBuf>, String> {
+    if command_exists("zenity") {
+        let output = Command::new("zenity")
+            .args([
+                "--file-selection",
+                "--title=Choose audio file",
+                "--file-filter=Audio files | *.opus *.mp3 *.m4a *.ogg *.wav",
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if output.status.success() {
+            let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return if selected.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(PathBuf::from(selected)))
+            };
+        }
+        return Ok(None);
+    }
+
+    if command_exists("kdialog") {
+        let output = Command::new("kdialog")
+            .args([
+                "--getopenfilename",
+                ".",
+                "*.opus *.mp3 *.m4a *.ogg *.wav|Audio files",
+                "--title",
+                "Choose audio file",
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if output.status.success() {
+            let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return if selected.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(PathBuf::from(selected)))
+            };
+        }
+        return Ok(None);
+    }
+
+    Err("Audio file picker is not available on this platform".to_string())
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn command_exists(program: &str) -> bool {
+    Command::new("which")
+        .arg(program)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -385,7 +649,10 @@ pub fn update_session_details(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::session::SessionArtifacts;
+    use crate::domain::session::{SessionArtifacts, SessionStatus};
+    use crate::settings::public_settings::{save_settings, PublicSettings};
+    use crate::storage::sqlite_repo::list_sessions as repo_list_sessions;
+    use chrono::Local;
     use tempfile::tempdir;
 
     fn sample_meta() -> SessionMeta {
@@ -463,5 +730,66 @@ mod tests {
                 summary_match: false
             }
         );
+    }
+
+    #[test]
+    fn import_selected_audio_creates_native_session() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        fs::create_dir_all(&app_data_dir).expect("create app-data");
+        let recording_root = tmp.path().join("recordings");
+        let settings = PublicSettings {
+            recording_root: recording_root.to_string_lossy().to_string(),
+            artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
+            transcription_url: String::new(),
+            transcription_task: "transcribe".to_string(),
+            transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
+            summary_url: String::new(),
+            summary_prompt: String::new(),
+            openai_model: "gpt-4.1-mini".to_string(),
+            audio_format: "opus".to_string(),
+            opus_bitrate_kbps: 24,
+            mic_device_name: String::new(),
+            system_device_name: String::new(),
+            artifact_opener_app: String::new(),
+            auto_run_pipeline_on_stop: false,
+            api_call_logging_enabled: false,
+        };
+        save_settings(&app_data_dir, &settings).expect("save settings");
+
+        let selected_audio = tmp.path().join("dictaphone-note.wav");
+        fs::write(&selected_audio, b"RIFFfake").expect("write audio fixture");
+
+        let dirs = AppDirs {
+            app_data_dir: app_data_dir.clone(),
+        };
+        let response = import_audio_session_from_path(&dirs, &selected_audio).expect("import audio");
+        let session_dir = PathBuf::from(&response.session_dir);
+
+        assert_eq!(response.status, "recorded");
+        assert!(session_dir.starts_with(recording_root.join("other")));
+        assert!(session_dir.to_string_lossy().contains(&Local::now().format("%d.%m.%Y").to_string()));
+        assert!(session_dir.join("audio.wav").exists());
+        assert!(session_dir.join("meta.json").exists());
+        assert!(session_dir.join("transcript_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".txt").exists());
+        assert!(session_dir.join("summary_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".md").exists());
+
+        let meta = load_meta(&session_dir.join("meta.json")).expect("load meta");
+        assert_eq!(meta.primary_tag, "other");
+        assert_eq!(meta.tags, vec!["other".to_string()]);
+        assert_eq!(meta.status, SessionStatus::Recorded);
+        assert_eq!(meta.artifacts.audio_file, "audio.wav");
+
+        let listed = repo_list_sessions(&app_data_dir).expect("list sessions");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].primary_tag, "other");
+        assert_eq!(listed[0].audio_format, "wav");
+        assert_eq!(listed[0].meta.as_ref().map(|meta| meta.source.as_str()), Some("other"));
     }
 }

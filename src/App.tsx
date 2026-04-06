@@ -300,6 +300,7 @@ export function App() {
     filteredSessions,
     getSummary,
     getText,
+    importAudioSession,
     loadSessions,
     openSessionArtifact,
     pipelineStateBySession,
@@ -1242,31 +1243,40 @@ export function App() {
               <label className="field session-search-label" htmlFor="session-search-input">
                 Search sessions
               </label>
-              <button
-                type="button"
-                className="refresh-icon-button"
-                aria-label="Refresh sessions"
-                title="Refresh sessions"
-                onClick={() => void loadSessions()}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M20 12a8 8 0 1 1-2.34-5.66"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M20 4v5h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+              <div className="session-toolbar-actions">
+                <button
+                  type="button"
+                  className="secondary-button session-import-button"
+                  onClick={() => void importAudioSession()}
+                >
+                  Загрузить аудио
+                </button>
+                <button
+                  type="button"
+                  className="refresh-icon-button"
+                  aria-label="Refresh sessions"
+                  title="Refresh sessions"
+                  onClick={() => void loadSessions()}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M20 12a8 8 0 1 1-2.34-5.66"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M20 4v5h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
             <div className="session-toolbar-search">
               <input

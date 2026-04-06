@@ -445,10 +445,22 @@ select {
   gap: 10px;
 }
 
-.session-search-label {
+.session-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.session-toolbar-actions .session-import-button {
+  padding: 5px 12px;
+}
+
+.field.session-search-label {
   gap: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -1452,6 +1464,10 @@ select {
   .session-toolbar-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .session-toolbar-actions {
+    justify-content: flex-start;
   }
 
   .session-card-header {
