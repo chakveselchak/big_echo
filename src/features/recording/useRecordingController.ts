@@ -153,20 +153,32 @@ export function useRecordingController({
 
   async function toggleInputMuted(channel: RecordingInputChannel) {
     if (status !== "recording") return;
+    const sessionId = sessionRef.current?.session_id;
+    if (!sessionId) return;
     const requestToken = ++muteMutationTokenRef.current;
-    const currentMuteState = muteStateRef.current;
-    const muted = channel === "mic" ? !currentMuteState.micMuted : !currentMuteState.systemMuted;
-    const optimisticState = nextRecordingMuteState(currentMuteState, channel, muted);
+    const previousMuteState = muteStateRef.current;
+    const muted = channel === "mic" ? !previousMuteState.micMuted : !previousMuteState.systemMuted;
+    const optimisticState = nextRecordingMuteState(previousMuteState, channel, muted);
     muteStateRef.current = optimisticState;
     setMuteState(optimisticState);
-    const next = await tauriInvoke<RecordingMuteState>("set_recording_input_muted", {
-      channel,
-      muted,
-    });
-    if (requestToken !== muteMutationTokenRef.current) return;
-    const resolvedState = next ?? optimisticState;
-    muteStateRef.current = resolvedState;
-    setMuteState(resolvedState);
+    try {
+      const next = await tauriInvoke<RecordingMuteState>("set_recording_input_muted", {
+        sessionId,
+        channel,
+        muted,
+      });
+      if (requestToken !== muteMutationTokenRef.current) return;
+      if (sessionRef.current?.session_id !== sessionId) return;
+      const resolvedState = next ?? optimisticState;
+      muteStateRef.current = resolvedState;
+      setMuteState(resolvedState);
+    } catch (error) {
+      if (requestToken !== muteMutationTokenRef.current) return;
+      if (sessionRef.current?.session_id !== sessionId) return;
+      muteStateRef.current = previousMuteState;
+      setMuteState(previousMuteState);
+      throw error;
+    }
   }
 
   useEffect(() => {

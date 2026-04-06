@@ -60,6 +60,7 @@ fn apply_recording_input_mute(
 
 fn apply_recording_input_mute_for_state(
     state: &AppState,
+    session_id: &str,
     channel: &str,
     muted: bool,
 ) -> Result<crate::audio::capture::RecordingMuteState, String> {
@@ -67,20 +68,24 @@ fn apply_recording_input_mute_for_state(
         .active_session
         .lock()
         .map_err(|_| "state lock poisoned".to_string())?;
-    if guard.is_none() {
-        return Err("No active recording session".to_string());
+    let active_session = guard
+        .as_ref()
+        .ok_or_else(|| "No active recording session".to_string())?;
+    if active_session.session_id != session_id {
+        return Err("Recording session mismatch".to_string());
     }
-    drop(guard);
-    apply_recording_input_mute(&state.recording_control, channel, muted)
+    state.recording_control.set_channel(channel, muted)?;
+    Ok(state.recording_control.snapshot())
 }
 
 #[tauri::command]
 pub fn set_recording_input_muted(
     state: tauri::State<AppState>,
+    session_id: String,
     channel: String,
     muted: bool,
 ) -> Result<crate::audio::capture::RecordingMuteState, String> {
-    apply_recording_input_mute_for_state(state.inner(), channel.trim(), muted)
+    apply_recording_input_mute_for_state(state.inner(), session_id.trim(), channel.trim(), muted)
 }
 
 fn start_recording_impl(
@@ -364,9 +369,32 @@ mod tests {
     fn apply_recording_input_mute_rejects_when_no_recording_is_active() {
         let state = AppState::default();
 
-        let error = apply_recording_input_mute_for_state(&state, "mic", true).unwrap_err();
+        let error =
+            apply_recording_input_mute_for_state(&state, "missing-session", "mic", true)
+                .unwrap_err();
 
         assert_eq!(error, "No active recording session");
+        assert_eq!(
+            state.recording_control.snapshot(),
+            crate::audio::capture::RecordingMuteState::default()
+        );
+    }
+
+    #[test]
+    fn apply_recording_input_mute_rejects_session_mismatch() {
+        let state = AppState::default();
+        *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
+            "active-session".to_string(),
+            vec!["zoom".to_string()],
+            String::new(),
+            vec![],
+        ));
+
+        let error =
+            apply_recording_input_mute_for_state(&state, "stale-session", "mic", true)
+                .unwrap_err();
+
+        assert_eq!(error, "Recording session mismatch");
         assert_eq!(
             state.recording_control.snapshot(),
             crate::audio::capture::RecordingMuteState::default()

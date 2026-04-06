@@ -324,7 +324,7 @@ describe("useRecordingController", () => {
     expect(loadSessions).not.toHaveBeenCalled();
   });
 
-  it("toggles recording input mute and resets it after stop", async () => {
+  it("toggles recording input mute with the active session id and resets it after stop", async () => {
     const loadSessions = vi.fn(async () => undefined);
 
     const { result } = renderHook(() => {
@@ -376,6 +376,7 @@ describe("useRecordingController", () => {
     });
 
     expect(invokeMock).toHaveBeenCalledWith("set_recording_input_muted", {
+      sessionId: "s1",
       channel: "mic",
       muted: true,
     });
@@ -453,7 +454,7 @@ describe("useRecordingController", () => {
 
   it("uses the system mute branch and falls back to the optimistic state on null responses", async () => {
     const loadSessions = vi.fn(async () => undefined);
-    const muteCalls: Array<{ channel: string; muted: boolean }> = [];
+    const muteCalls: Array<{ sessionId: string; channel: string; muted: boolean }> = [];
 
     invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "set_recording_input_muted") {
@@ -473,25 +474,28 @@ describe("useRecordingController", () => {
       const [lastSessionId, setLastSessionId] = useState<string | null>(null);
       const [status, setStatus] = useState("idle");
 
-      return useRecordingController({
-        isSettingsWindow: false,
-        isTrayWindow: true,
-        topic,
-        setTopic,
-        participants,
-        setParticipants,
-        source,
-        setSource,
-        customTag,
-        setCustomTag,
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
         session,
-        setSession,
-        lastSessionId,
-        setLastSessionId,
-        status,
-        setStatus,
-        loadSessions,
-      });
+      };
     });
 
     await waitFor(() => {
@@ -499,28 +503,28 @@ describe("useRecordingController", () => {
     });
 
     await act(async () => {
-      await result.current.startFromTray();
+      await result.current.controller.startFromTray();
     });
 
     await act(async () => {
-      const firstToggle = result.current.toggleInputMuted("system");
-      const secondToggle = result.current.toggleInputMuted("system");
+      const firstToggle = result.current.controller.toggleInputMuted("system");
+      const secondToggle = result.current.controller.toggleInputMuted("system");
       await Promise.all([firstToggle, secondToggle]);
     });
 
     expect(muteCalls).toEqual([
-      { channel: "system", muted: true },
-      { channel: "system", muted: false },
+      { sessionId: "s1", channel: "system", muted: true },
+      { sessionId: "s1", channel: "system", muted: false },
     ]);
-    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
   });
 
-  it("ignores a late mute response after stop", async () => {
+  it("ignores a late mute rejection after the recording session changes", async () => {
     const loadSessions = vi.fn(async () => undefined);
-    const muteCalls: Array<{ channel: string; muted: boolean }> = [];
-    let resolveMuteResponse: ((value: { micMuted: boolean; systemMuted: boolean } | null) => void) | undefined;
-    const muteResponse = new Promise<{ micMuted: boolean; systemMuted: boolean } | null>((resolve) => {
-      resolveMuteResponse = resolve;
+    const muteCalls: Array<{ sessionId: string; channel: string; muted: boolean }> = [];
+    let rejectMuteResponse: ((reason?: unknown) => void) | undefined;
+    const muteResponse = new Promise<{ micMuted: boolean; systemMuted: boolean } | null>((_, reject) => {
+      rejectMuteResponse = reject;
     });
 
     invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
@@ -540,25 +544,28 @@ describe("useRecordingController", () => {
       const [lastSessionId, setLastSessionId] = useState<string | null>(null);
       const [status, setStatus] = useState("idle");
 
-      return useRecordingController({
-        isSettingsWindow: false,
-        isTrayWindow: true,
-        topic,
-        setTopic,
-        participants,
-        setParticipants,
-        source,
-        setSource,
-        customTag,
-        setCustomTag,
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
         session,
-        setSession,
-        lastSessionId,
-        setLastSessionId,
-        status,
-        setStatus,
-        loadSessions,
-      });
+      };
     });
 
     await waitFor(() => {
@@ -566,29 +573,34 @@ describe("useRecordingController", () => {
     });
 
     await act(async () => {
-      await result.current.startFromTray();
+      await result.current.controller.startFromTray();
     });
 
     let togglePromise: Promise<void> | undefined;
     await act(async () => {
-      togglePromise = result.current.toggleInputMuted("system");
+      togglePromise = result.current.controller.toggleInputMuted("system");
     });
 
-    expect(muteCalls).toEqual([{ channel: "system", muted: true }]);
-    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: true });
+    expect(muteCalls).toEqual([{ sessionId: "s1", channel: "system", muted: true }]);
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: true });
+
+    const uiRecordingHandler = listeners.get("ui:recording");
+    expect(uiRecordingHandler).toBeDefined();
 
     await act(async () => {
-      await result.current.stop();
+      await uiRecordingHandler?.({ payload: { recording: true, sessionId: "s2" } });
     });
 
-    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
+    expect(result.current.session?.session_id).toBe("s2");
 
     await act(async () => {
-      resolveMuteResponse?.(null);
+      rejectMuteResponse?.(new Error("Recording session mismatch"));
       await togglePromise;
     });
 
-    expect(result.current.muteState).toEqual({ micMuted: false, systemMuted: false });
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
+    expect(result.current.session?.session_id).toBe("s2");
   });
 
   it("treats muted or sub-threshold levels as inactive", () => {
