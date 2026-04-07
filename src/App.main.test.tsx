@@ -296,6 +296,51 @@ describe("App main window", () => {
     expect(screen.queryByText("(zoom) - 11.03.2026")).not.toBeInTheDocument();
   });
 
+  it("opens the session folder from a session card action", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-folder",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Folder demo",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T10:00:00+03:00",
+            session_dir: "/tmp/s-folder",
+            audio_duration_hms: "00:00:10",
+            has_transcript_text: false,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-folder",
+          source: "zoom",
+          custom_tag: "",
+          topic: "Folder demo",
+          participants: [],
+        };
+      }
+      if (cmd === "open_session_folder") {
+        return "opened";
+      }
+      return null;
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Folder demo")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("открыть")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "Открыть папку сессии" }));
+
+    expect(invokeMock).toHaveBeenCalledWith("open_session_folder", { sessionDir: "/tmp/s-folder" });
+  });
+
   it("renders refresh sessions as an icon button in the sessions header", async () => {
     render(<App />);
 
@@ -772,7 +817,7 @@ describe("App main window", () => {
     expect(searchInput).toHaveFocus();
   });
 
-  it("does not render session path row content in session cards", async () => {
+  it("keeps session path hidden while showing a folder action in session cards", async () => {
     invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "get_ui_sync_state") {
         return { source: "slack", topic: "", is_recording: false, active_session_id: null };
@@ -831,7 +876,8 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(screen.queryByText("/tmp/s6")).not.toBeInTheDocument();
       expect(screen.queryByText("Path")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "открыть" })).not.toBeInTheDocument();
+      expect(screen.queryByText("открыть")).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Открыть папку сессии" })).toBeInTheDocument();
     });
   });
 

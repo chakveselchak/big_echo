@@ -1,6 +1,6 @@
 [package]
 name = "bigecho"
-version = "1.4.1"
+version = "1.4.3"
 edition = "2021"
 
 [build-dependencies]
