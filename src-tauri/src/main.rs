@@ -16,7 +16,7 @@ use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
-    start_recording, stop_active_recording, stop_recording,
+    set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
 };
 use commands::sessions::{
     delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state,
@@ -208,6 +208,10 @@ fn should_hide_tray_popover_on_focus_lost(platform: &str, focused: bool) -> bool
     platform == "macos" && !focused
 }
 
+fn should_hide_tray_popover_on_toggle_request(visible: bool, focused: bool) -> bool {
+    visible && focused
+}
+
 fn should_probe_idle_levels(recording_active: bool, tray_visible: bool) -> bool {
     !recording_active && tray_visible
 }
@@ -230,7 +234,9 @@ fn toggle_tray_window_visibility(
     anchor: Option<PhysicalPosition<f64>>,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("tray") {
-        if window.is_visible().map_err(|e| e.to_string())? {
+        let is_visible = window.is_visible().map_err(|e| e.to_string())?;
+        let is_focused = window.is_focused().map_err(|e| e.to_string())?;
+        if should_hide_tray_popover_on_toggle_request(is_visible, is_focused) {
             window.hide().map_err(|e| e.to_string())?;
         } else {
             if let Some(anchor) = anchor {
@@ -577,6 +583,7 @@ pub(crate) fn stop_active_recording_internal(
         finalize_error = Some(format!("Audio encoding failed: {err}"));
     }
     state.live_levels.reset();
+    state.recording_control.reset();
 
     if let Some(app) = app {
         let _ = set_tray_indicator(app, false);
@@ -804,6 +811,13 @@ mod ipc_runtime_tests {
     }
 
     #[test]
+    fn tray_toggle_hides_only_when_popover_is_visible_and_focused() {
+        assert!(should_hide_tray_popover_on_toggle_request(true, true));
+        assert!(!should_hide_tray_popover_on_toggle_request(true, false));
+        assert!(!should_hide_tray_popover_on_toggle_request(false, false));
+    }
+
+    #[test]
     fn idle_levels_probe_requires_visible_tray_window() {
         assert!(should_probe_idle_levels(false, true));
         assert!(!should_probe_idle_levels(false, false));
@@ -922,6 +936,7 @@ mod ipc_runtime_tests {
                 start_recording,
                 stop_recording,
                 stop_active_recording,
+                set_recording_input_muted,
                 run_pipeline,
                 retry_pipeline,
                 run_transcription,
@@ -1820,6 +1835,7 @@ fn main() {
             start_recording,
             stop_recording,
             stop_active_recording,
+            set_recording_input_muted,
             run_pipeline,
             retry_pipeline,
             run_transcription,

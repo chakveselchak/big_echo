@@ -1,7 +1,14 @@
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
-import { LiveInputLevels, StartResponse, UiSyncStateView } from "../../appTypes";
+import {
+  LiveInputLevels,
+  RecordingInputChannel,
+  RecordingMuteState,
+  StartResponse,
+  UiSyncStateView,
+} from "../../appTypes";
 import { clamp01, parseEventPayload, splitParticipants } from "../../lib/appUtils";
 import { tauriEmit, tauriInvoke, tauriListen } from "../../lib/tauri";
+import { defaultRecordingMuteState, nextRecordingMuteState } from "./trayAudio";
 
 const UI_SYNC_DEBOUNCE_MS = 150;
 const TRAY_LEVELS_IDLE_POLL_MS = 280;
@@ -54,7 +61,10 @@ export function useRecordingController({
   loadSessions,
 }: UseRecordingControllerOptions) {
   const [liveLevels, setLiveLevels] = useState<LiveInputLevels>({ mic: 0, system: 0 });
+  const [muteState, setMuteState] = useState<RecordingMuteState>(defaultRecordingMuteState);
   const [uiSyncReady, setUiSyncReady] = useState(isSettingsWindow);
+  const muteStateRef = useRef<RecordingMuteState>(defaultRecordingMuteState);
+  const muteMutationTokenRef = useRef(0);
   const topicRef = useRef(topic);
   const sourceRef = useRef(source);
   const sessionRef = useRef<StartResponse | null>(session);
@@ -69,6 +79,39 @@ export function useRecordingController({
     sessionRef.current = session;
   }, [session, source, topic]);
 
+  useEffect(() => {
+    muteStateRef.current = muteState;
+  }, [muteState]);
+
+  function resetMuteState() {
+    muteMutationTokenRef.current += 1;
+    muteStateRef.current = defaultRecordingMuteState;
+    setMuteState(defaultRecordingMuteState);
+  }
+
+  function applyMuteState(nextMuteState: RecordingMuteState) {
+    muteMutationTokenRef.current += 1;
+    muteStateRef.current = nextMuteState;
+    setMuteState(nextMuteState);
+  }
+
+  function setRecordingSession(sessionId: string) {
+    if (sessionRef.current?.session_id === sessionId) {
+      setLastSessionId(sessionId);
+      return;
+    }
+
+    const nextSession = {
+      session_id: sessionId,
+      session_dir: "",
+      status: "recording",
+    };
+    resetMuteState();
+    sessionRef.current = nextSession;
+    setSession(nextSession);
+    setLastSessionId(sessionId);
+  }
+
   async function startRecording(payload: { source: string; customTag?: string; topic?: string; participants?: string[] }) {
     const tags = [payload.source];
     if (payload.customTag && payload.customTag.trim()) tags.push(payload.customTag.trim());
@@ -79,8 +122,7 @@ export function useRecordingController({
         participants: payload.participants ?? [],
       },
     });
-    setSession(response);
-    setLastSessionId(response.session_id);
+    setRecordingSession(response.session_id);
     setStatus("recording");
     await loadSessions();
   }
@@ -109,6 +151,7 @@ export function useRecordingController({
   async function stop() {
     if (!session) return;
     await tauriInvoke<string>("stop_recording", { sessionId: session.session_id });
+    resetMuteState();
     setStatus("recorded");
     setSession(null);
     await loadSessions();
@@ -119,6 +162,36 @@ export function useRecordingController({
     await tauriInvoke<string>("run_pipeline", { sessionId: lastSessionId });
     setStatus("done");
     await loadSessions();
+  }
+
+  async function toggleInputMuted(channel: RecordingInputChannel) {
+    if (status !== "recording") return;
+    const sessionId = sessionRef.current?.session_id;
+    if (!sessionId) return;
+    const requestToken = ++muteMutationTokenRef.current;
+    const previousMuteState = muteStateRef.current;
+    const muted = channel === "mic" ? !previousMuteState.micMuted : !previousMuteState.systemMuted;
+    const optimisticState = nextRecordingMuteState(previousMuteState, channel, muted);
+    muteStateRef.current = optimisticState;
+    setMuteState(optimisticState);
+    try {
+      const next = await tauriInvoke<RecordingMuteState>("set_recording_input_muted", {
+        sessionId,
+        channel,
+        muted,
+      });
+      if (requestToken !== muteMutationTokenRef.current) return;
+      if (sessionRef.current?.session_id !== sessionId) return;
+      const resolvedState = next ?? optimisticState;
+      muteStateRef.current = resolvedState;
+      setMuteState(resolvedState);
+    } catch (error) {
+      if (requestToken !== muteMutationTokenRef.current) return;
+      if (sessionRef.current?.session_id !== sessionId) return;
+      muteStateRef.current = previousMuteState;
+      setMuteState(previousMuteState);
+      throw error;
+    }
   }
 
   useEffect(() => {
@@ -170,15 +243,13 @@ export function useRecordingController({
         if (current.source?.trim()) setSource(syncedSource);
         setTopic(syncedTopic);
         if (current.is_recording) {
-          setStatus("recording");
           if (current.active_session_id) {
-            setSession({
-              session_id: current.active_session_id,
-              session_dir: "",
-              status: "recording",
-            });
-            setLastSessionId(current.active_session_id);
+            setRecordingSession(current.active_session_id);
+            applyMuteState(current.mute_state ?? defaultRecordingMuteState);
+          } else {
+            resetMuteState();
           }
+          setStatus("recording");
         }
       })
       .catch(() => undefined)
@@ -214,6 +285,7 @@ export function useRecordingController({
       try {
         if (!sessionRef.current) return;
         await tauriInvoke<string>("stop_recording", { sessionId: sessionRef.current.session_id });
+        resetMuteState();
         setStatus("recorded");
         setSession(null);
         await loadSessions();
@@ -248,12 +320,12 @@ export function useRecordingController({
       const payload = parseEventPayload<{ recording?: boolean; sessionId?: string | null }>(event);
       if (!payload || typeof payload.recording !== "boolean") return;
       if (payload.recording) {
-        setStatus("recording");
         const sessionId = payload.sessionId;
         if (!sessionId) return;
-        setSession((prev) => prev ?? { session_id: sessionId, session_dir: "", status: "recording" });
-        setLastSessionId(sessionId);
+        setRecordingSession(sessionId);
+        setStatus("recording");
       } else {
+        resetMuteState();
         setSession(null);
         setStatus((prev) => (prev === "recording" ? "recorded" : prev));
       }
@@ -328,9 +400,11 @@ export function useRecordingController({
 
   return {
     liveLevels,
+    muteState,
     runPipeline,
     start,
     startFromTray,
+    toggleInputMuted,
     stop,
     uiSyncReady,
   };

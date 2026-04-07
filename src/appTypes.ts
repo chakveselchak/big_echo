@@ -32,6 +32,12 @@ export type StartResponse = {
   status: string;
 };
 
+export type RecordingInputChannel = "mic" | "system";
+export type RecordingMuteState = {
+  micMuted: boolean;
+  systemMuted: boolean;
+};
+
 export type SessionListItem = {
   session_id: string;
   status: string;
@@ -61,6 +67,7 @@ export type UiSyncStateView = {
   topic: string;
   is_recording: boolean;
   active_session_id: string | null;
+  mute_state: RecordingMuteState;
 };
 
 export type SecretSaveState = "unknown" | "updated" | "unchanged" | "error";

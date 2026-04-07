@@ -49,6 +49,10 @@ swift!(fn bigecho_open_system_audio_settings() -> Bool);
 swift!(fn bigecho_start_system_audio_capture(path: &SRString) -> Int64);
 #[cfg(target_os = "macos")]
 swift!(fn bigecho_stop_system_audio_capture(handle: Int64) -> Bool);
+#[cfg(target_os = "macos")]
+swift!(fn bigecho_get_system_audio_capture_level(handle: Int64) -> Int32);
+#[cfg(target_os = "macos")]
+swift!(fn bigecho_set_system_audio_capture_muted(handle: Int64, muted: Bool) -> Bool);
 
 pub fn permission_status() -> MacosSystemAudioPermissionStatus {
     #[cfg(target_os = "macos")]
@@ -104,6 +108,37 @@ pub fn start_capture(path: &Path) -> Result<NativeSystemAudioCapture, String> {
 }
 
 impl NativeSystemAudioCapture {
+    pub fn live_level(&self) -> f32 {
+        #[cfg(target_os = "macos")]
+        {
+            let raw = unsafe { bigecho_get_system_audio_capture_level(self.handle) };
+            ((raw as f32) / 1000.0).clamp(0.0, 1.0)
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = self;
+            0.0
+        }
+    }
+
+    pub fn set_muted(&self, muted: bool) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            if unsafe { bigecho_set_system_audio_capture_muted(self.handle, muted) } {
+                Ok(())
+            } else {
+                Err("Failed to update native macOS system audio mute state".to_string())
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (self, muted);
+            Ok(())
+        }
+    }
+
     #[allow(dead_code)]
     pub fn stop(self) -> Result<NativeSystemAudioArtifacts, String> {
         #[cfg(target_os = "macos")]
@@ -167,7 +202,10 @@ mod tests {
         assert!(!status.can_request);
 
         let status = map_permission_code(2);
-        assert!(matches!(status.kind, MacosSystemAudioPermissionKind::Denied));
+        assert!(matches!(
+            status.kind,
+            MacosSystemAudioPermissionKind::Denied
+        ));
         assert!(!status.can_request);
 
         let status = map_permission_code(99);

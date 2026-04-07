@@ -20,6 +20,7 @@ import {
   transcriptionProviderOptions,
   transcriptionTaskOptions,
 } from "./appTypes";
+import { TrayAudioRow } from "./features/recording/TrayAudioRow";
 import { useRecordingController } from "./features/recording/useRecordingController";
 import { useSessions } from "./features/sessions/useSessions";
 import { useSettingsForm } from "./features/settings/useSettingsForm";
@@ -235,6 +236,7 @@ export function App() {
   const [session, setSession] = useState<StartResponse | null>(null);
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
+  const [trayMuteError, setTrayMuteError] = useState<string | null>(null);
   const [isOpenerDropdownOpen, setIsOpenerDropdownOpen] = useState(false);
   const [openerActiveIndex, setOpenerActiveIndex] = useState(0);
   const appMainRef = useRef<HTMLElement | null>(null);
@@ -328,7 +330,7 @@ export function App() {
       ? "Try a different search or clear the query to see all sessions."
       : "No sessions matched the current filters."
     : "New recordings will appear here with search, transcript, summary, and audio actions.";
-  const { liveLevels, start, startFromTray, stop } = useRecordingController({
+  const { liveLevels, muteState, start, startFromTray, stop, toggleInputMuted } = useRecordingController({
     isSettingsWindow,
     isTrayWindow,
     topic,
@@ -1075,8 +1077,6 @@ export function App() {
   }
 
   if (isTrayWindow) {
-    const micPct = Math.round(liveLevels.mic * 100);
-    const systemPct = Math.round(liveLevels.system * 100);
     const isMacosSystemAudioUnsupported =
       macosSystemAudioPermissionLoadState === "ready" && macosSystemAudioPermission?.kind === "unsupported";
     const isMacosSystemAudioLoading = macosSystemAudioPermissionLoadState === "loading";
@@ -1087,6 +1087,22 @@ export function App() {
       macosSystemAudioPermission?.kind !== "unsupported";
     const showMacosSystemAudioSettingsShortcut =
       isMacosSystemAudioPermissionPendingReview || isMacosSystemAudioLookupFailed;
+    const handleToggleTrayInputMuted = async (channel: "mic" | "system") => {
+      setTrayMuteError(null);
+      try {
+        await toggleInputMuted(channel);
+      } catch (err) {
+        setTrayMuteError(`Mute update failed: ${getErrorMessage(err)}`);
+      }
+    };
+    const handleStartFromTray = async () => {
+      setTrayMuteError(null);
+      await startFromTray();
+    };
+    const handleStopFromTray = async () => {
+      setTrayMuteError(null);
+      await stop();
+    };
     return (
       <main className="tray-shell" ref={appMainRef}>
         <div className="tray-top-bar">
@@ -1097,6 +1113,11 @@ export function App() {
             </button>
           )}
         </div>
+        {trayMuteError && (
+          <p className="tray-inline-error" role="alert">
+            {trayMuteError}
+          </p>
+        )}
         <div className="tray-meta-grid">
           <label className="field tray-source-field">
             Source
@@ -1113,60 +1134,25 @@ export function App() {
             <input value={topic} onChange={(e) => setTopic(e.target.value)} />
           </label>
         </div>
-        <div className="tray-levels">
-          <div className="tray-level-row">
-            <span className="tray-level-name">Mic</span>
-            <div className="tray-level-track" aria-label="Mic level">
-              <div className="tray-level-fill" style={{ width: `${micPct}%` }} />
-            </div>
-            <label className="tray-level-device">
-              <span className="sr-only">Mic device</span>
-              <select
-                aria-label="Mic device"
-                value={settings?.mic_device_name ?? ""}
-                onChange={(e) => {
-                  void saveSettingsPatch({ mic_device_name: e.target.value }).catch((err) =>
-                    setStatus(`error: ${String(err)}`)
-                  );
-                }}
-                disabled={status === "recording"}
-              >
-                <option value="">Auto</option>
-                {audioDevices.map((dev) => (
-                  <option key={`mic-${dev}`} value={dev}>
-                    {dev}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {isMacosSystemAudioLoading ? (
-            <div className="tray-level-row">
-              <span className="tray-level-name">System</span>
-              <div className="tray-level-value tray-level-status">
-                Checking macOS system audio status
-              </div>
-            </div>
-          ) : isMacosSystemAudioLookupFailed ? (
-            <div className="tray-level-row">
-              <span className="tray-level-name">System</span>
-              <div className="tray-level-value tray-level-status">
-                Could not load macOS system audio status. Open System Settings to review the permission.
-              </div>
-            </div>
-          ) : isMacosSystemAudioUnsupported ? (
-            <div className="tray-level-row">
-              <span className="tray-level-name">System</span>
-              <div className="tray-level-track" aria-label="System level">
-                <div className="tray-level-fill" style={{ width: `${systemPct}%` }} />
-              </div>
-              <label className="tray-level-device">
-                <span className="sr-only">System device</span>
+        <div className="tray-audio-rows">
+          <TrayAudioRow
+            label="Mic"
+            animationLabel="Mic activity"
+            muteLabel="microphone"
+            icon="mic"
+            level={liveLevels.mic}
+            muted={muteState.micMuted}
+            disabled={status !== "recording"}
+            onToggleMuted={() => handleToggleTrayInputMuted("mic")}
+            inlineTrailing
+            trailing={
+              <label className="tray-audio-device">
+                <span className="sr-only">Mic device</span>
                 <select
-                  aria-label="System device"
-                  value={settings?.system_device_name ?? ""}
+                  aria-label="Mic device"
+                  value={settings?.mic_device_name ?? ""}
                   onChange={(e) => {
-                    void saveSettingsPatch({ system_device_name: e.target.value }).catch((err) =>
+                    void saveSettingsPatch({ mic_device_name: e.target.value }).catch((err) =>
                       setStatus(`error: ${String(err)}`)
                     );
                   }}
@@ -1174,23 +1160,74 @@ export function App() {
                 >
                   <option value="">Auto</option>
                   {audioDevices.map((dev) => (
-                    <option key={`sys-${dev}`} value={dev}>
+                    <option key={`mic-${dev}`} value={dev}>
                       {dev}
                     </option>
                   ))}
                 </select>
               </label>
-            </div>
-          ) : isMacosSystemAudioPermissionPendingReview ? (
-            null
-          ) : null}
+            }
+          />
+          <TrayAudioRow
+            label="System"
+            animationLabel="System activity"
+            muteLabel="system audio"
+            icon="system"
+            level={liveLevels.system}
+            muted={muteState.systemMuted}
+            disabled={
+              status !== "recording" ||
+              isMacosSystemAudioLoading ||
+              isMacosSystemAudioLookupFailed ||
+              isMacosSystemAudioPermissionPendingReview
+            }
+            onToggleMuted={() => handleToggleTrayInputMuted("system")}
+            statusText={
+              isMacosSystemAudioLoading
+                ? "Checking macOS system audio status"
+                : isMacosSystemAudioLookupFailed
+                  ? "Could not load macOS system audio status. Open System Settings to review the permission."
+                  : isMacosSystemAudioPermissionPendingReview
+                    ? "Grant Screen & System Audio Recording permission in System Settings."
+                    : null
+            }
+            inlineTrailing
+            trailing={
+              isMacosSystemAudioUnsupported ? (
+                <label className="tray-audio-device">
+                  <span className="sr-only">System device</span>
+                  <select
+                    aria-label="System device"
+                    value={settings?.system_device_name ?? ""}
+                    onChange={(e) => {
+                      void saveSettingsPatch({ system_device_name: e.target.value }).catch((err) =>
+                        setStatus(`error: ${String(err)}`)
+                      );
+                    }}
+                    disabled={status === "recording"}
+                  >
+                    <option value="">Auto</option>
+                    {audioDevices.map((dev) => (
+                      <option key={`sys-${dev}`} value={dev}>
+                        {dev}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null
+            }
+          />
         </div>
         <div className="button-row">
-          <button className="primary-button rec-button" onClick={startFromTray} disabled={status === "recording"}>
+          <button
+            className="primary-button rec-button"
+            onClick={() => void handleStartFromTray()}
+            disabled={status === "recording"}
+          >
             <span className="rec-dot" />
             Rec
           </button>
-          <button className="secondary-button" onClick={stop} disabled={status !== "recording"}>
+          <button className="secondary-button" onClick={() => void handleStopFromTray()} disabled={status !== "recording"}>
             <span className="stop-square" />
             Stop
           </button>

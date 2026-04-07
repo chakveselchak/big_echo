@@ -12,13 +12,13 @@ use crate::{
 };
 use chrono::{DateTime, Local};
 #[cfg(test)]
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
 use uuid::Uuid;
 
 #[cfg(test)]
-static TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS: OnceLock<
-    Mutex<Option<crate::commands::settings::MacosSystemAudioPermissionStatus>>,
-> = OnceLock::new();
+thread_local! {
+    static TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS: RefCell<Option<crate::commands::settings::MacosSystemAudioPermissionStatus>> = const { RefCell::new(None) };
+}
 
 #[tauri::command]
 pub fn set_api_secret(
@@ -49,6 +49,58 @@ pub fn start_recording(
     start_recording_impl(dirs.inner(), state.inner(), payload)
 }
 
+fn apply_recording_input_mute(
+    control: &crate::audio::capture::SharedRecordingControl,
+    channel: &str,
+    muted: bool,
+) -> Result<crate::audio::capture::RecordingMuteState, String> {
+    control.set_channel(channel, muted)?;
+    Ok(control.snapshot())
+}
+
+fn apply_capture_input_mute_for_state(
+    state: &AppState,
+    channel: &str,
+    muted: bool,
+) -> Result<(), String> {
+    if let Ok(capture_guard) = state.active_capture.lock() {
+        if let Some(capture) = capture_guard.as_ref() {
+            capture.set_channel_muted(channel.trim(), muted)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_recording_input_mute_for_state(
+    state: &AppState,
+    session_id: &str,
+    channel: &str,
+    muted: bool,
+) -> Result<crate::audio::capture::RecordingMuteState, String> {
+    let guard = state
+        .active_session
+        .lock()
+        .map_err(|_| "state lock poisoned".to_string())?;
+    let active_session = guard
+        .as_ref()
+        .ok_or_else(|| "No active recording session".to_string())?;
+    if active_session.session_id != session_id {
+        return Err("Recording session mismatch".to_string());
+    }
+    apply_capture_input_mute_for_state(state, channel, muted)?;
+    apply_recording_input_mute(&state.recording_control, channel, muted)
+}
+
+#[tauri::command]
+pub fn set_recording_input_muted(
+    state: tauri::State<AppState>,
+    session_id: String,
+    channel: String,
+    muted: bool,
+) -> Result<crate::audio::capture::RecordingMuteState, String> {
+    apply_recording_input_mute_for_state(state.inner(), session_id.trim(), channel.trim(), muted)
+}
+
 fn start_recording_impl(
     dirs: &AppDirs,
     state: &AppState,
@@ -64,6 +116,8 @@ fn start_recording_impl(
     if guard.is_some() {
         return Err("Recording already active".to_string());
     }
+
+    state.recording_control.reset();
 
     #[cfg(target_os = "macos")]
     {
@@ -119,6 +173,7 @@ fn start_recording_impl(
         mic_name,
         system_source,
         state.live_levels.clone(),
+        state.recording_control.clone(),
     )?;
 
     let persist_result = (|| -> Result<(), String> {
@@ -267,23 +322,16 @@ fn current_macos_system_audio_permission_status(
 #[cfg(test)]
 fn test_macos_system_audio_permission_status(
 ) -> Option<crate::commands::settings::MacosSystemAudioPermissionStatus> {
-    TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
+    TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS.with(|cell| cell.borrow().clone())
 }
 
 #[cfg(test)]
 fn set_test_macos_system_audio_permission_status(
     status: Option<crate::commands::settings::MacosSystemAudioPermissionStatus>,
 ) {
-    if let Ok(mut guard) = TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-    {
-        *guard = status;
-    }
+    TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS.with(|cell| {
+        *cell.borrow_mut() = status;
+    });
 }
 
 #[cfg(test)]
@@ -314,6 +362,75 @@ mod tests {
         assert!(
             ensure_macos_system_audio_permission(&status).is_ok(),
             "granted permission should pass"
+        );
+    }
+
+    #[test]
+    fn apply_recording_input_mute_rejects_unknown_channel() {
+        let control = crate::audio::capture::SharedRecordingControl::new();
+        let error = apply_recording_input_mute(&control, "other", true).unwrap_err();
+        assert_eq!(error, "Unsupported recording input channel");
+    }
+
+    #[test]
+    fn apply_recording_input_mute_rejects_when_no_recording_is_active() {
+        let state = AppState::default();
+
+        let error = apply_recording_input_mute_for_state(&state, "missing-session", "mic", true)
+            .unwrap_err();
+
+        assert_eq!(error, "No active recording session");
+        assert_eq!(
+            state.recording_control.snapshot(),
+            crate::audio::capture::RecordingMuteState::default()
+        );
+    }
+
+    #[test]
+    fn apply_recording_input_mute_rejects_session_mismatch() {
+        let state = AppState::default();
+        *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
+            "active-session".to_string(),
+            vec!["zoom".to_string()],
+            String::new(),
+            vec![],
+        ));
+
+        let error =
+            apply_recording_input_mute_for_state(&state, "stale-session", "mic", true).unwrap_err();
+
+        assert_eq!(error, "Recording session mismatch");
+        assert_eq!(
+            state.recording_control.snapshot(),
+            crate::audio::capture::RecordingMuteState::default()
+        );
+    }
+
+    #[test]
+    fn apply_recording_input_mute_preserves_shared_state_when_capture_update_fails() {
+        let state = AppState::default();
+        *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
+            "active-session".to_string(),
+            vec!["zoom".to_string()],
+            String::new(),
+            vec![],
+        ));
+        *state.active_capture.lock().expect("capture lock") = Some(
+            crate::audio::capture::ContinuousCapture::test_stub(state.recording_control.clone()),
+        );
+        crate::audio::capture::set_test_set_channel_muted_result(Some(Err(
+            "native system mute failed".to_string(),
+        )));
+
+        let error =
+            apply_recording_input_mute_for_state(&state, "active-session", "system", true)
+                .unwrap_err();
+
+        crate::audio::capture::set_test_set_channel_muted_result(None);
+        assert_eq!(error, "native system mute failed");
+        assert_eq!(
+            state.recording_control.snapshot(),
+            crate::audio::capture::RecordingMuteState::default()
         );
     }
 

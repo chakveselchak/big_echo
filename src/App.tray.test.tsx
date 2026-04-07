@@ -130,7 +130,7 @@ describe("Tray window", () => {
     });
   });
 
-  it("keeps source/topic and tray actions in single rows and hides the pending-review system message", async () => {
+  it("keeps source/topic and tray actions in single rows and shows the pending-review system message", async () => {
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "get_macos_system_audio_permission_status") {
         return { kind: "denied", can_request: false };
@@ -156,8 +156,9 @@ describe("Tray window", () => {
       expect(trayButtonRow).not.toBeNull();
       expect(screen.getByRole("button", { name: "Rec" }).closest(".button-row")).toBe(trayButtonRow);
       expect(screen.getByRole("button", { name: "Stop" }).closest(".button-row")).toBe(trayButtonRow);
-
-      expect(screen.queryByText("Open System Settings to review macOS system audio access.")).not.toBeInTheDocument();
+      expect(screen.getByText("Grant Screen & System Audio Recording permission in System Settings.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
+      expect(screen.queryByLabelText("System activity")).not.toBeInTheDocument();
     });
   });
 
@@ -223,6 +224,7 @@ describe("Tray window", () => {
     });
 
     expect(screen.getByText("Checking macOS system audio status")).toBeInTheDocument();
+    expect(screen.queryByLabelText("System activity")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
@@ -263,6 +265,7 @@ describe("Tray window", () => {
       expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
     });
 
+    expect(screen.queryByLabelText("System activity")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
   });
@@ -340,7 +343,8 @@ describe("Tray window", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Mic level")).toBeInTheDocument();
+      expect(screen.getByLabelText("Mic activity")).toBeInTheDocument();
+      expect(screen.getByLabelText("System activity")).toBeInTheDocument();
     });
 
     expect(screen.queryByText("System audio is captured natively by macOS.")).not.toBeInTheDocument();
@@ -350,22 +354,48 @@ describe("Tray window", () => {
     expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });
 
-  it("keeps legacy system device controls when macOS system audio is unsupported", async () => {
+  it("renders tray audio activity rows and mute controls instead of level bars", async () => {
     render(<App />);
 
     expect(screen.getByText("Mic")).toBeInTheDocument();
     expect(screen.getByText("System")).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("get_live_input_levels");
+      expect(screen.getByLabelText("Mic activity")).toBeInTheDocument();
+      expect(screen.getByLabelText("System activity")).toBeInTheDocument();
     });
 
-    await waitFor(() => {
-      const micTrack = screen.getByLabelText("Mic level");
-      const sysTrack = screen.getByLabelText("System level");
-      expect(micTrack.firstElementChild).toHaveStyle({ width: "42%" });
-      expect(sysTrack.firstElementChild).toHaveStyle({ width: "73%" });
+    expect(screen.queryByLabelText("Mic level")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mute microphone" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Mute system audio" })).toBeDisabled();
+    expect(screen.getByLabelText("Mic activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+      "data-wave-mode",
+      "gentle"
+    );
+    expect(screen.getByLabelText("System activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+      "data-wave-mode",
+      "strong"
+    );
+  });
+
+  it("keeps a flat equalizer line when no audio is present", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_live_input_levels") {
+        return { mic: 0, system: 0 };
+      }
+      return defaultInvokeImplementation(cmd, args);
     });
+
+    render(<App />);
+
+    const micVisual = await screen.findByLabelText("Mic activity");
+    const micLottie = micVisual.querySelector(".tray-audio-lottie");
+    const micPath = micVisual.querySelector(".tray-audio-wave-path");
+
+    expect(micLottie).not.toBeNull();
+    expect(micLottie).toHaveAttribute("data-wave-mode", "flat");
+    expect(micPath).toHaveAttribute("d", "M 0.00 14.00 L 120.00 14.00");
   });
 
   it("shows audio device selectors near live levels and saves selected devices", async () => {
@@ -396,5 +426,87 @@ describe("Tray window", () => {
         })
       );
     });
+  });
+
+  it("keeps the mic selector inline with the tray audio visual and mute control", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Mic activity")).toBeInTheDocument();
+    });
+
+    const micRow = screen.getByText("Mic").closest(".tray-audio-row");
+    const micMain = screen.getByLabelText("Mic activity").closest(".tray-audio-main");
+    const micMute = screen.getByRole("button", { name: "Mute microphone" });
+    const micSelect = screen.getByLabelText("Mic device");
+
+    expect(micRow).toHaveClass("has-inline-trailing");
+    expect(micMain).not.toBeNull();
+    expect(micMute.closest(".tray-audio-main")).toBe(micMain);
+    expect(micSelect.closest(".tray-audio-main")).toBe(micMain);
+    expect(micSelect.closest(".tray-audio-trailing")).toHaveClass("is-inline");
+    expect(micMain?.children[1]).toHaveClass("tray-audio-trailing", "is-inline");
+    expect(micMain?.children[2]).toHaveClass("tray-audio-mute");
+  });
+
+  it("toggles tray mute buttons during recording and resets them after stop", async () => {
+    const user = userEvent.setup();
+    let muteState = { micMuted: false, systemMuted: false };
+
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "set_recording_input_muted") {
+        muteState =
+          args?.channel === "mic"
+            ? { ...muteState, micMuted: args.muted }
+            : { ...muteState, systemMuted: args.muted };
+        return muteState;
+      }
+      return defaultInvokeImplementation(cmd, args);
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Rec" }));
+    await screen.findByRole("button", { name: "Mute microphone" });
+    await user.click(await screen.findByRole("button", { name: "Mute microphone" }));
+
+    expect(invokeMock).toHaveBeenCalledWith("set_recording_input_muted", {
+      sessionId: "tray-session",
+      channel: "mic",
+      muted: true,
+    });
+    expect(screen.getByRole("button", { name: "Unmute microphone" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Mute microphone" })).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
+  it("keeps tray recording controls active when mute rpc fails", async () => {
+    const user = userEvent.setup();
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "set_recording_input_muted") {
+        throw new Error("mute failed");
+      }
+      return defaultInvokeImplementation(cmd, args);
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Rec" }));
+    await user.click(await screen.findByRole("button", { name: "Mute microphone" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Mute update failed: mute failed")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Status: идет запись")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rec" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mute microphone" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mute microphone" })).toHaveAttribute("aria-pressed", "false");
   });
 });
