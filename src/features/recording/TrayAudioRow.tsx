@@ -1,7 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import lottie, { type AnimationItem } from "lottie-web";
-import trayWaveAnimation from "../../assets/lottie/tray-wave.json";
-import { shouldAnimateTrayAudio } from "./trayAudio";
+import { type ReactNode } from "react";
+
+import { TrayAudioWave } from "./TrayAudioWave";
 
 type TrayAudioRowProps = {
   label: string;
@@ -51,38 +50,7 @@ export function TrayAudioRow({
   trailing,
   inlineTrailing = false,
 }: TrayAudioRowProps) {
-  const animationRef = useRef<HTMLDivElement | null>(null);
-  const itemRef = useRef<AnimationItem | null>(null);
   const shouldShowVisual = !statusText;
-
-  useEffect(() => {
-    if (!shouldShowVisual || !animationRef.current || itemRef.current) return;
-    const item = lottie.loadAnimation({
-      container: animationRef.current,
-      renderer: "svg",
-      loop: true,
-      autoplay: false,
-      animationData: trayWaveAnimation,
-      rendererSettings: {
-        preserveAspectRatio: "xMidYMid meet",
-      },
-    });
-    itemRef.current = item;
-    return () => {
-      itemRef.current = null;
-      item.destroy();
-    };
-  }, [shouldShowVisual]);
-
-  useEffect(() => {
-    const item = itemRef.current;
-    if (!item) return;
-    if (statusText || !shouldAnimateTrayAudio(level, muted)) {
-      item.goToAndStop(0, true);
-      return;
-    }
-    item.play();
-  }, [level, muted, statusText]);
 
   const buttonLabel = muted ? `Unmute ${muteLabel}` : `Mute ${muteLabel}`;
 
@@ -94,7 +62,7 @@ export function TrayAudioRow({
           <div className="tray-audio-status">{statusText}</div>
         ) : (
           <div className="tray-audio-visual" aria-label={animationLabel}>
-            <div className="tray-audio-lottie" ref={animationRef} />
+            <TrayAudioWave level={level} muted={muted} />
           </div>
         )}
         {trailing ? <div className={`tray-audio-trailing${inlineTrailing ? " is-inline" : ""}`}>{trailing}</div> : null}

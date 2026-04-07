@@ -50,35 +50,10 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
   return null;
 }
 
-const {
-  listeners,
-  invokeMock,
-  loadAnimationMock,
-  animationPlayMock,
-  animationPauseMock,
-  animationGoToAndStopMock,
-  animationDestroyMock,
-} = vi.hoisted(() => {
-  const animationPlayMock = vi.fn();
-  const animationPauseMock = vi.fn();
-  const animationGoToAndStopMock = vi.fn();
-  const animationDestroyMock = vi.fn();
-
-  return {
-    listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
-    invokeMock: vi.fn<InvokeMock>(defaultInvokeImplementation),
-    loadAnimationMock: vi.fn(() => ({
-      play: animationPlayMock,
-      pause: animationPauseMock,
-      goToAndStop: animationGoToAndStopMock,
-      destroy: animationDestroyMock,
-    })),
-    animationPlayMock,
-    animationPauseMock,
-    animationGoToAndStopMock,
-    animationDestroyMock,
-  };
-});
+const { listeners, invokeMock } = vi.hoisted(() => ({
+  listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
+  invokeMock: vi.fn<InvokeMock>(defaultInvokeImplementation),
+}));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
@@ -96,12 +71,6 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: "tray", hide: vi.fn() }),
 }));
 
-vi.mock("lottie-web", () => ({
-  default: {
-    loadAnimation: loadAnimationMock,
-  },
-}));
-
 import { App } from "./App";
 
 describe("Tray window", () => {
@@ -110,11 +79,6 @@ describe("Tray window", () => {
     invokeMock.mockClear();
     invokeMock.mockReset();
     invokeMock.mockImplementation(defaultInvokeImplementation);
-    loadAnimationMock.mockClear();
-    animationPlayMock.mockClear();
-    animationPauseMock.mockClear();
-    animationGoToAndStopMock.mockClear();
-    animationDestroyMock.mockClear();
   });
 
   it("applies shared ui sync updates", async () => {
@@ -405,8 +369,33 @@ describe("Tray window", () => {
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mute microphone" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Mute system audio" })).toBeDisabled();
-    expect(loadAnimationMock).toHaveBeenCalledTimes(2);
-    expect(animationPlayMock).toHaveBeenCalled();
+    expect(screen.getByLabelText("Mic activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+      "data-wave-mode",
+      "gentle"
+    );
+    expect(screen.getByLabelText("System activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+      "data-wave-mode",
+      "strong"
+    );
+  });
+
+  it("keeps a flat equalizer line when no audio is present", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_live_input_levels") {
+        return { mic: 0, system: 0 };
+      }
+      return defaultInvokeImplementation(cmd, args);
+    });
+
+    render(<App />);
+
+    const micVisual = await screen.findByLabelText("Mic activity");
+    const micLottie = micVisual.querySelector(".tray-audio-lottie");
+    const micPath = micVisual.querySelector(".tray-audio-wave-path");
+
+    expect(micLottie).not.toBeNull();
+    expect(micLottie).toHaveAttribute("data-wave-mode", "flat");
+    expect(micPath).toHaveAttribute("d", "M 0.00 14.00 L 120.00 14.00");
   });
 
   it("shows audio device selectors near live levels and saves selected devices", async () => {
@@ -479,7 +468,6 @@ describe("Tray window", () => {
 
     await user.click(screen.getByRole("button", { name: "Rec" }));
     await screen.findByRole("button", { name: "Mute microphone" });
-    animationGoToAndStopMock.mockClear();
     await user.click(await screen.findByRole("button", { name: "Mute microphone" }));
 
     expect(invokeMock).toHaveBeenCalledWith("set_recording_input_muted", {
@@ -488,7 +476,6 @@ describe("Tray window", () => {
       muted: true,
     });
     expect(screen.getByRole("button", { name: "Unmute microphone" })).toHaveAttribute("aria-pressed", "true");
-    expect(animationGoToAndStopMock).toHaveBeenCalledWith(0, true);
 
     await user.click(screen.getByRole("button", { name: "Stop" }));
 

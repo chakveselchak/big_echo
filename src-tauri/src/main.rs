@@ -208,6 +208,10 @@ fn should_hide_tray_popover_on_focus_lost(platform: &str, focused: bool) -> bool
     platform == "macos" && !focused
 }
 
+fn should_hide_tray_popover_on_toggle_request(visible: bool, focused: bool) -> bool {
+    visible && focused
+}
+
 fn should_probe_idle_levels(recording_active: bool, tray_visible: bool) -> bool {
     !recording_active && tray_visible
 }
@@ -230,7 +234,9 @@ fn toggle_tray_window_visibility(
     anchor: Option<PhysicalPosition<f64>>,
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("tray") {
-        if window.is_visible().map_err(|e| e.to_string())? {
+        let is_visible = window.is_visible().map_err(|e| e.to_string())?;
+        let is_focused = window.is_focused().map_err(|e| e.to_string())?;
+        if should_hide_tray_popover_on_toggle_request(is_visible, is_focused) {
             window.hide().map_err(|e| e.to_string())?;
         } else {
             if let Some(anchor) = anchor {
@@ -802,6 +808,13 @@ mod ipc_runtime_tests {
         assert!(should_toggle_tray_popover_on_left_click("macos"));
         assert!(!should_toggle_tray_popover_on_left_click("windows"));
         assert!(!should_toggle_tray_popover_on_left_click("linux"));
+    }
+
+    #[test]
+    fn tray_toggle_hides_only_when_popover_is_visible_and_focused() {
+        assert!(should_hide_tray_popover_on_toggle_request(true, true));
+        assert!(!should_hide_tray_popover_on_toggle_request(true, false));
+        assert!(!should_hide_tray_popover_on_toggle_request(false, false));
     }
 
     #[test]
