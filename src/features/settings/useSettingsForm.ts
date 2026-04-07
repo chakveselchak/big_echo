@@ -11,6 +11,7 @@ import { validateSettings } from "../../lib/validation";
 import { tauriInvoke } from "../../lib/tauri";
 
 type UseSettingsFormOptions = {
+  enabled?: boolean;
   isTrayWindow: boolean;
   setStatus: (status: string) => void;
 };
@@ -58,7 +59,7 @@ function normalizeMacosSystemAudioPermissionStatus(
   return fallbackMacosSystemAudioPermission;
 }
 
-export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOptions) {
+export function useSettingsForm({ enabled = true, isTrayWindow, setStatus }: UseSettingsFormOptions) {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<PublicSettings | null>(null);
   const [nexaraKey, setNexaraKey] = useState("");
@@ -202,20 +203,23 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
   }
 
   useEffect(() => {
+    if (!enabled) return;
     void loadSettings().catch(() => undefined);
     void loadMacosSystemAudioPermission().catch(() => undefined);
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (isTrayWindow) {
       void loadAudioDevices().catch(() => undefined);
       return;
     }
     if (settingsTab !== "audio" || audioDevices.length > 0) return;
     void loadAudioDevices().catch(() => undefined);
-  }, [audioDevices.length, isTrayWindow, settingsTab]);
+  }, [audioDevices.length, enabled, isTrayWindow, settingsTab]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (isTrayWindow) return;
     if (settingsTab !== "generals" || textEditorAppsLoaded) return;
     let active = true;
@@ -250,7 +254,7 @@ export function useSettingsForm({ isTrayWindow, setStatus }: UseSettingsFormOpti
     return () => {
       active = false;
     };
-  }, [isTrayWindow, settingsTab, textEditorAppsLoaded]);
+  }, [enabled, isTrayWindow, settingsTab, textEditorAppsLoaded]);
 
   return {
     audioDevices,

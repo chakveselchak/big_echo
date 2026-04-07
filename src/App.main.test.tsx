@@ -70,6 +70,23 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { App } from "./App";
 
 describe("App main window", () => {
+  it("defers settings loading until the Settings tab opens", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("list_sessions");
+    });
+
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "get_settings")).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+  });
+
   it("shows top-level Sessions and Settings tabs and loads sessions when Sessions opens", async () => {
     const user = userEvent.setup();
     render(<App />);

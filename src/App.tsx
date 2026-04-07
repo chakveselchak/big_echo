@@ -251,6 +251,7 @@ export function App() {
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const wasDialogOpenRef = useRef(false);
   const loadSessionsRef = useRef<(() => Promise<void>) | null>(null);
+  const shouldLoadSettings = isTrayWindow || isSettingsWindow || mainTab === "settings";
   const {
     audioDevices,
     autoDetectSystemSource,
@@ -281,7 +282,7 @@ export function App() {
     settingsErrors,
     settingsTab,
     textEditorApps,
-  } = useSettingsForm({ isTrayWindow, setStatus });
+  } = useSettingsForm({ enabled: shouldLoadSettings, isTrayWindow, setStatus });
   const openerOptions = textEditorApps.length > 0 ? textEditorApps : openerUiFallback;
   const openerMenuOptions = [
     { id: "", name: "System default", icon_fallback: "", icon_data_url: null },
@@ -332,6 +333,7 @@ export function App() {
       : "No sessions matched the current filters."
     : "New recordings will appear here with search, transcript, summary, and audio actions.";
   const { liveLevels, muteState, start, startFromTray, stop, toggleInputMuted } = useRecordingController({
+    enableTrayCommandListeners: !isSettingsWindow && !isTrayWindow,
     isSettingsWindow,
     isTrayWindow,
     topic,

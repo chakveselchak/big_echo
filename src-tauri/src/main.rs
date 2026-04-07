@@ -260,6 +260,21 @@ fn toggle_tray_window_visibility(
     Ok(())
 }
 
+fn register_tray_window_events(window: &tauri::WebviewWindow) {
+    let window_for_event = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(focused) = event {
+            if should_hide_tray_popover_on_focus_lost(
+                std::env::consts::OS,
+                *focused,
+                cfg!(debug_assertions),
+            ) {
+                let _ = window_for_event.hide();
+            }
+        }
+    });
+}
+
 fn choose_tray_icon_variant(theme: Theme, is_recording: bool) -> TrayIconVariant {
     if is_recording {
         return TrayIconVariant::RecDark;
@@ -495,7 +510,8 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
         .inner_size(460.0, 244.0)
         .resizable(false)
         .always_on_top(true)
-        .skip_taskbar(true);
+        .skip_taskbar(true)
+        .visible(false);
 
     #[cfg(target_os = "macos")]
     {
@@ -507,21 +523,38 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
     }
 
     let window = builder.build().map_err(|e| e.to_string())?;
-    let window_for_event = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::Focused(focused) = event {
-            if should_hide_tray_popover_on_focus_lost(
-                std::env::consts::OS,
-                *focused,
-                cfg!(debug_assertions),
-            ) {
-                let _ = window_for_event.hide();
-            }
-        }
-    });
+    register_tray_window_events(&window);
     let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn prewarm_tray_window(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window("tray").is_some() {
+        return Ok(());
+    }
+
+    let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
+        .title("BigEcho Recorder")
+        .inner_size(460.0, 244.0)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false);
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .decorations(false)
+            .shadow(false)
+            .transparent(true)
+            .visible_on_all_workspaces(true);
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
+    register_tray_window_events(&window);
+    let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
     Ok(())
 }
 
@@ -1672,6 +1705,7 @@ fn main() {
                 app_data_dir: data_dir.clone(),
             },
         );
+        prewarm_tray_window(&app.handle())?;
         #[cfg(target_os = "macos")]
         {
             let app_menu = build_macos_app_menu(app)?;
