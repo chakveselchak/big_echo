@@ -1,13 +1,13 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
+#[cfg(test)]
+use std::cell::RefCell;
 use serde::Serialize;
 use std::fs::{remove_file, File};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
-#[cfg(test)]
-use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -17,8 +17,9 @@ use uuid::Uuid;
 const TARGET_RATE: u32 = 48_000;
 
 #[cfg(test)]
-static TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR: OnceLock<Mutex<Option<String>>> =
-    OnceLock::new();
+thread_local! {
+    static TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
 
 type I16Sink = Arc<Mutex<BufWriter<File>>>;
 
@@ -223,7 +224,7 @@ impl ContinuousCapture {
             .ok_or_else(|| "No input device available for microphone".to_string())?;
 
         #[cfg(target_os = "macos")]
-        let native_system_capture = Some(start_macos_native_system_capture()?);
+        let native_system_capture = start_macos_native_system_capture()?;
 
         let thread_control = control.clone();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
@@ -488,13 +489,24 @@ fn capture_until_stopped_macos(
 
 #[cfg(target_os = "macos")]
 fn start_macos_native_system_capture(
-) -> Result<crate::audio::macos_system_audio::NativeSystemAudioCapture, String> {
+) -> Result<Option<crate::audio::macos_system_audio::NativeSystemAudioCapture>, String> {
+    #[cfg(test)]
+    {
+        if let Some(err) = test_macos_system_audio_start_capture_error() {
+            return Err(err);
+        }
+        return Ok(None);
+    }
+
+    #[cfg(not(test))]
+    {
     let path = temp_raw_path("sys");
     let result = start_macos_native_system_capture_at(&path);
     if result.is_err() {
         cleanup_temp_capture_paths(&path, None);
     }
-    result
+        result.map(Some)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -511,21 +523,14 @@ fn start_macos_native_system_capture_at(
 
 #[cfg(test)]
 fn test_macos_system_audio_start_capture_error() -> Option<String> {
-    TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
+    TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR.with(|cell| cell.borrow().clone())
 }
 
 #[cfg(test)]
 pub(crate) fn set_test_macos_system_audio_start_capture_result(result: Option<Result<(), String>>) {
-    if let Ok(mut guard) = TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-    {
-        *guard = result.and_then(|outcome| outcome.err());
-    }
+    TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR.with(|cell| {
+        *cell.borrow_mut() = result.and_then(|outcome| outcome.err());
+    });
 }
 
 pub fn list_input_devices() -> Result<Vec<String>, String> {

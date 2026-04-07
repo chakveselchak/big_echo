@@ -12,13 +12,13 @@ use crate::{
 };
 use chrono::{DateTime, Local};
 #[cfg(test)]
-use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
 use uuid::Uuid;
 
 #[cfg(test)]
-static TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS: OnceLock<
-    Mutex<Option<crate::commands::settings::MacosSystemAudioPermissionStatus>>,
-> = OnceLock::new();
+thread_local! {
+    static TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS: RefCell<Option<crate::commands::settings::MacosSystemAudioPermissionStatus>> = const { RefCell::new(None) };
+}
 
 #[tauri::command]
 pub fn set_api_secret(
@@ -314,23 +314,16 @@ fn current_macos_system_audio_permission_status(
 #[cfg(test)]
 fn test_macos_system_audio_permission_status(
 ) -> Option<crate::commands::settings::MacosSystemAudioPermissionStatus> {
-    TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
+    TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS.with(|cell| cell.borrow().clone())
 }
 
 #[cfg(test)]
 fn set_test_macos_system_audio_permission_status(
     status: Option<crate::commands::settings::MacosSystemAudioPermissionStatus>,
 ) {
-    if let Ok(mut guard) = TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-    {
-        *guard = status;
-    }
+    TEST_MACOS_SYSTEM_AUDIO_PERMISSION_STATUS.with(|cell| {
+        *cell.borrow_mut() = status;
+    });
 }
 
 #[cfg(test)]
