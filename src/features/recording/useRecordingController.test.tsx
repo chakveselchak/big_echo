@@ -454,6 +454,7 @@ describe("useRecordingController", () => {
 
   it("preserves mute state when recording sync repeats the active session id", async () => {
     const loadSessions = vi.fn(async () => undefined);
+    const uiRecordingEmitCalls = () => emitMock.mock.calls.filter(([event]) => event === "ui:recording");
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
@@ -503,17 +504,24 @@ describe("useRecordingController", () => {
 
     expect(result.current.session?.session_id).toBe("s1");
     expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
+    await waitFor(() => {
+      expect(uiRecordingEmitCalls()).toContainEqual(["ui:recording", { recording: true, sessionId: "s1" }]);
+    });
 
     const uiRecordingHandler = listeners.get("ui:recording");
     expect(uiRecordingHandler).toBeDefined();
+    const sessionBeforeSync = result.current.session;
+    const emitCountBeforeSync = uiRecordingEmitCalls().length;
 
     await act(async () => {
       await uiRecordingHandler?.({ payload: { recording: true, sessionId: "s1" } });
     });
 
     expect(result.current.session?.session_id).toBe("s1");
+    expect(result.current.session).toBe(sessionBeforeSync);
     expect(result.current.lastSessionId).toBe("s1");
     expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
+    expect(uiRecordingEmitCalls()).toHaveLength(emitCountBeforeSync);
   });
 
   it("uses the system mute branch and falls back to the optimistic state on null responses", async () => {
