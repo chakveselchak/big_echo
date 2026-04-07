@@ -439,6 +439,27 @@ describe("Tray window", () => {
     });
   });
 
+  it("keeps the mic selector inline with the tray audio visual and mute control", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Mic activity")).toBeInTheDocument();
+    });
+
+    const micRow = screen.getByText("Mic").closest(".tray-audio-row");
+    const micMain = screen.getByLabelText("Mic activity").closest(".tray-audio-main");
+    const micMute = screen.getByRole("button", { name: "Mute microphone" });
+    const micSelect = screen.getByLabelText("Mic device");
+
+    expect(micRow).toHaveClass("has-inline-trailing");
+    expect(micMain).not.toBeNull();
+    expect(micMute.closest(".tray-audio-main")).toBe(micMain);
+    expect(micSelect.closest(".tray-audio-main")).toBe(micMain);
+    expect(micSelect.closest(".tray-audio-trailing")).toHaveClass("is-inline");
+    expect(micMain?.children[1]).toHaveClass("tray-audio-trailing", "is-inline");
+    expect(micMain?.children[2]).toHaveClass("tray-audio-mute");
+  });
+
   it("toggles tray mute buttons during recording and resets them after stop", async () => {
     const user = userEvent.setup();
     let muteState = { micMuted: false, systemMuted: false };

@@ -14,6 +14,7 @@ type TrayAudioRowProps = {
   onToggleMuted: () => void;
   statusText?: string | null;
   trailing?: ReactNode;
+  inlineTrailing?: boolean;
 };
 
 function TrayAudioIcon({ icon }: { icon: "mic" | "system" }) {
@@ -48,6 +49,7 @@ export function TrayAudioRow({
   onToggleMuted,
   statusText,
   trailing,
+  inlineTrailing = false,
 }: TrayAudioRowProps) {
   const animationRef = useRef<HTMLDivElement | null>(null);
   const itemRef = useRef<AnimationItem | null>(null);
@@ -85,29 +87,31 @@ export function TrayAudioRow({
   const buttonLabel = muted ? `Unmute ${muteLabel}` : `Mute ${muteLabel}`;
 
   return (
-    <div className="tray-audio-row">
+    <div className={`tray-audio-row${inlineTrailing && trailing ? " has-inline-trailing" : ""}`}>
       <span className="tray-audio-label">{label}</span>
-      {statusText ? (
-        <div className="tray-audio-status">{statusText}</div>
-      ) : (
-        <div className="tray-audio-visual" aria-label={animationLabel}>
-          <div className="tray-audio-lottie" ref={animationRef} />
-        </div>
-      )}
-      <button
-        type="button"
-        className={`tray-audio-mute${muted ? " is-muted" : ""}`}
-        aria-label={buttonLabel}
-        aria-pressed={muted}
-        disabled={disabled}
-        onClick={onToggleMuted}
-      >
-        <span className="tray-audio-icon" aria-hidden="true">
-          <TrayAudioIcon icon={icon} />
-        </span>
-        <span className="tray-audio-slash" aria-hidden="true" />
-      </button>
-      {trailing ? <div className="tray-audio-trailing">{trailing}</div> : null}
+      <div className="tray-audio-main">
+        {statusText ? (
+          <div className="tray-audio-status">{statusText}</div>
+        ) : (
+          <div className="tray-audio-visual" aria-label={animationLabel}>
+            <div className="tray-audio-lottie" ref={animationRef} />
+          </div>
+        )}
+        {trailing ? <div className={`tray-audio-trailing${inlineTrailing ? " is-inline" : ""}`}>{trailing}</div> : null}
+        <button
+          type="button"
+          className={`tray-audio-mute${muted ? " is-muted" : ""}`}
+          aria-label={buttonLabel}
+          aria-pressed={muted}
+          disabled={disabled}
+          onClick={onToggleMuted}
+        >
+          <span className="tray-audio-icon" aria-hidden="true">
+            <TrayAudioIcon icon={icon} />
+          </span>
+          <span className="tray-audio-slash" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 }

@@ -1144,6 +1144,7 @@ export function App() {
             muted={muteState.micMuted}
             disabled={status !== "recording"}
             onToggleMuted={() => handleToggleTrayInputMuted("mic")}
+            inlineTrailing
             trailing={
               <label className="tray-audio-device">
                 <span className="sr-only">Mic device</span>
@@ -1190,6 +1191,7 @@ export function App() {
                     ? "Grant Screen & System Audio Recording permission in System Settings."
                     : null
             }
+            inlineTrailing
             trailing={
               isMacosSystemAudioUnsupported ? (
                 <label className="tray-audio-device">

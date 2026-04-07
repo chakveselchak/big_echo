@@ -704,7 +704,15 @@ select {
 
 .tray-audio-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 30px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.tray-audio-main {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
   min-width: 0;
@@ -730,12 +738,19 @@ select {
   min-width: 0;
 }
 
+.tray-audio-visual,
+.tray-audio-status {
+  flex: 1 1 0;
+}
+
+.tray-audio-row.has-inline-trailing .tray-audio-visual {
+  flex: 0 0 30%;
+  max-width: 30%;
+}
+
 .tray-audio-lottie {
   height: 28px;
   border-radius: 12px;
-  border: 1px solid rgba(140, 151, 165, 0.24);
-  background: linear-gradient(180deg, rgba(250, 252, 255, 0.96), rgba(241, 246, 252, 0.96));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
   overflow: hidden;
 }
 
@@ -835,7 +850,11 @@ select {
 }
 
 .tray-audio-trailing {
-  grid-column: 2 / -1;
+  flex: 0 0 100%;
+}
+
+.tray-audio-trailing.is-inline {
+  flex: 1 1 0;
 }
 
 .tray-audio-device select {
@@ -1527,8 +1546,12 @@ select {
   }
 
   .tray-audio-row {
-    grid-template-columns: 40px minmax(0, 1fr) 30px;
+    grid-template-columns: 40px minmax(0, 1fr);
     gap: 6px 8px;
+  }
+
+  .tray-audio-main {
+    gap: 6px;
   }
 
   .session-card-footer {
