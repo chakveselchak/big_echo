@@ -19,6 +19,7 @@ const TARGET_RATE: u32 = 48_000;
 #[cfg(test)]
 thread_local! {
     static TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+    static TEST_SET_CHANNEL_MUTED_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 type I16Sink = Arc<Mutex<BufWriter<File>>>;
@@ -242,6 +243,12 @@ impl ContinuousCapture {
     }
 
     pub fn set_channel_muted(&self, channel: &str, muted: bool) -> Result<(), String> {
+        #[cfg(test)]
+        if let Some(err) = test_set_channel_muted_error() {
+            let _ = (channel, muted);
+            return Err(err);
+        }
+
         #[cfg(target_os = "macos")]
         if channel == "system" {
             if let Some(native) = &self.native_system_capture {
@@ -312,6 +319,18 @@ impl ContinuousCapture {
         #[cfg(not(target_os = "macos"))]
         {
             mic_result?
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_stub(recording_control: SharedRecordingControl) -> Self {
+        let (stop_tx, _stop_rx) = mpsc::channel::<()>();
+        Self {
+            stop_tx,
+            join: None,
+            recording_control,
+            #[cfg(target_os = "macos")]
+            native_system_capture: None,
         }
     }
 }
@@ -510,6 +529,7 @@ fn start_macos_native_system_capture(
 }
 
 #[cfg(target_os = "macos")]
+#[cfg_attr(test, allow(dead_code))]
 fn start_macos_native_system_capture_at(
     path: &PathBuf,
 ) -> Result<crate::audio::macos_system_audio::NativeSystemAudioCapture, String> {
@@ -527,8 +547,20 @@ fn test_macos_system_audio_start_capture_error() -> Option<String> {
 }
 
 #[cfg(test)]
+fn test_set_channel_muted_error() -> Option<String> {
+    TEST_SET_CHANNEL_MUTED_ERROR.with(|cell| cell.borrow().clone())
+}
+
+#[cfg(test)]
 pub(crate) fn set_test_macos_system_audio_start_capture_result(result: Option<Result<(), String>>) {
     TEST_MACOS_SYSTEM_AUDIO_START_CAPTURE_ERROR.with(|cell| {
+        *cell.borrow_mut() = result.and_then(|outcome| outcome.err());
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_set_channel_muted_result(result: Option<Result<(), String>>) {
+    TEST_SET_CHANNEL_MUTED_ERROR.with(|cell| {
         *cell.borrow_mut() = result.and_then(|outcome| outcome.err());
     });
 }

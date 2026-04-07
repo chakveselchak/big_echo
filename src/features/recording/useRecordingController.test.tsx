@@ -452,6 +452,70 @@ describe("useRecordingController", () => {
     expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
   });
 
+  it("preserves mute state when recording sync repeats the active session id", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        session,
+        lastSessionId,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await act(async () => {
+      await result.current.controller.startFromTray();
+    });
+
+    await act(async () => {
+      await result.current.controller.toggleInputMuted("mic");
+    });
+
+    expect(result.current.session?.session_id).toBe("s1");
+    expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
+
+    const uiRecordingHandler = listeners.get("ui:recording");
+    expect(uiRecordingHandler).toBeDefined();
+
+    await act(async () => {
+      await uiRecordingHandler?.({ payload: { recording: true, sessionId: "s1" } });
+    });
+
+    expect(result.current.session?.session_id).toBe("s1");
+    expect(result.current.lastSessionId).toBe("s1");
+    expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
+  });
+
   it("uses the system mute branch and falls back to the optimistic state on null responses", async () => {
     const loadSessions = vi.fn(async () => undefined);
     const muteCalls: Array<{ sessionId: string; channel: string; muted: boolean }> = [];

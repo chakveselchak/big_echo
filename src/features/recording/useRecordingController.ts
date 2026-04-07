@@ -90,12 +90,16 @@ export function useRecordingController({
   }
 
   function setRecordingSession(sessionId: string) {
-    resetMuteState();
-    setSession({
+    const nextSession = {
       session_id: sessionId,
       session_dir: "",
       status: "recording",
-    });
+    };
+    if (sessionRef.current?.session_id !== sessionId) {
+      resetMuteState();
+    }
+    sessionRef.current = nextSession;
+    setSession(nextSession);
     setLastSessionId(sessionId);
   }
 
