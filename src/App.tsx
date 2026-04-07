@@ -304,6 +304,7 @@ export function App() {
     getText,
     importAudioSession,
     loadSessions,
+    openSessionFolder,
     openSessionArtifact,
     pipelineStateBySession,
     requestDeleteSession,
@@ -1402,20 +1403,58 @@ export function App() {
                           </button>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        className="icon-button delete-session-button"
-                        aria-label="Удалить сессию"
-                        title="Удалить сессию"
-                        onClick={() => requestDeleteSession(item.session_id, item.status === "recording")}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                            d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 7h2v8h-2v-8zm4 0h2v8h-2v-8zM7 10h2v8H7v-8z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                      </button>
+                      <div className="session-card-icon-actions">
+                        <button
+                          type="button"
+                          className="icon-button delete-session-button"
+                          aria-label="Удалить сессию"
+                          title="Удалить сессию"
+                          onClick={() => requestDeleteSession(item.session_id, item.status === "recording")}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 7h2v8h-2v-8zm4 0h2v8h-2v-8zM7 10h2v8H7v-8z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        </button>
+                        <a
+                          href="#"
+                          className="session-folder-link"
+                          aria-label="Открыть папку сессии"
+                          title="Открыть папку сессии"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            void openSessionFolder(item.session_dir);
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M14 5h5v5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M19 5 11 13"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                            />
+                            <path
+                              d="M18 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </a>
+                      </div>
                     </div>
                   </div>
                   <div className="session-edit-grid">

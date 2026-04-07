@@ -204,8 +204,12 @@ fn should_toggle_tray_popover_on_left_click(platform: &str) -> bool {
     platform == "macos"
 }
 
-fn should_hide_tray_popover_on_focus_lost(platform: &str, focused: bool) -> bool {
-    platform == "macos" && !focused
+fn should_hide_tray_popover_on_focus_lost(
+    platform: &str,
+    focused: bool,
+    is_debug_build: bool,
+) -> bool {
+    platform == "macos" && !focused && !is_debug_build
 }
 
 fn should_hide_tray_popover_on_toggle_request(visible: bool, focused: bool) -> bool {
@@ -506,7 +510,11 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
     let window_for_event = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(focused) = event {
-            if should_hide_tray_popover_on_focus_lost(std::env::consts::OS, *focused) {
+            if should_hide_tray_popover_on_focus_lost(
+                std::env::consts::OS,
+                *focused,
+                cfg!(debug_assertions),
+            ) {
                 let _ = window_for_event.hide();
             }
         }
@@ -773,9 +781,10 @@ mod ipc_runtime_tests {
 
     #[test]
     fn tray_popover_autoclose_policy_is_platform_specific() {
-        assert!(should_hide_tray_popover_on_focus_lost("macos", false));
-        assert!(!should_hide_tray_popover_on_focus_lost("macos", true));
-        assert!(!should_hide_tray_popover_on_focus_lost("windows", false));
+        assert!(should_hide_tray_popover_on_focus_lost("macos", false, false));
+        assert!(!should_hide_tray_popover_on_focus_lost("macos", false, true));
+        assert!(!should_hide_tray_popover_on_focus_lost("macos", true, false));
+        assert!(!should_hide_tray_popover_on_focus_lost("windows", false, false));
     }
 
     #[test]
