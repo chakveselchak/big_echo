@@ -47,12 +47,13 @@ impl Default for UiSyncState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct UiSyncStateView {
     pub source: String,
     pub topic: String,
     pub is_recording: bool,
     pub active_session_id: Option<String>,
+    pub mute_state: audio::capture::RecordingMuteState,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

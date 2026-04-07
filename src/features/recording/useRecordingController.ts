@@ -89,6 +89,12 @@ export function useRecordingController({
     setMuteState(defaultRecordingMuteState);
   }
 
+  function applyMuteState(nextMuteState: RecordingMuteState) {
+    muteMutationTokenRef.current += 1;
+    muteStateRef.current = nextMuteState;
+    setMuteState(nextMuteState);
+  }
+
   function setRecordingSession(sessionId: string) {
     if (sessionRef.current?.session_id === sessionId) {
       setLastSessionId(sessionId);
@@ -239,6 +245,7 @@ export function useRecordingController({
         if (current.is_recording) {
           if (current.active_session_id) {
             setRecordingSession(current.active_session_id);
+            applyMuteState(current.mute_state ?? defaultRecordingMuteState);
           } else {
             resetMuteState();
           }

@@ -528,6 +528,10 @@ pub fn search_session_artifacts(
 
 #[tauri::command]
 pub fn get_ui_sync_state(state: tauri::State<AppState>) -> Result<UiSyncStateView, String> {
+    build_ui_sync_state_view(state.inner())
+}
+
+fn build_ui_sync_state_view(state: &AppState) -> Result<UiSyncStateView, String> {
     let ui = state
         .ui_sync
         .lock()
@@ -543,6 +547,7 @@ pub fn get_ui_sync_state(state: tauri::State<AppState>) -> Result<UiSyncStateVie
         topic: ui.topic,
         is_recording: active.is_some(),
         active_session_id,
+        mute_state: state.recording_control.snapshot(),
     })
 }
 
@@ -648,6 +653,7 @@ pub fn update_session_details(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_state::AppState;
     use crate::domain::session::{SessionArtifacts, SessionStatus};
     use crate::settings::public_settings::{save_settings, PublicSettings};
     use crate::storage::sqlite_repo::list_sessions as repo_list_sessions;
@@ -727,6 +733,40 @@ mod tests {
             SessionArtifactSearchHit {
                 transcript_match: false,
                 summary_match: false
+            }
+        );
+    }
+
+    #[test]
+    fn ui_sync_state_view_includes_authoritative_mute_state() {
+        let state = AppState::default();
+        {
+            let mut ui = state.ui_sync.lock().expect("ui lock");
+            ui.source = "telegram".to_string();
+            ui.topic = "Daily sync".to_string();
+        }
+        *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
+            "active-session".to_string(),
+            vec!["telegram".to_string()],
+            "Daily sync".to_string(),
+            vec![],
+        ));
+        state
+            .recording_control
+            .set_channel("mic", true)
+            .expect("mute mic");
+
+        let view = build_ui_sync_state_view(&state).expect("ui sync view");
+
+        assert_eq!(view.source, "telegram");
+        assert_eq!(view.topic, "Daily sync");
+        assert!(view.is_recording);
+        assert_eq!(view.active_session_id.as_deref(), Some("active-session"));
+        assert_eq!(
+            view.mute_state,
+            crate::audio::capture::RecordingMuteState {
+                mic_muted: true,
+                system_muted: false,
             }
         );
     }

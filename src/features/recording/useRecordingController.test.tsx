@@ -7,7 +7,13 @@ const { invokeMock, emitMock, listenMock, listeners } = vi.hoisted(() => ({
   emitMock: vi.fn(async () => undefined),
   invokeMock: vi.fn(async (cmd: string) => {
     if (cmd === "get_ui_sync_state") {
-      return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      return {
+        source: "slack",
+        topic: "",
+        is_recording: false,
+        active_session_id: null,
+        mute_state: { micMuted: false, systemMuted: false },
+      };
     }
     if (cmd === "start_recording") {
       return { session_id: "s1", session_dir: "/tmp/s1", status: "recording" };
@@ -47,7 +53,13 @@ import { useRecordingController } from "./useRecordingController";
 
 function getDefaultInvokeResponse(cmd: string) {
   if (cmd === "get_ui_sync_state") {
-    return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+    return {
+      source: "slack",
+      topic: "",
+      is_recording: false,
+      active_session_id: null,
+      mute_state: { micMuted: false, systemMuted: false },
+    };
   }
   if (cmd === "start_recording") {
     return { session_id: "s1", session_dir: "/tmp/s1", status: "recording" };
@@ -522,6 +534,77 @@ describe("useRecordingController", () => {
     expect(result.current.lastSessionId).toBe("s1");
     expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
     expect(uiRecordingEmitCalls()).toHaveLength(emitCountBeforeSync);
+  });
+
+  it("hydrates authoritative mute state for an active recording and toggles the correct next edge", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+    const muteCalls: Array<{ sessionId: string; channel: string; muted: boolean }> = [];
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_ui_sync_state") {
+        return {
+          source: "slack",
+          topic: "Standup",
+          is_recording: true,
+          active_session_id: "s1",
+          mute_state: { micMuted: true, systemMuted: false },
+        };
+      }
+      if (cmd === "set_recording_input_muted") {
+        muteCalls.push(args as { sessionId: string; channel: string; muted: boolean });
+        return { micMuted: false, systemMuted: false };
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [participants, setParticipants] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag, setCustomTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          participants,
+          setParticipants,
+          source,
+          setSource,
+          customTag,
+          setCustomTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        session,
+        status,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    expect(result.current.status).toBe("recording");
+    expect(result.current.session?.session_id).toBe("s1");
+    expect(result.current.controller.muteState).toEqual({ micMuted: true, systemMuted: false });
+
+    await act(async () => {
+      await result.current.controller.toggleInputMuted("mic");
+    });
+
+    expect(muteCalls).toEqual([{ sessionId: "s1", channel: "mic", muted: false }]);
+    expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
   });
 
   it("uses the system mute branch and falls back to the optimistic state on null responses", async () => {

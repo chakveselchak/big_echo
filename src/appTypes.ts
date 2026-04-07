@@ -67,6 +67,7 @@ export type UiSyncStateView = {
   topic: string;
   is_recording: boolean;
   active_session_id: string | null;
+  mute_state: RecordingMuteState;
 };
 
 export type SecretSaveState = "unknown" | "updated" | "unchanged" | "error";
