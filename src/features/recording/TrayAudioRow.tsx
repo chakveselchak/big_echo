@@ -76,7 +76,7 @@ export function TrayAudioRow({
     const item = itemRef.current;
     if (!item) return;
     if (statusText || !shouldAnimateTrayAudio(level, muted)) {
-      item.pause();
+      item.goToAndStop(0, true);
       return;
     }
     item.play();

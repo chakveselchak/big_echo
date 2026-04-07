@@ -236,6 +236,7 @@ export function App() {
   const [session, setSession] = useState<StartResponse | null>(null);
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
+  const [trayMuteError, setTrayMuteError] = useState<string | null>(null);
   const [isOpenerDropdownOpen, setIsOpenerDropdownOpen] = useState(false);
   const [openerActiveIndex, setOpenerActiveIndex] = useState(0);
   const appMainRef = useRef<HTMLElement | null>(null);
@@ -1086,8 +1087,21 @@ export function App() {
       macosSystemAudioPermission?.kind !== "unsupported";
     const showMacosSystemAudioSettingsShortcut =
       isMacosSystemAudioPermissionPendingReview || isMacosSystemAudioLookupFailed;
-    const handleToggleTrayInputMuted = (channel: "mic" | "system") => {
-      void toggleInputMuted(channel).catch((err) => setStatus(`error: ${getErrorMessage(err)}`));
+    const handleToggleTrayInputMuted = async (channel: "mic" | "system") => {
+      setTrayMuteError(null);
+      try {
+        await toggleInputMuted(channel);
+      } catch (err) {
+        setTrayMuteError(`Mute update failed: ${getErrorMessage(err)}`);
+      }
+    };
+    const handleStartFromTray = async () => {
+      setTrayMuteError(null);
+      await startFromTray();
+    };
+    const handleStopFromTray = async () => {
+      setTrayMuteError(null);
+      await stop();
     };
     return (
       <main className="tray-shell" ref={appMainRef}>
@@ -1099,6 +1113,11 @@ export function App() {
             </button>
           )}
         </div>
+        {trayMuteError && (
+          <p className="tray-inline-error" role="alert">
+            {trayMuteError}
+          </p>
+        )}
         <div className="tray-meta-grid">
           <label className="field tray-source-field">
             Source
@@ -1198,11 +1217,15 @@ export function App() {
           />
         </div>
         <div className="button-row">
-          <button className="primary-button rec-button" onClick={startFromTray} disabled={status === "recording"}>
+          <button
+            className="primary-button rec-button"
+            onClick={() => void handleStartFromTray()}
+            disabled={status === "recording"}
+          >
             <span className="rec-dot" />
             Rec
           </button>
-          <button className="secondary-button" onClick={stop} disabled={status !== "recording"}>
+          <button className="secondary-button" onClick={() => void handleStopFromTray()} disabled={status !== "recording"}>
             <span className="stop-square" />
             Stop
           </button>

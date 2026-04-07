@@ -56,10 +56,12 @@ const {
   loadAnimationMock,
   animationPlayMock,
   animationPauseMock,
+  animationGoToAndStopMock,
   animationDestroyMock,
 } = vi.hoisted(() => {
   const animationPlayMock = vi.fn();
   const animationPauseMock = vi.fn();
+  const animationGoToAndStopMock = vi.fn();
   const animationDestroyMock = vi.fn();
 
   return {
@@ -68,10 +70,12 @@ const {
     loadAnimationMock: vi.fn(() => ({
       play: animationPlayMock,
       pause: animationPauseMock,
+      goToAndStop: animationGoToAndStopMock,
       destroy: animationDestroyMock,
     })),
     animationPlayMock,
     animationPauseMock,
+    animationGoToAndStopMock,
     animationDestroyMock,
   };
 });
@@ -109,6 +113,7 @@ describe("Tray window", () => {
     loadAnimationMock.mockClear();
     animationPlayMock.mockClear();
     animationPauseMock.mockClear();
+    animationGoToAndStopMock.mockClear();
     animationDestroyMock.mockClear();
   });
 
@@ -452,6 +457,8 @@ describe("Tray window", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Rec" }));
+    await screen.findByRole("button", { name: "Mute microphone" });
+    animationGoToAndStopMock.mockClear();
     await user.click(await screen.findByRole("button", { name: "Mute microphone" }));
 
     expect(invokeMock).toHaveBeenCalledWith("set_recording_input_muted", {
@@ -460,11 +467,38 @@ describe("Tray window", () => {
       muted: true,
     });
     expect(screen.getByRole("button", { name: "Unmute microphone" })).toHaveAttribute("aria-pressed", "true");
+    expect(animationGoToAndStopMock).toHaveBeenCalledWith(0, true);
 
     await user.click(screen.getByRole("button", { name: "Stop" }));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Mute microphone" })).toHaveAttribute("aria-pressed", "false");
     });
+  });
+
+  it("keeps tray recording controls active when mute rpc fails", async () => {
+    const user = userEvent.setup();
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "set_recording_input_muted") {
+        throw new Error("mute failed");
+      }
+      return defaultInvokeImplementation(cmd, args);
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Rec" }));
+    await user.click(await screen.findByRole("button", { name: "Mute microphone" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Mute update failed: mute failed")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Status: идет запись")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rec" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mute microphone" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mute microphone" })).toHaveAttribute("aria-pressed", "false");
   });
 });

@@ -183,6 +183,13 @@ select {
   min-width: 0;
 }
 
+.tray-inline-error {
+  margin: -2px 0 0;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
 .tray-settings-link {
   appearance: none;
   border: 0;
