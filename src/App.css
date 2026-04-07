@@ -1189,7 +1189,7 @@ select {
   align-items: flex-start;
   gap: 6px 10px;
   flex-wrap: wrap;
-  line-height: 1.2;
+  line-height: 1.6;
 }
 
 .session-title-heading {
@@ -1232,7 +1232,6 @@ select {
 
 .session-card-icon-actions {
   display: flex;
-  flex-direction: column;
   align-items: flex-end;
   gap: 6px;
 }
@@ -1276,15 +1275,7 @@ select {
 }
 
 .session-folder-link {
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
-  border: 1px solid rgba(141, 154, 170, 0.28);
-  background: rgba(255, 255, 255, 0.96);
   color: rgba(70, 82, 95, 0.92);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   transition:
     background-color 120ms ease,
     border-color 120ms ease,
@@ -1293,18 +1284,8 @@ select {
 }
 
 .session-folder-link:hover {
-  border-color: var(--stroke-strong);
-  box-shadow: 0 8px 18px rgba(18, 24, 34, 0.08);
-}
-
-.session-folder-link:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.session-folder-link svg {
-  width: 16px;
-  height: 16px;
+  background: rgba(141, 154, 170, 0.08);
+  border-color: rgba(141, 154, 170, 0.12);
 }
 
 .session-label-summary {

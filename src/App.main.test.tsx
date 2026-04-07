@@ -308,7 +308,7 @@ describe("App main window", () => {
 
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText("(wav) - 11.03.2026")).toBeInTheDocument();
+      expect(screen.getByText("(wav) - 11.03.2026 10:00")).toBeInTheDocument();
     });
     expect(screen.queryByText("(zoom) - 11.03.2026")).not.toBeInTheDocument();
   });
@@ -353,7 +353,10 @@ describe("App main window", () => {
     });
 
     expect(screen.queryByText("открыть")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "Открыть папку сессии" }));
+    const folderButton = screen.getByRole("button", { name: "Открыть папку сессии" });
+    expect(folderButton).toHaveClass("icon-button");
+    expect(folderButton).toHaveClass("session-folder-link");
+    await user.click(folderButton);
 
     expect(invokeMock).toHaveBeenCalledWith("open_session_folder", { sessionDir: "/tmp/s-folder" });
   });
@@ -894,7 +897,7 @@ describe("App main window", () => {
       expect(screen.queryByText("/tmp/s6")).not.toBeInTheDocument();
       expect(screen.queryByText("Path")).not.toBeInTheDocument();
       expect(screen.queryByText("открыть")).not.toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Открыть папку сессии" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Открыть папку сессии" })).toBeInTheDocument();
     });
   });
 

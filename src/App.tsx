@@ -76,6 +76,11 @@ function parseDurationHms(value: string | undefined): number {
   return parts[0] * 3600 + parts[1] * 60 + parts[2];
 }
 
+function extractStartTimeHm(startedAtIso: string): string {
+  const match = startedAtIso.match(/T(\d{2}:\d{2})/);
+  return match?.[1] ?? "";
+}
+
 function joinSessionAudioPath(sessionDir: string, audioFile: string): string {
   const normalizedDir = sessionDir.trim().replace(/[\\/]+$/, "");
   const normalizedFile = audioFile.trim().replace(/^[\\/]+/, "");
@@ -1370,15 +1375,17 @@ export function App() {
               const artifactHit = sessionArtifactSearchHits[item.session_id];
               const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
               const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
+              const startTimeHm = extractStartTimeHm(item.started_at_iso);
+              const sessionTitleMeta = startTimeHm
+                ? `(${item.audio_format}) - ${item.display_date_ru} ${startTimeHm}`
+                : `(${item.audio_format}) - ${item.display_date_ru}`;
               return (
                 <article key={item.session_id} className="session-card">
                   <div className="session-card-header">
                     <div className="session-card-heading">
                       <div className="session-title-line">
                         <h3 className="session-title-heading">{detail.topic || "Без темы"}</h3>
-                        <span className="session-title-meta">
-                          ({item.audio_format}) - {item.display_date_ru}
-                        </span>
+                        <span className="session-title-meta">{sessionTitleMeta}</span>
                       </div>
                       <div className={statusMatch ? "session-status match-hit" : "session-status"}>
                         Status: {formatSessionStatus(item.status)}
@@ -1420,13 +1427,12 @@ export function App() {
                             />
                           </svg>
                         </button>
-                        <a
-                          href="#"
-                          className="session-folder-link"
+                        <button
+                          type="button"
+                          className="icon-button session-folder-link"
                           aria-label="Открыть папку сессии"
                           title="Открыть папку сессии"
-                          onClick={(event) => {
-                            event.preventDefault();
+                          onClick={() => {
                             void openSessionFolder(item.session_dir);
                           }}
                         >
@@ -1455,7 +1461,7 @@ export function App() {
                               strokeLinejoin="round"
                             />
                           </svg>
-                        </a>
+                        </button>
                       </div>
                     </div>
                   </div>
