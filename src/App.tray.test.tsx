@@ -102,6 +102,19 @@ describe("Tray window", () => {
     });
   });
 
+  it("does not subscribe tray window to global tray start and stop commands", async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+      expect(listeners.has("ui:sync")).toBe(true);
+      expect(listeners.has("ui:recording")).toBe(true);
+    });
+
+    expect(listeners.has("tray:start")).toBe(false);
+    expect(listeners.has("tray:stop")).toBe(false);
+  });
+
   it("renders mini recorder and starts with optional topic", async () => {
     const user = userEvent.setup();
     render(<App />);

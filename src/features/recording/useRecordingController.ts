@@ -17,6 +17,7 @@ const TRAY_LEVELS_RECORDING_POLL_MS = 120;
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
 type UseRecordingControllerOptions = {
+  enableTrayCommandListeners?: boolean;
   isSettingsWindow: boolean;
   isTrayWindow: boolean;
   topic: string;
@@ -44,6 +45,7 @@ function formatRecordingError(err: unknown): string {
 }
 
 export function useRecordingController({
+  enableTrayCommandListeners = true,
   isSettingsWindow,
   isTrayWindow,
   topic,
@@ -267,34 +269,36 @@ export function useRecordingController({
     let unlistenUiSync: (() => void) | undefined;
     let unlistenUiRecording: (() => void) | undefined;
 
-    tauriListen("tray:start", async () => {
-      try {
-        await startRecording({
-          source: sourceRef.current,
-          topic: topicRef.current,
-          participants: [],
-        });
-      } catch (err) {
-        setStatus(`error: ${formatRecordingError(err)}`);
-      }
-    }).then((fn) => {
-      unlistenStart = fn;
-    });
+    if (enableTrayCommandListeners) {
+      tauriListen("tray:start", async () => {
+        try {
+          await startRecording({
+            source: sourceRef.current,
+            topic: topicRef.current,
+            participants: [],
+          });
+        } catch (err) {
+          setStatus(`error: ${formatRecordingError(err)}`);
+        }
+      }).then((fn) => {
+        unlistenStart = fn;
+      });
 
-    tauriListen("tray:stop", async () => {
-      try {
-        if (!sessionRef.current) return;
-        await tauriInvoke<string>("stop_recording", { sessionId: sessionRef.current.session_id });
-        resetMuteState();
-        setStatus("recorded");
-        setSession(null);
-        await loadSessions();
-      } catch (err) {
-        setStatus(`error: ${formatRecordingError(err)}`);
-      }
-    }).then((fn) => {
-      unlistenStop = fn;
-    });
+      tauriListen("tray:stop", async () => {
+        try {
+          if (!sessionRef.current) return;
+          await tauriInvoke<string>("stop_recording", { sessionId: sessionRef.current.session_id });
+          resetMuteState();
+          setStatus("recorded");
+          setSession(null);
+          await loadSessions();
+        } catch (err) {
+          setStatus(`error: ${formatRecordingError(err)}`);
+        }
+      }).then((fn) => {
+        unlistenStop = fn;
+      });
+    }
 
     tauriListen("ui:sync", (event) => {
       const payload = parseEventPayload<{ source?: string; topic?: string }>(event);
@@ -339,7 +343,7 @@ export function useRecordingController({
       if (unlistenUiSync) unlistenUiSync();
       if (unlistenUiRecording) unlistenUiRecording();
     };
-  }, [loadSessions, setLastSessionId, setSession, setSource, setStatus, setTopic]);
+  }, [enableTrayCommandListeners, loadSessions, setLastSessionId, setSession, setSource, setStatus, setTopic]);
 
   useEffect(() => {
     if (isSettingsWindow) return;

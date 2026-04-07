@@ -44,8 +44,8 @@ use storage::sqlite_repo::{add_event, upsert_session};
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, Listener, Manager, PhysicalPosition, Position, Theme, WebviewUrl,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, Listener, Manager, PhysicalPosition, Position, RunEvent, Theme,
+    WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{Builder as GlobalShortcutBuilder, ShortcutState};
 
@@ -173,6 +173,12 @@ fn register_close_to_tray_for_main(app: &AppHandle) {
                 let state = app.state::<AppState>();
                 let _ = set_tray_indicator(&app, is_recording_active(state.inner()));
             }
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if should_hide_tray_when_main_window_focuses(*focused) {
+                    let app = window_for_event.app_handle();
+                    let _ = hide_tray_window(&app);
+                }
+            }
             if !should_intercept_close_to_tray(&label) {
                 return;
             }
@@ -189,8 +195,7 @@ fn toggle_main_window_visibility(app: &AppHandle) -> Result<(), String> {
         if window.is_visible().map_err(|e| e.to_string())? {
             window.hide().map_err(|e| e.to_string())?;
         } else {
-            window.show().map_err(|e| e.to_string())?;
-            window.set_focus().map_err(|e| e.to_string())?;
+            focus_main_window(app)?;
         }
     }
     Ok(())
@@ -204,16 +209,23 @@ fn should_toggle_tray_popover_on_left_click(platform: &str) -> bool {
     platform == "macos"
 }
 
-fn should_hide_tray_popover_on_focus_lost(
-    platform: &str,
-    focused: bool,
-    is_debug_build: bool,
-) -> bool {
-    platform == "macos" && !focused && !is_debug_build
+fn should_hide_tray_popover_on_focus_lost(focused: bool) -> bool {
+    !focused
 }
 
 fn should_hide_tray_popover_on_toggle_request(visible: bool, focused: bool) -> bool {
     visible && focused
+}
+
+fn should_hide_tray_when_main_window_focuses(focused: bool) -> bool {
+    focused
+}
+
+fn should_reveal_main_window_on_app_reopen(
+    has_visible_windows: bool,
+    main_window_visible: bool,
+) -> bool {
+    !has_visible_windows && !main_window_visible
 }
 
 fn should_probe_idle_levels(recording_active: bool, tray_visible: bool) -> bool {
@@ -258,6 +270,26 @@ fn toggle_tray_window_visibility(
         }
     }
     Ok(())
+}
+
+fn hide_tray_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("tray") {
+        if window.is_visible().map_err(|e| e.to_string())? {
+            window.hide().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn register_tray_window_events(window: &tauri::WebviewWindow) {
+    let window_for_event = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(focused) = event {
+            if should_hide_tray_popover_on_focus_lost(*focused) {
+                let _ = window_for_event.hide();
+            }
+        }
+    });
 }
 
 fn choose_tray_icon_variant(theme: Theme, is_recording: bool) -> TrayIconVariant {
@@ -456,6 +488,7 @@ pub(crate) fn set_tray_indicator_from_state(state: &AppState, is_recording: bool
 
 fn focus_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
+        hide_tray_window(app)?;
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
     }
@@ -495,7 +528,8 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
         .inner_size(460.0, 244.0)
         .resizable(false)
         .always_on_top(true)
-        .skip_taskbar(true);
+        .skip_taskbar(true)
+        .visible(false);
 
     #[cfg(target_os = "macos")]
     {
@@ -507,21 +541,38 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
     }
 
     let window = builder.build().map_err(|e| e.to_string())?;
-    let window_for_event = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::Focused(focused) = event {
-            if should_hide_tray_popover_on_focus_lost(
-                std::env::consts::OS,
-                *focused,
-                cfg!(debug_assertions),
-            ) {
-                let _ = window_for_event.hide();
-            }
-        }
-    });
+    register_tray_window_events(&window);
     let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn prewarm_tray_window(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window("tray").is_some() {
+        return Ok(());
+    }
+
+    let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
+        .title("BigEcho Recorder")
+        .inner_size(460.0, 244.0)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false);
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .decorations(false)
+            .shadow(false)
+            .transparent(true)
+            .visible_on_all_workspaces(true);
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
+    register_tray_window_events(&window);
+    let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
     Ok(())
 }
 
@@ -780,11 +831,9 @@ mod ipc_runtime_tests {
     }
 
     #[test]
-    fn tray_popover_autoclose_policy_is_platform_specific() {
-        assert!(should_hide_tray_popover_on_focus_lost("macos", false, false));
-        assert!(!should_hide_tray_popover_on_focus_lost("macos", false, true));
-        assert!(!should_hide_tray_popover_on_focus_lost("macos", true, false));
-        assert!(!should_hide_tray_popover_on_focus_lost("windows", false, false));
+    fn tray_popover_autoclose_policy_hides_on_focus_loss_for_all_platforms() {
+        assert!(should_hide_tray_popover_on_focus_lost(false));
+        assert!(!should_hide_tray_popover_on_focus_lost(true));
     }
 
     #[test]
@@ -824,6 +873,19 @@ mod ipc_runtime_tests {
         assert!(should_hide_tray_popover_on_toggle_request(true, true));
         assert!(!should_hide_tray_popover_on_toggle_request(true, false));
         assert!(!should_hide_tray_popover_on_toggle_request(false, false));
+    }
+
+    #[test]
+    fn main_window_focus_hides_tray() {
+        assert!(should_hide_tray_when_main_window_focuses(true));
+        assert!(!should_hide_tray_when_main_window_focuses(false));
+    }
+
+    #[test]
+    fn app_reopen_reveals_main_only_when_no_window_is_visible() {
+        assert!(should_reveal_main_window_on_app_reopen(false, false));
+        assert!(!should_reveal_main_window_on_app_reopen(true, false));
+        assert!(!should_reveal_main_window_on_app_reopen(false, true));
     }
 
     #[test]
@@ -1672,6 +1734,7 @@ fn main() {
                 app_data_dir: data_dir.clone(),
             },
         );
+        prewarm_tray_window(&app.handle())?;
         #[cfg(target_os = "macos")]
         {
             let app_menu = build_macos_app_menu(app)?;
@@ -1789,7 +1852,7 @@ fn main() {
         Ok(())
     });
 
-    builder
+    let app = builder
         .plugin(
             GlobalShortcutBuilder::new()
                 .with_shortcuts([REC_HOTKEY, STOP_HOTKEY])
@@ -1850,6 +1913,26 @@ fn main() {
             run_transcription,
             run_summary
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running bigecho app");
+        .build(tauri::generate_context!())
+        .expect("error while building bigecho app");
+
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = event
+        {
+            let main_window_visible = app_handle
+                .get_webview_window("main")
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false);
+            if should_reveal_main_window_on_app_reopen(
+                has_visible_windows,
+                main_window_visible,
+            ) {
+                let _ = focus_main_window(app_handle);
+            }
+        }
+    });
 }
