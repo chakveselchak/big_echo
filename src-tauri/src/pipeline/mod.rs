@@ -1098,31 +1098,44 @@ pub async fn summarize_text(
     settings: &PublicSettings,
     api_key: &str,
     transcript: &str,
+    custom_prompt: Option<&str>,
 ) -> Result<String, String> {
     summarize_text_logged(
         settings,
         api_key,
         transcript,
+        custom_prompt,
         &ExternalApiLogger::disabled(),
     )
     .await
+}
+
+pub(crate) fn resolve_summary_prompt<'a>(
+    settings: &'a PublicSettings,
+    custom_prompt: Option<&'a str>,
+) -> &'a str {
+    if let Some(prompt) = custom_prompt.map(str::trim).filter(|value| !value.is_empty()) {
+        return prompt;
+    }
+    if settings.summary_prompt.trim().is_empty() {
+        "Есть стенограмма встречи. Подготовь краткое саммари."
+    } else {
+        settings.summary_prompt.trim()
+    }
 }
 
 pub async fn summarize_text_logged(
     settings: &PublicSettings,
     api_key: &str,
     transcript: &str,
+    custom_prompt: Option<&str>,
     logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     if settings.summary_url.trim().is_empty() {
         return Err("Summary URL is not configured".to_string());
     }
 
-    let summary_prompt = if settings.summary_prompt.trim().is_empty() {
-        "Есть стенограмма встречи. Подготовь краткое саммари."
-    } else {
-        settings.summary_prompt.trim()
-    };
+    let summary_prompt = resolve_summary_prompt(settings, custom_prompt);
 
     let payload = json!({
       "model": settings.openai_model,
@@ -2042,6 +2055,7 @@ mod tests {
                 &settings,
                 "openai-test-key",
                 "meeting transcript",
+                None,
             ))
             .expect("summary ok");
         assert_eq!(out, "ok summary");
@@ -2055,6 +2069,42 @@ mod tests {
         assert_eq!(
             payload["messages"][0]["content"].as_str(),
             Some("Сделай саммари: решения, риски, action items")
+        );
+    }
+
+    #[test]
+    fn summarize_text_prefers_non_empty_custom_prompt_override() {
+        let settings = PublicSettings {
+            recording_root: "./recordings".to_string(),
+            artifact_open_app: String::new(),
+            transcription_provider: "nexara".to_string(),
+            transcription_url: "https://example.com/transcribe".to_string(),
+            transcription_task: "transcribe".to_string(),
+            transcription_diarization_setting: "general".to_string(),
+            salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),
+            salute_speech_model: "general".to_string(),
+            salute_speech_language: "ru-RU".to_string(),
+            salute_speech_sample_rate: 48_000,
+            salute_speech_channels_count: 1,
+            summary_url: "https://example.com/summary".to_string(),
+            summary_prompt: "Системный промпт".to_string(),
+            openai_model: "gpt-4.1-mini".to_string(),
+            audio_format: "opus".to_string(),
+            opus_bitrate_kbps: 24,
+            mic_device_name: String::new(),
+            system_device_name: String::new(),
+            artifact_opener_app: String::new(),
+            auto_run_pipeline_on_stop: false,
+            api_call_logging_enabled: false,
+        };
+
+        assert_eq!(
+            resolve_summary_prompt(&settings, Some("  Кастомный промпт  ")),
+            "Кастомный промпт"
+        );
+        assert_eq!(
+            resolve_summary_prompt(&settings, Some("   ")),
+            "Системный промпт"
         );
     }
 

@@ -25,7 +25,7 @@ import { useRecordingController } from "./features/recording/useRecordingControl
 import { useSessions } from "./features/sessions/useSessions";
 import { useSettingsForm } from "./features/settings/useSettingsForm";
 import { formatSecretSaveState, getErrorMessage, splitParticipants } from "./lib/appUtils";
-import { getCurrentWindowLabel, tauriConvertFileSrc } from "./lib/tauri";
+import { getCurrentWindowLabel, tauriConvertFileSrc, tauriInvoke } from "./lib/tauri";
 import { formatAppStatus, formatSessionStatus } from "./status";
 import vscodeIcon from "./assets/editor-icons/vscode.svg";
 import cursorIcon from "./assets/editor-icons/cursor.svg";
@@ -43,6 +43,11 @@ const openerUiFallback = [
 ] as const;
 
 type MainTab = "sessions" | "settings";
+type SummaryPromptDialogState = {
+  sessionId: string;
+  value: string;
+  saving: boolean;
+};
 
 function localIconForEditor(editorName: string): string | null {
   const lowered = editorName.toLowerCase();
@@ -253,9 +258,11 @@ export function App() {
   const artifactPreviewBodyRef = useRef<HTMLPreElement | null>(null);
   const deleteDialogRef = useRef<HTMLDivElement | null>(null);
   const artifactDialogRef = useRef<HTMLDivElement | null>(null);
+  const summaryPromptDialogRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const wasDialogOpenRef = useRef(false);
   const loadSessionsRef = useRef<(() => Promise<void>) | null>(null);
+  const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
   const shouldLoadSettings = isTrayWindow || isSettingsWindow || mainTab === "settings";
   const {
     audioDevices,
@@ -314,6 +321,7 @@ export function App() {
     openSessionArtifact,
     pipelineStateBySession,
     requestDeleteSession,
+    saveSessionDetails,
     sessionArtifactSearchHits,
     sessionDetails,
     sessionSearchQuery,
@@ -404,8 +412,14 @@ export function App() {
   }, [artifactPreview]);
 
   useEffect(() => {
-    const isDialogOpen = Boolean(deleteTarget || artifactPreview);
-    const dialogRef = deleteTarget ? deleteDialogRef : artifactPreview ? artifactDialogRef : null;
+    const isDialogOpen = Boolean(deleteTarget || artifactPreview || summaryPromptDialog);
+    const dialogRef = deleteTarget
+      ? deleteDialogRef
+      : artifactPreview
+        ? artifactDialogRef
+        : summaryPromptDialog
+          ? summaryPromptDialogRef
+          : null;
     const dialogElement = dialogRef ? dialogRef.current : null;
 
     if (isDialogOpen && !wasDialogOpenRef.current) {
@@ -428,7 +442,7 @@ export function App() {
     }
 
     wasDialogOpenRef.current = isDialogOpen;
-  }, [artifactPreview, deleteTarget]);
+  }, [artifactPreview, deleteTarget, summaryPromptDialog]);
 
   function closeOpenerDropdown({ restoreFocus = true }: { restoreFocus?: boolean } = {}) {
     setIsOpenerDropdownOpen(false);
@@ -545,6 +559,55 @@ export function App() {
 
     event.preventDefault();
     (focusables[nextIndex] ?? dialogNode)?.focus();
+  }
+
+  async function openSummaryPromptDialogForSession(detail: SessionMetaView) {
+    const persistedPrompt = detail.custom_summary_prompt?.trim() ?? "";
+    if (persistedPrompt) {
+      setSummaryPromptDialog({
+        sessionId: detail.session_id,
+        value: detail.custom_summary_prompt ?? "",
+        saving: false,
+      });
+      return;
+    }
+
+    let defaultPrompt = settings?.summary_prompt ?? "";
+    if (!settings) {
+      try {
+        const currentSettings = await tauriInvoke<PublicSettings>("get_settings");
+        defaultPrompt = currentSettings.summary_prompt;
+      } catch (err) {
+        setStatus(`error: ${getErrorMessage(err)}`);
+      }
+    }
+
+    setSummaryPromptDialog({
+      sessionId: detail.session_id,
+      value: defaultPrompt,
+      saving: false,
+    });
+  }
+
+  async function confirmSummaryPromptDialog() {
+    if (!summaryPromptDialog) return;
+    const current = sessionDetails[summaryPromptDialog.sessionId];
+    if (!current) {
+      setSummaryPromptDialog(null);
+      return;
+    }
+
+    const nextDetail: SessionMetaView = {
+      ...current,
+      custom_summary_prompt: summaryPromptDialog.value,
+    };
+    setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: true } : prev));
+    const saved = await saveSessionDetails(summaryPromptDialog.sessionId, nextDetail);
+    if (saved) {
+      setSummaryPromptDialog(null);
+    } else {
+      setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
+    }
   }
 
   useEffect(() => {
@@ -1358,6 +1421,7 @@ export function App() {
                 session_id: item.session_id,
                 source: item.primary_tag,
                 custom_tag: "",
+                custom_summary_prompt: "",
                 topic: item.topic,
                 participants: [],
               };
@@ -1562,6 +1626,24 @@ export function App() {
                             "Get Summary"
                           )}
                         </button>
+                        <button
+                          type="button"
+                          className="icon-button session-summary-prompt-button"
+                          aria-label="Настроить промпт саммари"
+                          title="Настроить промпт саммари"
+                          onClick={() => void openSummaryPromptDialogForSession(detail)}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6A2.5 2.5 0 0 1 16.5 15H11l-4.25 3.5A.75.75 0 0 1 5.5 18v-3.3A2.49 2.49 0 0 1 5 13.5v-7Z"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.7"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
                         {summaryPending && (
                           <span
                             className="visually-hidden"
@@ -1654,6 +1736,58 @@ export function App() {
                 <div className="button-row">
                   <button className="secondary-button" type="button" onClick={closeArtifactPreview}>
                     Закрыть
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        {summaryPromptDialog && (
+            <div
+              className="confirm-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Промпт саммари"
+              onKeyDown={(event) =>
+                handleDialogKeyDown(event, summaryPromptDialogRef.current, () => setSummaryPromptDialog(null))
+              }
+            >
+              <div className="confirm-card summary-prompt-card" ref={summaryPromptDialogRef} tabIndex={-1}>
+                <div className="session-title-line">
+                  <strong>Промпт саммари</strong>
+                </div>
+                <label className="field">
+                  <textarea
+                    rows={8}
+                    value={summaryPromptDialog.value}
+                    onChange={(event) =>
+                      setSummaryPromptDialog((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              value: event.target.value,
+                            }
+                          : prev
+                      )
+                    }
+                    disabled={summaryPromptDialog.saving}
+                  />
+                </label>
+                <div className="button-row">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => setSummaryPromptDialog(null)}
+                    disabled={summaryPromptDialog.saving}
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void confirmSummaryPromptDialog()}
+                    disabled={summaryPromptDialog.saving}
+                  >
+                    {summaryPromptDialog.saving ? "Сохранение..." : "Ок"}
                   </button>
                 </div>
               </div>

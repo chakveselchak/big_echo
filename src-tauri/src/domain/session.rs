@@ -42,6 +42,8 @@ pub struct SessionMeta {
     pub primary_tag: String,
     pub topic: String,
     pub participants: Vec<String>,
+    #[serde(default)]
+    pub custom_summary_prompt: String,
     pub status: SessionStatus,
     pub artifacts: SessionArtifacts,
     pub errors: Vec<String>,
@@ -70,6 +72,7 @@ impl SessionMeta {
             primary_tag,
             topic,
             participants,
+            custom_summary_prompt: String::new(),
             status: SessionStatus::Recording,
             artifacts: SessionArtifacts::default(),
             errors: vec![],

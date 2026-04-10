@@ -119,6 +119,7 @@ pub async fn run_pipeline_core(
     session_id: &str,
     invocation: PipelineInvocation,
     mode: PipelineMode,
+    custom_summary_prompt: Option<String>,
 ) -> Result<String, String> {
     let settings = load_settings(&dirs.app_data_dir)?;
     let data_dir = dirs.app_data_dir.clone();
@@ -242,6 +243,15 @@ pub async fn run_pipeline_core(
     }
 
     if needs_summary {
+        let summary_prompt_override = custom_summary_prompt
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                let prompt = meta.custom_summary_prompt.trim();
+                (!prompt.is_empty()).then(|| prompt.to_string())
+            });
         let transcript_for_summary = if let Some(text) = transcript {
             text
         } else {
@@ -261,13 +271,16 @@ pub async fn run_pipeline_core(
                 "url={} model={} prompt_chars={}",
                 settings.summary_url.trim(),
                 settings.openai_model.trim(),
-                settings.summary_prompt.trim().chars().count()
+                pipeline::resolve_summary_prompt(&settings, summary_prompt_override.as_deref())
+                    .chars()
+                    .count()
             ),
         );
         let summary = match pipeline::summarize_text_logged(
             &settings,
             &openai_key,
             &transcript_for_summary,
+            summary_prompt_override.as_deref(),
             &external_api_logger,
         )
         .await
@@ -326,6 +339,7 @@ pub async fn process_retry_jobs_once(
             &session_id,
             PipelineInvocation::WorkerRetry,
             PipelineMode::Full,
+            None,
         )
         .await;
         if result.is_ok() {

@@ -58,6 +58,7 @@ export type SessionMetaView = {
   session_id: string;
   source: string;
   custom_tag: string;
+  custom_summary_prompt?: string;
   topic: string;
   participants: string[];
 };

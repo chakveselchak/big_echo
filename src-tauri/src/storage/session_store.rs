@@ -80,4 +80,29 @@ mod tests {
         let loaded = load_meta(&path).expect("load meta");
         assert_eq!(loaded.artifacts.summary_file, "summary_10.03.2026.md");
     }
+
+    #[test]
+    fn load_meta_defaults_missing_custom_summary_prompt_to_empty_string() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("meta.json");
+        let meta = SessionMeta::new(
+            "legacy-session".to_string(),
+            vec!["zoom".to_string()],
+            "Topic".to_string(),
+            vec!["Alice".to_string()],
+        );
+        let mut body = serde_json::to_value(&meta).expect("serialize meta");
+        body.as_object_mut()
+            .expect("meta object")
+            .remove("custom_summary_prompt");
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&body).expect("serialize legacy meta"),
+        )
+        .expect("write legacy meta");
+
+        let loaded = load_meta(&path).expect("load meta");
+        let loaded_json = serde_json::to_value(loaded).expect("serialize loaded meta");
+        assert_eq!(loaded_json["custom_summary_prompt"], "");
+    }
 }

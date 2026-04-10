@@ -250,6 +250,7 @@ pub async fn run_pipeline(
         &session_id,
         PipelineInvocation::Run,
         PipelineMode::Full,
+        None,
     )
     .await
 }
@@ -264,6 +265,7 @@ pub async fn retry_pipeline(
         &session_id,
         PipelineInvocation::Retry,
         PipelineMode::Full,
+        None,
     )
     .await
 }
@@ -278,6 +280,7 @@ pub async fn run_transcription(
         &session_id,
         PipelineInvocation::Manual,
         PipelineMode::TranscriptionOnly,
+        None,
     )
     .await
 }
@@ -286,12 +289,14 @@ pub async fn run_transcription(
 pub async fn run_summary(
     dirs: tauri::State<'_, AppDirs>,
     session_id: String,
+    custom_prompt: Option<String>,
 ) -> Result<String, String> {
     run_pipeline_core(
         dirs.inner().clone(),
         &session_id,
         PipelineInvocation::Manual,
         PipelineMode::SummaryOnly,
+        custom_prompt,
     )
     .await
 }
