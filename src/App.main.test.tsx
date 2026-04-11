@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -235,6 +235,7 @@ describe("App main window", () => {
           session_id: "s2",
           source: "zoom",
           custom_tag: "alpha",
+          custom_summary_prompt: "",
           topic: "Initial topic",
           participants: ["Alice"],
         };
@@ -267,11 +268,112 @@ describe("App main window", () => {
           session_id: "s2",
           source: "zoom",
           custom_tag: "alpha",
+          custom_summary_prompt: "",
           topic: "Edited topic",
           participants: ["Alice"],
         },
       });
     }, { timeout: 3000 });
+  });
+
+  it("opens summary prompt dialog with system default and saves custom prompt on Ok", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_provider: "nexara",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          salute_speech_scope: "SALUTE_SPEECH_CORP",
+          salute_speech_model: "general",
+          salute_speech_language: "ru-RU",
+          salute_speech_sample_rate: 48000,
+          salute_speech_channels_count: 1,
+          summary_url: "",
+          summary_prompt: "Сделай саммари блоками: решения, риски, action items",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-prompt",
+            status: "recorded",
+            primary_tag: "slack",
+            topic: "Prompt session",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T12:30:00+03:00",
+            session_dir: "/tmp/s-prompt",
+            audio_duration_hms: "00:20:00",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-prompt",
+          source: "slack",
+          custom_tag: "",
+          custom_summary_prompt: "",
+          topic: "Prompt session",
+          participants: [],
+        };
+      }
+      if (cmd === "update_session_details") {
+        return "updated";
+      }
+      return null;
+    });
+
+    render(<App />);
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_session_meta", { sessionId: "s-prompt" });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const textarea = within(dialog).getByRole("textbox");
+    expect(textarea).toHaveValue("Сделай саммари блоками: решения, риски, action items");
+
+    await user.clear(textarea);
+    await user.type(textarea, "Итог: решения, риски, следующие шаги");
+    await user.click(within(dialog).getByRole("button", { name: "Ок" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
+        payload: {
+          session_id: "s-prompt",
+          source: "slack",
+          custom_tag: "",
+          custom_summary_prompt: "Итог: решения, риски, следующие шаги",
+          topic: "Prompt session",
+          participants: [],
+        },
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
+    const reopenedDialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    expect(within(reopenedDialog).getByRole("textbox")).toHaveValue(
+      "Итог: решения, риски, следующие шаги"
+    );
   });
 
   it("shows audio format in session title meta instead of source", async () => {

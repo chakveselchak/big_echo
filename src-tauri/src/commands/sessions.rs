@@ -601,6 +601,7 @@ pub fn get_session_meta(
         session_id: meta.session_id,
         source: meta.primary_tag,
         custom_tag,
+        custom_summary_prompt: meta.custom_summary_prompt,
         topic: meta.topic,
         participants: meta.participants,
     })
@@ -628,6 +629,7 @@ pub fn update_session_details(
 
     meta.primary_tag = source;
     meta.tags = tags;
+    meta.custom_summary_prompt = payload.custom_summary_prompt.trim().to_string();
     meta.topic = payload.topic.trim().to_string();
     meta.participants = payload
         .participants
@@ -645,7 +647,7 @@ pub fn update_session_details(
         &dirs.app_data_dir,
         &meta.session_id,
         "session_details_updated",
-        "Source/topic/participants updated",
+        "Source/topic/participants/summary prompt updated",
     )?;
     Ok("updated".to_string())
 }

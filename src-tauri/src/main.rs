@@ -11,7 +11,7 @@ mod text_editors;
 
 use app_state::{AppDirs, AppState};
 #[cfg(test)]
-use app_state::{SessionMetaView, StartRecordingResponse};
+use app_state::StartRecordingResponse;
 use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
 use commands::recording::{
@@ -683,6 +683,7 @@ pub(crate) fn stop_active_recording_internal(
                 &session_id,
                 PipelineInvocation::Run,
                 PipelineMode::Full,
+                None,
             )
             .await;
         });
@@ -782,6 +783,7 @@ mod ipc_runtime_tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
     use serde_json::json;
@@ -1038,6 +1040,23 @@ mod ipc_runtime_tests {
         format!("http://{addr}")
     }
 
+    fn spawn_summary_capture_server() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind summary server");
+        let addr = listener.local_addr().expect("local addr");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured_requests = Arc::clone(&requests);
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let request = read_http_request(&mut stream);
+            captured_requests.lock().expect("lock requests").push(request);
+            write_http_json_response(
+                &mut stream,
+                r#"{"choices":[{"message":{"content":"mock summary"}}]}"#,
+            );
+        });
+        (format!("http://{addr}"), requests)
+    }
+
     fn read_http_request_line(stream: &mut TcpStream) -> String {
         let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
         let mut line = String::new();
@@ -1062,6 +1081,36 @@ mod ipc_runtime_tests {
             reader.read_exact(&mut body).expect("read request body");
         }
         line
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> String {
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        let mut request = String::new();
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read request line");
+        request.push_str(&line);
+
+        let mut content_length = 0usize;
+        loop {
+            let mut header_line = String::new();
+            reader
+                .read_line(&mut header_line)
+                .expect("read header line");
+            request.push_str(&header_line);
+            if header_line == "\r\n" {
+                break;
+            }
+            let lower = header_line.to_ascii_lowercase();
+            if let Some(rest) = lower.strip_prefix("content-length:") {
+                content_length = rest.trim().parse::<usize>().unwrap_or(0);
+            }
+        }
+        if content_length > 0 {
+            let mut body = vec![0u8; content_length];
+            reader.read_exact(&mut body).expect("read request body");
+            request.push_str(&String::from_utf8_lossy(&body));
+        }
+        request
     }
 
     fn write_http_json_response(stream: &mut TcpStream, body: &str) {
@@ -1217,6 +1266,7 @@ mod ipc_runtime_tests {
                         "session_id":"session-details",
                         "source":"telegram",
                         "custom_tag":"client-a",
+                        "customSummaryPrompt":"Сделай саммари только по решениям",
                         "topic":"",
                         "participants":["Alice", "Bob"]
                     }
@@ -1231,12 +1281,17 @@ mod ipc_runtime_tests {
             invoke_request("get_session_meta", json!({ "sessionId":"session-details" })),
         );
         let get_out = extract_ok_json(get_response.expect("get should succeed"));
-        let details: SessionMetaView = serde_json::from_value(get_out).expect("parse details");
-        assert_eq!(details.source, "telegram");
-        assert_eq!(details.custom_tag, "client-a");
-        assert_eq!(details.topic, "");
+        let details = get_out.as_object().expect("session details object");
+        assert_eq!(details["source"], "telegram");
+        assert_eq!(details["custom_tag"], "client-a");
         assert_eq!(
-            details.participants,
+            details["custom_summary_prompt"],
+            "Сделай саммари только по решениям"
+        );
+        assert_eq!(details["topic"], "");
+        assert_eq!(
+            serde_json::from_value::<Vec<String>>(details["participants"].clone())
+                .expect("participants"),
             vec!["Alice".to_string(), "Bob".to_string()]
         );
     }
@@ -1428,6 +1483,122 @@ mod ipc_runtime_tests {
     }
 
     #[test]
+    fn invoke_run_summary_uses_explicit_custom_prompt() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (base_url, requests) = spawn_summary_capture_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-summary-custom", &base_url);
+        let session_dir = app_data_dir.join("sessions").join("session-summary-custom");
+        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
+            .expect("write transcript");
+
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "run_summary",
+                json!({
+                    "sessionId":"session-summary-custom",
+                    "customPrompt":"Сделай саммари только по рискам и решениям"
+                }),
+            ),
+        )
+        .expect("run_summary should succeed");
+        assert_eq!(
+            response.deserialize::<String>().expect("done string"),
+            "done".to_string()
+        );
+
+        let captured = requests.lock().expect("lock requests");
+        let request_body = captured[0]
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        let payload: serde_json::Value =
+            serde_json::from_str(request_body).expect("valid json payload");
+        assert_eq!(
+            payload["messages"][0]["content"].as_str(),
+            Some("Сделай саммари только по рискам и решениям")
+        );
+    }
+
+    #[test]
+    fn invoke_run_summary_uses_persisted_session_prompt_when_override_is_missing() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (base_url, requests) = spawn_summary_capture_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-summary-persisted", &base_url);
+        let session_dir = app_data_dir.join("sessions").join("session-summary-persisted");
+        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
+            .expect("write transcript");
+
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt = "Сделай саммари только по action items".to_string();
+        save_meta(&meta_path, &meta).expect("save meta");
+
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("run_summary", json!({ "sessionId":"session-summary-persisted" })),
+        )
+        .expect("run_summary should succeed");
+        assert_eq!(
+            response.deserialize::<String>().expect("done string"),
+            "done".to_string()
+        );
+
+        let captured = requests.lock().expect("lock requests");
+        let request_body = captured[0]
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        let payload: serde_json::Value =
+            serde_json::from_str(request_body).expect("valid json payload");
+        assert_eq!(
+            payload["messages"][0]["content"].as_str(),
+            Some("Сделай саммари только по action items")
+        );
+    }
+
+    #[test]
+    fn invoke_run_summary_without_custom_prompt_uses_settings_prompt() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (base_url, requests) = spawn_summary_capture_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-summary-default", &base_url);
+        let session_dir = app_data_dir.join("sessions").join("session-summary-default");
+        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
+            .expect("write transcript");
+
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("run_summary", json!({ "sessionId":"session-summary-default" })),
+        )
+        .expect("run_summary should succeed");
+        assert_eq!(
+            response.deserialize::<String>().expect("done string"),
+            "done".to_string()
+        );
+
+        let captured = requests.lock().expect("lock requests");
+        let request_body = captured[0]
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        let payload: serde_json::Value =
+            serde_json::from_str(request_body).expect("valid json payload");
+        assert_eq!(
+            payload["messages"][0]["content"].as_str(),
+            Some("Есть стенограмма встречи. Подготовь краткое саммари.")
+        );
+    }
+
+    #[test]
     fn invoke_retry_pipeline_audio_missing_schedules_retry_job() {
         let (app, app_data_dir) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -1577,6 +1748,7 @@ mod ipc_runtime_tests {
             "session-worker-exhaust",
             PipelineInvocation::WorkerRetry,
             PipelineMode::Full,
+            None,
         ));
         let err = result.expect_err("worker run should fail without audio");
         assert_eq!(err, "Audio file is missing");

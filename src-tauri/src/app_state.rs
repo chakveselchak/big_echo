@@ -81,6 +81,8 @@ pub struct UpdateSessionDetailsRequest {
     pub session_id: String,
     pub source: String,
     pub custom_tag: String,
+    #[serde(default, alias = "customSummaryPrompt")]
+    pub custom_summary_prompt: String,
     pub topic: String,
     pub participants: Vec<String>,
 }
@@ -90,6 +92,7 @@ pub struct SessionMetaView {
     pub session_id: String,
     pub source: String,
     pub custom_tag: String,
+    pub custom_summary_prompt: String,
     pub topic: String,
     pub participants: Vec<String>,
 }

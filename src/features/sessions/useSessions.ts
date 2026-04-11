@@ -35,13 +35,21 @@ function sameSessionMeta(left: SessionMetaView, right: SessionMetaView) {
     left.session_id === right.session_id &&
     left.source === right.source &&
     left.custom_tag === right.custom_tag &&
+    (left.custom_summary_prompt ?? "") === (right.custom_summary_prompt ?? "") &&
     left.topic === right.topic &&
     sameParticipants(left.participants, right.participants)
   );
 }
 
 function sessionMetaSignature(meta: SessionMetaView) {
-  return `${meta.session_id}\n${meta.source}\n${meta.custom_tag}\n${meta.topic}\n${meta.participants.join("\u001f")}`;
+  return `${meta.session_id}\n${meta.source}\n${meta.custom_tag}\n${meta.custom_summary_prompt ?? ""}\n${meta.topic}\n${meta.participants.join("\u001f")}`;
+}
+
+function normalizeSessionMeta(meta: SessionMetaView): SessionMetaView {
+  return {
+    ...meta,
+    custom_summary_prompt: meta.custom_summary_prompt ?? "",
+  };
 }
 
 function fallbackSessionMeta(item: SessionListItem): SessionMetaView {
@@ -49,6 +57,7 @@ function fallbackSessionMeta(item: SessionListItem): SessionMetaView {
     session_id: item.session_id,
     source: item.primary_tag,
     custom_tag: "",
+    custom_summary_prompt: "",
     topic: item.topic,
     participants: [],
   };
@@ -78,11 +87,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     const details = await Promise.all(
       data.map(async (item) => {
         if (item.meta) {
-          return [item.session_id, item.meta] as const;
+          return [item.session_id, normalizeSessionMeta(item.meta)] as const;
         }
         try {
           const meta = await tauriInvoke<SessionMetaView>("get_session_meta", { sessionId: item.session_id });
-          return [item.session_id, meta] as const;
+          return [item.session_id, normalizeSessionMeta(meta)] as const;
         } catch {
           return [item.session_id, fallbackSessionMeta(item)] as const;
         }
@@ -128,7 +137,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       return next;
     });
     try {
-      await tauriInvoke<string>("run_summary", { sessionId });
+      const customPrompt = sessionDetails[sessionId]?.custom_summary_prompt?.trim() ?? "";
+      await tauriInvoke<string>(
+        "run_summary",
+        customPrompt ? { sessionId, customPrompt } : { sessionId }
+      );
       setPipelineStateBySession((prev) => ({
         ...prev,
         [sessionId]: { kind: "success", text: "Summary fetched successfully" },
@@ -144,6 +157,39 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       setStatus(`error: ${message}`);
     } finally {
       setSummaryPendingBySession((prev) => ({ ...prev, [sessionId]: false }));
+    }
+  }
+
+  async function persistSessionDetails(sessionId: string, detail: SessionMetaView) {
+    await tauriInvoke<string>("update_session_details", {
+      payload: {
+        session_id: sessionId,
+        source: detail.source,
+        custom_tag: detail.custom_tag,
+        custom_summary_prompt: detail.custom_summary_prompt ?? "",
+        topic: detail.topic,
+        participants: detail.participants,
+      },
+    });
+    setSavedSessionDetails((prev) => ({ ...prev, [sessionId]: detail }));
+  }
+
+  async function saveSessionDetails(sessionId: string, detail: SessionMetaView) {
+    const normalized = normalizeSessionMeta(detail);
+    const existing = autosaveTimersRef.current[sessionId];
+    if (existing) {
+      clearTimeout(existing);
+      delete autosaveTimersRef.current[sessionId];
+    }
+    delete pendingAutosaveSignatureRef.current[sessionId];
+    setSessionDetails((prev) => ({ ...prev, [sessionId]: normalized }));
+    try {
+      await persistSessionDetails(sessionId, normalized);
+      setStatus("session_details_saved");
+      return true;
+    } catch (err) {
+      setStatus(`error: ${String(err)}`);
+      return false;
     }
   }
 
@@ -291,16 +337,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
 
       autosaveTimersRef.current[sessionId] = setTimeout(async () => {
         try {
-          await tauriInvoke<string>("update_session_details", {
-            payload: {
-              session_id: sessionId,
-              source: current.source,
-              custom_tag: current.custom_tag,
-              topic: current.topic,
-              participants: current.participants,
-            },
-          });
-          setSavedSessionDetails((prev) => ({ ...prev, [sessionId]: current }));
+          await persistSessionDetails(sessionId, current);
           setStatus("session_details_autosaved");
         } catch (err) {
           setStatus(`error: ${String(err)}`);
@@ -369,6 +406,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     openSessionArtifact,
     pipelineStateBySession,
     requestDeleteSession,
+    saveSessionDetails,
     sessionArtifactSearchHits,
     sessionDetails,
     sessionSearchQuery,

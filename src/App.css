@@ -1288,6 +1288,15 @@ select {
   border-color: rgba(141, 154, 170, 0.12);
 }
 
+.session-summary-prompt-button {
+  color: #44687f;
+}
+
+.session-summary-prompt-button:hover {
+  background: rgba(68, 104, 127, 0.08);
+  border-color: rgba(68, 104, 127, 0.16);
+}
+
 .session-label-summary {
   color: #1b7a45;
   background: #eef9f1;
@@ -1359,6 +1368,15 @@ select {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.summary-prompt-card {
+  width: min(720px, calc(100vw - 48px));
+}
+
+.summary-prompt-card textarea {
+  min-height: 180px;
+  resize: vertical;
 }
 
 .session-audio-toggle:hover {
