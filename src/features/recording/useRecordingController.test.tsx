@@ -2,7 +2,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { invokeMock, emitMock, listenMock, listeners } = vi.hoisted(() => ({
+const { captureAnalyticsEventMock, invokeMock, emitMock, listenMock, listeners } = vi.hoisted(() => ({
+  captureAnalyticsEventMock: vi.fn(async () => undefined),
   listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
   emitMock: vi.fn(async () => undefined),
   invokeMock: vi.fn(async (cmd: string) => {
@@ -45,6 +46,10 @@ vi.mock("../../lib/tauri", () => ({
   tauriEmit: emitMock,
   tauriInvoke: invokeMock,
   tauriListen: listenMock,
+}));
+
+vi.mock("../../lib/analytics", () => ({
+  captureAnalyticsEvent: captureAnalyticsEventMock,
 }));
 
 import { StartResponse } from "../../appTypes";
@@ -90,6 +95,7 @@ describe("useRecordingController", () => {
   beforeEach(() => {
     listeners.clear();
     invokeMock.mockClear();
+    captureAnalyticsEventMock.mockClear();
     emitMock.mockClear();
     listenMock.mockClear();
     setDefaultInvokeMockImplementation();
@@ -146,6 +152,13 @@ describe("useRecordingController", () => {
         topic: "",
         participants: [],
       },
+    });
+    expect(captureAnalyticsEventMock).toHaveBeenCalledWith("rec_clicked", {
+      source: "slack",
+      surface: "main",
+      custom_tag_present: false,
+      topic_present: false,
+      participants_count: 0,
     });
     expect(loadSessions).toHaveBeenCalled();
   });

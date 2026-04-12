@@ -815,7 +815,10 @@ mod tests {
         let session_dir = PathBuf::from(&response.session_dir);
 
         assert_eq!(response.status, "recorded");
-        assert!(session_dir.starts_with(recording_root.join("other")));
+        assert!(session_dir.starts_with(recording_root.join(Local::now().format("%d.%m.%Y").to_string())));
+        assert!(!session_dir
+            .components()
+            .any(|component| component.as_os_str() == "other"));
         assert!(session_dir
             .to_string_lossy()
             .contains(&Local::now().format("%d.%m.%Y").to_string()));
