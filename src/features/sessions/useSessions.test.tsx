@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { invokeMock } = vi.hoisted(() => ({
+const { captureAnalyticsEventMock, invokeMock } = vi.hoisted(() => ({
+  captureAnalyticsEventMock: vi.fn(async () => undefined),
   invokeMock: vi.fn(async (cmd: string, args?: unknown) => {
     if (cmd === "list_sessions") {
       return [
@@ -37,11 +38,16 @@ vi.mock("../../lib/tauri", () => ({
   tauriInvoke: invokeMock,
 }));
 
+vi.mock("../../lib/analytics", () => ({
+  captureAnalyticsEvent: captureAnalyticsEventMock,
+}));
+
 import { useSessions } from "./useSessions";
 
 describe("useSessions", () => {
   beforeEach(() => {
     invokeMock.mockClear();
+    captureAnalyticsEventMock.mockClear();
   });
 
   it("loads sessions and meta details through the tauri adapter", async () => {
@@ -232,5 +238,28 @@ describe("useSessions", () => {
       sessionId: "s1",
       customPrompt: "Сделай саммари по решениям",
     });
+    expect(captureAnalyticsEventMock).toHaveBeenCalledWith("get_summary_clicked", {
+      session_id: "s1",
+      surface: "sessions",
+      custom_prompt_present: true,
+    });
+  });
+
+  it("tracks Get text clicks before running transcription", async () => {
+    const setStatus = vi.fn();
+    const setLastSessionId = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId })
+    );
+
+    await act(async () => {
+      await result.current.getText("s1");
+    });
+
+    expect(captureAnalyticsEventMock).toHaveBeenCalledWith("get_text_clicked", {
+      session_id: "s1",
+      surface: "sessions",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("run_transcription", { sessionId: "s1" });
   });
 });

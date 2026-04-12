@@ -24,6 +24,7 @@ import { TrayAudioRow } from "./features/recording/TrayAudioRow";
 import { useRecordingController } from "./features/recording/useRecordingController";
 import { useSessions } from "./features/sessions/useSessions";
 import { useSettingsForm } from "./features/settings/useSettingsForm";
+import { initializeAnalytics } from "./lib/analytics";
 import { formatSecretSaveState, getErrorMessage, splitParticipants } from "./lib/appUtils";
 import { getCurrentWindowLabel, tauriConvertFileSrc, tauriInvoke } from "./lib/tauri";
 import { formatAppStatus, formatSessionStatus } from "./status";
@@ -365,6 +366,10 @@ export function App() {
     setStatus,
     loadSessions,
   });
+
+  useEffect(() => {
+    initializeAnalytics({ window_label: currentWindowLabel });
+  }, []);
 
   useEffect(() => {
     loadSessionsRef.current = loadSessions;

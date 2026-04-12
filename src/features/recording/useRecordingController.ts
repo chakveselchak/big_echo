@@ -6,6 +6,7 @@ import {
   StartResponse,
   UiSyncStateView,
 } from "../../appTypes";
+import { captureAnalyticsEvent } from "../../lib/analytics";
 import { clamp01, parseEventPayload, splitParticipants } from "../../lib/appUtils";
 import { tauriEmit, tauriInvoke, tauriListen } from "../../lib/tauri";
 import { defaultRecordingMuteState, nextRecordingMuteState } from "./trayAudio";
@@ -114,7 +115,20 @@ export function useRecordingController({
     setLastSessionId(sessionId);
   }
 
-  async function startRecording(payload: { source: string; customTag?: string; topic?: string; participants?: string[] }) {
+  async function startRecording(payload: {
+    source: string;
+    customTag?: string;
+    topic?: string;
+    participants?: string[];
+    surface?: string;
+  }) {
+    void captureAnalyticsEvent("rec_clicked", {
+      source: payload.source,
+      surface: payload.surface ?? (isTrayWindow ? "tray" : "main"),
+      custom_tag_present: Boolean(payload.customTag?.trim()),
+      topic_present: Boolean(payload.topic?.trim()),
+      participants_count: payload.participants?.length ?? 0,
+    });
     const tags = [payload.source];
     if (payload.customTag && payload.customTag.trim()) tags.push(payload.customTag.trim());
     const response = await tauriInvoke<StartResponse>("start_recording", {
@@ -135,6 +149,7 @@ export function useRecordingController({
       customTag,
       topic,
       participants: splitParticipants(participants),
+      surface: "main",
     });
   }
 
@@ -144,6 +159,7 @@ export function useRecordingController({
         source,
         topic,
         participants: [],
+        surface: "tray",
       });
     } catch (err) {
       setStatus(`error: ${formatRecordingError(err)}`);
@@ -276,6 +292,7 @@ export function useRecordingController({
             source: sourceRef.current,
             topic: topicRef.current,
             participants: [],
+            surface: "tray_event",
           });
         } catch (err) {
           setStatus(`error: ${formatRecordingError(err)}`);

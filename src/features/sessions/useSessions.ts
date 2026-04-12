@@ -7,6 +7,7 @@ import {
   SessionMetaView,
   StartResponse,
 } from "../../appTypes";
+import { captureAnalyticsEvent } from "../../lib/analytics";
 import { getErrorMessage } from "../../lib/appUtils";
 import { tauriInvoke } from "../../lib/tauri";
 
@@ -103,6 +104,10 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   }
 
   async function getText(sessionId: string) {
+    void captureAnalyticsEvent("get_text_clicked", {
+      session_id: sessionId,
+      surface: "sessions",
+    });
     setTextPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
     setPipelineStateBySession((prev) => {
       const next = { ...prev };
@@ -130,6 +135,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   }
 
   async function getSummary(sessionId: string) {
+    void captureAnalyticsEvent("get_summary_clicked", {
+      session_id: sessionId,
+      surface: "sessions",
+      custom_prompt_present: Boolean(sessionDetails[sessionId]?.custom_summary_prompt?.trim()),
+    });
     setSummaryPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
     setPipelineStateBySession((prev) => {
       const next = { ...prev };

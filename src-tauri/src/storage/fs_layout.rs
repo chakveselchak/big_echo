@@ -1,13 +1,10 @@
 use chrono::{DateTime, Local};
 use std::path::PathBuf;
 
-pub fn build_session_relative_dir(primary_tag: &str, started_at: DateTime<Local>) -> PathBuf {
-    let tag = sanitize_tag(primary_tag);
+pub fn build_session_relative_dir(_primary_tag: &str, started_at: DateTime<Local>) -> PathBuf {
     let date_part = started_at.format("%d.%m.%Y").to_string();
     let time_part = started_at.format("%H-%M-%S").to_string();
-    PathBuf::from(tag)
-        .join(date_part)
-        .join(format!("meeting_{}", time_part))
+    PathBuf::from(date_part).join(format!("meeting_{}", time_part))
 }
 
 pub fn transcript_name(started_at: DateTime<Local>) -> String {
@@ -16,23 +13,6 @@ pub fn transcript_name(started_at: DateTime<Local>) -> String {
 
 pub fn summary_name(started_at: DateTime<Local>) -> String {
     format!("summary_{}.md", started_at.format("%d.%m.%Y"))
-}
-
-pub fn sanitize_tag(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for c in input.chars() {
-        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-            out.push(c.to_ascii_lowercase());
-        } else if c.is_whitespace() {
-            out.push('_');
-        }
-    }
-    let out = out.trim_matches('_').to_string();
-    if out.is_empty() {
-        "general".to_string()
-    } else {
-        out
-    }
 }
 
 #[cfg(test)]
@@ -49,7 +29,8 @@ mod tests {
             .with_timezone(&Local);
 
         let p = build_session_relative_dir("Zoom Team", dt);
-        assert!(p.ends_with("zoom_team/10.03.2026/meeting_15-06-07"));
+        assert!(p.ends_with("10.03.2026/meeting_15-06-07"));
+        assert!(!p.to_string_lossy().contains("zoom_team"));
     }
 
     #[test]
