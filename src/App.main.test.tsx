@@ -464,6 +464,7 @@ describe("App main window", () => {
   });
 
   it("renders refresh sessions as an icon button in the sessions header", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
     await waitFor(() => {
@@ -474,6 +475,10 @@ describe("App main window", () => {
     expect(refreshButton).toHaveClass("refresh-icon-button");
     expect(refreshButton).not.toHaveClass("icon-button");
     expect(refreshButton.textContent?.trim()).toBe("");
+
+    await user.click(refreshButton);
+
+    expect(refreshButton.querySelector("svg")).toHaveClass("refresh-icon-spin");
   });
 
   it("imports audio from the sessions header and reloads imported session as native", async () => {
@@ -632,6 +637,138 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("run_transcription", { sessionId: "s3" });
     });
+  });
+
+  it("opens a session context menu on right click and runs session actions", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "get_settings") {
+        return {
+          recording_root: "./recordings",
+          artifact_open_app: "",
+          transcription_provider: "nexara",
+          transcription_url: "",
+          transcription_task: "transcribe",
+          transcription_diarization_setting: "general",
+          salute_speech_scope: "SALUTE_SPEECH_CORP",
+          salute_speech_model: "general",
+          salute_speech_language: "ru-RU",
+          salute_speech_sample_rate: 48000,
+          salute_speech_channels_count: 1,
+          summary_url: "",
+          summary_prompt: "Default summary prompt",
+          openai_model: "gpt-4.1-mini",
+          audio_format: "opus",
+          opus_bitrate_kbps: 24,
+          mic_device_name: "",
+          system_device_name: "",
+          auto_run_pipeline_on_stop: false,
+          api_call_logging_enabled: false,
+        };
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-context",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Context menu session",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T11:00:00+03:00",
+            session_dir: "/tmp/s-context",
+            audio_duration_hms: "00:15:20",
+            has_transcript_text: true,
+            has_summary_text: true,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-context",
+          source: "zoom",
+          custom_tag: "",
+          custom_summary_prompt: "",
+          topic: "Context menu session",
+          participants: [],
+        };
+      }
+      if (cmd === "open_session_folder") return "opened";
+      if (cmd === "open_session_artifact") return "opened";
+      if (cmd === "run_transcription") return "transcribed";
+      if (cmd === "run_summary") return "summarized";
+      return args ?? null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Context menu session" })).toBeInTheDocument();
+    });
+
+    const openMenu = () => {
+      const card = screen.getByRole("heading", { name: "Context menu session" }).closest(".session-card");
+      expect(card).not.toBeNull();
+      fireEvent.contextMenu(card!, { clientX: 120, clientY: 160 });
+      return screen.getByRole("menu", { name: "Действия сессии" });
+    };
+
+    let menu = openMenu();
+    expect(within(menu).getByRole("menuitem", { name: "Открыть папку сессии" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Открыть текст" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Открыть саммари" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Сгенерировать текст" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Сгенерировать саммари" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Настроить промпт саммари" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Удалить" })).toBeInTheDocument();
+
+    await user.click(within(menu).getByRole("menuitem", { name: "Открыть папку сессии" }));
+    expect(invokeMock).toHaveBeenCalledWith("open_session_folder", { sessionDir: "/tmp/s-context" });
+
+    menu = openMenu();
+    await user.click(within(menu).getByRole("menuitem", { name: "Открыть текст" }));
+    expect(invokeMock).toHaveBeenCalledWith("open_session_artifact", {
+      sessionId: "s-context",
+      artifactKind: "transcript",
+    });
+
+    menu = openMenu();
+    await user.click(within(menu).getByRole("menuitem", { name: "Открыть саммари" }));
+    expect(invokeMock).toHaveBeenCalledWith("open_session_artifact", {
+      sessionId: "s-context",
+      artifactKind: "summary",
+    });
+
+    menu = openMenu();
+    await user.click(within(menu).getByRole("menuitem", { name: "Сгенерировать текст" }));
+    expect(invokeMock).toHaveBeenCalledWith("run_transcription", { sessionId: "s-context" });
+
+    await waitFor(() => {
+      expect(screen.getByText("Text fetched successfully")).toBeInTheDocument();
+    });
+
+    menu = openMenu();
+    await user.click(within(menu).getByRole("menuitem", { name: "Сгенерировать саммари" }));
+    expect(invokeMock).toHaveBeenCalledWith("run_summary", { sessionId: "s-context" });
+
+    await waitFor(() => {
+      expect(screen.getByText("Summary fetched successfully")).toBeInTheDocument();
+    });
+
+    menu = openMenu();
+    await user.click(within(menu).getByRole("menuitem", { name: "Настроить промпт саммари" }));
+    expect(screen.getByRole("dialog", { name: "Промпт саммари" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+
+    menu = openMenu();
+    await user.click(within(menu).getByRole("menuitem", { name: "Удалить" }));
+    expect(screen.getByRole("dialog", { name: "Подтверждение удаления" })).toBeInTheDocument();
   });
 
   it("searches sessions by one query and highlights matched fields", async () => {

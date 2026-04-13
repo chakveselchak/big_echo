@@ -5,6 +5,7 @@ import {
   type CSSProperties,
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
   audioFormatOptions,
@@ -48,6 +49,11 @@ type SummaryPromptDialogState = {
   sessionId: string;
   value: string;
   saving: boolean;
+};
+type SessionContextMenuState = {
+  sessionId: string;
+  x: number;
+  y: number;
 };
 
 function localIconForEditor(editorName: string): string | null {
@@ -260,10 +266,13 @@ export function App() {
   const deleteDialogRef = useRef<HTMLDivElement | null>(null);
   const artifactDialogRef = useRef<HTMLDivElement | null>(null);
   const summaryPromptDialogRef = useRef<HTMLDivElement | null>(null);
+  const sessionContextMenuRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const wasDialogOpenRef = useRef(false);
   const loadSessionsRef = useRef<(() => Promise<void>) | null>(null);
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
+  const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
+  const [refreshAnimationCount, setRefreshAnimationCount] = useState(0);
   const shouldLoadSettings = isTrayWindow || isSettingsWindow || mainTab === "settings";
   const {
     audioDevices,
@@ -449,6 +458,31 @@ export function App() {
     wasDialogOpenRef.current = isDialogOpen;
   }, [artifactPreview, deleteTarget, summaryPromptDialog]);
 
+  useEffect(() => {
+    if (!sessionContextMenu) return;
+
+    const onDocumentPointerDown = (event: PointerEvent) => {
+      if (sessionContextMenuRef.current?.contains(event.target as Node)) return;
+      setSessionContextMenu(null);
+    };
+    const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSessionContextMenu(null);
+      }
+    };
+    const onWindowScroll = () => setSessionContextMenu(null);
+
+    document.addEventListener("pointerdown", onDocumentPointerDown);
+    document.addEventListener("keydown", onDocumentKeyDown);
+    window.addEventListener("scroll", onWindowScroll, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDocumentPointerDown);
+      document.removeEventListener("keydown", onDocumentKeyDown);
+      window.removeEventListener("scroll", onWindowScroll, true);
+    };
+  }, [sessionContextMenu]);
+
   function closeOpenerDropdown({ restoreFocus = true }: { restoreFocus?: boolean } = {}) {
     setIsOpenerDropdownOpen(false);
     if (restoreFocus) {
@@ -615,6 +649,43 @@ export function App() {
     }
   }
 
+  function getSessionDetail(item: SessionListItem): SessionMetaView {
+    return (
+      sessionDetails[item.session_id] ?? {
+        session_id: item.session_id,
+        source: item.primary_tag,
+        custom_tag: "",
+        custom_summary_prompt: "",
+        topic: item.topic,
+        participants: [],
+      }
+    );
+  }
+
+  function openSessionContextMenu(event: ReactMouseEvent<HTMLElement>, sessionId: string) {
+    event.preventDefault();
+    const menuWidth = 248;
+    const menuHeight = 300;
+    const viewportWidth = window.innerWidth || event.clientX + menuWidth;
+    const viewportHeight = window.innerHeight || event.clientY + menuHeight;
+
+    setSessionContextMenu({
+      sessionId,
+      x: Math.max(8, Math.min(event.clientX, viewportWidth - menuWidth)),
+      y: Math.max(8, Math.min(event.clientY, viewportHeight - menuHeight)),
+    });
+  }
+
+  function runSessionContextMenuAction(action: () => void) {
+    setSessionContextMenu(null);
+    action();
+  }
+
+  function refreshSessions() {
+    setRefreshAnimationCount((count) => count + 1);
+    void loadSessions();
+  }
+
   useEffect(() => {
     if (isOpenerDropdownOpen && !wasOpenerDropdownOpenRef.current) {
       focusOpenerIndex(selectedOpenerIndex);
@@ -628,6 +699,17 @@ export function App() {
       setStatus(`error: ${String(err)}`);
     });
   }, [isSettingsWindow, isTrayWindow, mainTab]);
+
+  const sessionContextMenuItem = sessionContextMenu
+    ? filteredSessions.find((item) => item.session_id === sessionContextMenu.sessionId)
+    : null;
+  const sessionContextMenuDetail = sessionContextMenuItem ? getSessionDetail(sessionContextMenuItem) : null;
+  const sessionContextMenuTextPending = sessionContextMenuItem
+    ? Boolean(textPendingBySession[sessionContextMenuItem.session_id])
+    : false;
+  const sessionContextMenuSummaryPending = sessionContextMenuItem
+    ? Boolean(summaryPendingBySession[sessionContextMenuItem.session_id])
+    : false;
 
   function renderSettingsFields() {
     if (!settings) return null;
@@ -1369,9 +1451,14 @@ export function App() {
                   className="refresh-icon-button"
                   aria-label="Refresh sessions"
                   title="Refresh sessions"
-                  onClick={() => void loadSessions()}
+                  onClick={refreshSessions}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <svg
+                    key={refreshAnimationCount}
+                    className={refreshAnimationCount > 0 ? "refresh-icon-spin" : undefined}
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
                     <path
                       d="M20 12a8 8 0 1 1-2.34-5.66"
                       fill="none"
@@ -1422,14 +1509,7 @@ export function App() {
           </div>
           <div className="sessions-grid">
             {filteredSessions.map((item) => {
-              const detail = sessionDetails[item.session_id] ?? {
-                session_id: item.session_id,
-                source: item.primary_tag,
-                custom_tag: "",
-                custom_summary_prompt: "",
-                topic: item.topic,
-                participants: [],
-              };
+              const detail = getSessionDetail(item);
               const textPending = Boolean(textPendingBySession[item.session_id]);
               const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
               const pipelineState = pipelineStateBySession[item.session_id];
@@ -1449,7 +1529,11 @@ export function App() {
                 ? `(${item.audio_format}) - ${item.display_date_ru} ${startTimeHm}`
                 : `(${item.audio_format}) - ${item.display_date_ru}`;
               return (
-                <article key={item.session_id} className="session-card">
+                <article
+                  key={item.session_id}
+                  className="session-card"
+                  onContextMenu={(event) => openSessionContextMenu(event, item.session_id)}
+                >
                   <div className="session-card-header">
                     <div className="session-card-heading">
                       <div className="session-title-line">
@@ -1687,6 +1771,118 @@ export function App() {
               </div>
             )}
           </div>
+          {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (
+            <div
+              ref={sessionContextMenuRef}
+              className="session-context-menu"
+              role="menu"
+              aria-label="Действия сессии"
+              style={{ left: sessionContextMenu.x, top: sessionContextMenu.y }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="session-context-menu-item"
+                onClick={() =>
+                  runSessionContextMenuAction(() => {
+                    void openSessionFolder(sessionContextMenuItem.session_dir);
+                  })
+                }
+              >
+                Открыть папку сессии
+              </button>
+              {sessionContextMenuItem.has_transcript_text && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="session-context-menu-item"
+                  onClick={() =>
+                    runSessionContextMenuAction(() => {
+                      void openSessionArtifact(sessionContextMenuItem.session_id, "transcript");
+                    })
+                  }
+                >
+                  Открыть текст
+                </button>
+              )}
+              {sessionContextMenuItem.has_summary_text && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="session-context-menu-item"
+                  onClick={() =>
+                    runSessionContextMenuAction(() => {
+                      void openSessionArtifact(sessionContextMenuItem.session_id, "summary");
+                    })
+                  }
+                >
+                  Открыть саммари
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                className="session-context-menu-item"
+                onClick={() =>
+                  runSessionContextMenuAction(() => {
+                    void getText(sessionContextMenuItem.session_id);
+                  })
+                }
+                disabled={
+                  sessionContextMenuItem.status === "recording" ||
+                  sessionContextMenuTextPending ||
+                  sessionContextMenuSummaryPending
+                }
+              >
+                Сгенерировать текст
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="session-context-menu-item"
+                onClick={() =>
+                  runSessionContextMenuAction(() => {
+                    void getSummary(sessionContextMenuItem.session_id);
+                  })
+                }
+                disabled={
+                  sessionContextMenuItem.status === "recording" ||
+                  !sessionContextMenuItem.has_transcript_text ||
+                  sessionContextMenuSummaryPending ||
+                  sessionContextMenuTextPending
+                }
+              >
+                Сгенерировать саммари
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="session-context-menu-item"
+                onClick={() =>
+                  runSessionContextMenuAction(() => {
+                    void openSummaryPromptDialogForSession(sessionContextMenuDetail);
+                  })
+                }
+              >
+                Настроить промпт саммари
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="session-context-menu-item session-context-menu-item-danger"
+                onClick={() =>
+                  runSessionContextMenuAction(() =>
+                    requestDeleteSession(
+                      sessionContextMenuItem.session_id,
+                      sessionContextMenuItem.status === "recording"
+                    )
+                  )
+                }
+              >
+                Удалить
+              </button>
+            </div>
+          )}
         {deleteTarget && (
             <div
               className="confirm-overlay"
