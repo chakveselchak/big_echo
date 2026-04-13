@@ -1,6 +1,9 @@
+import packageJson from "../../package.json";
+
 const POSTHOG_API_KEY = "phc_mpxTuPeojpQQFYsdBQjWBpnVxDXtk6YbVjnxFGwsrLnE";
-const DEFAULT_POSTHOG_API_HOST = "https://us.i.posthog.com";
+const DEFAULT_POSTHOG_API_HOST = "https://eu.i.posthog.com";
 const DISTINCT_ID_STORAGE_KEY = "bigecho.posthog.distinct_id";
+const APP_VERSION = packageJson.version;
 
 export type AnalyticsEventName =
   | "app_opened"
@@ -88,6 +91,7 @@ function buildContextProperties(): Record<string, AnalyticsPropertyValue> {
 
   return cleanProperties({
     app: "bigecho",
+    app_version: APP_VERSION,
     app_runtime: "tauri",
     locale: typeof navigator !== "undefined" ? navigator.language : undefined,
     platform: typeof navigator !== "undefined" ? navigator.platform : undefined,
@@ -105,6 +109,7 @@ function buildPersonProperties(): Record<string, AnalyticsPropertyValue> {
   const context = buildContextProperties();
   return {
     app: "bigecho",
+    app_version: APP_VERSION,
     app_runtime: "tauri",
     locale: context.locale ?? null,
     platform: context.platform ?? null,

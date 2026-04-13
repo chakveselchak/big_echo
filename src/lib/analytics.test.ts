@@ -7,6 +7,7 @@ import {
   setAnalyticsEnabledForTests,
   setAnalyticsTransportForTests,
 } from "./analytics";
+import packageJson from "../../package.json";
 
 describe("analytics", () => {
   beforeEach(() => {
@@ -33,10 +34,14 @@ describe("analytics", () => {
         event: "get_text_clicked",
         properties: expect.objectContaining({
           app: "bigecho",
+          app_version: packageJson.version,
           distinct_id: distinctId,
           session_id: "s1",
           surface: "sessions",
           timezone: expect.any(String),
+          $set: expect.objectContaining({
+            app_version: packageJson.version,
+          }),
         }),
       })
     );
@@ -59,7 +64,7 @@ describe("analytics", () => {
 
     expect(sendBeaconMock).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://us.i.posthog.com/i/v0/e/",
+      "https://eu.i.posthog.com/i/v0/e/",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
