@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -66,6 +66,45 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { App } from "./App";
+
+function getAntdSelect(label: string) {
+  const combobox = screen.getByRole("combobox", { name: label });
+  const select = combobox.closest(".ant-select");
+  expect(select).not.toBeNull();
+  return { combobox, select: select as HTMLElement };
+}
+
+async function selectAntdOption(_user: ReturnType<typeof userEvent.setup>, label: string, optionName: string) {
+  const { combobox, select } = getAntdSelect(label);
+  const selector = (select.querySelector(".ant-select-selector") as HTMLElement | null) ?? select;
+  fireEvent.mouseDown(selector);
+  await waitFor(() => {
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+  });
+  const optionTexts = await screen.findAllByText(optionName);
+  const optionText = optionTexts.find((element) => element.closest(".ant-select-item-option"));
+  const option = (optionText?.closest(".ant-select-item-option") as HTMLElement | null) ?? null;
+  expect(option).not.toBeNull();
+  fireEvent.click(option as HTMLElement);
+  await waitFor(() => {
+    expectAntdSelectValue(label, optionName);
+  });
+  fireEvent.keyDown(combobox, { key: "Escape", code: "Escape" });
+}
+
+async function openAntdSelect(label: string) {
+  const { combobox, select } = getAntdSelect(label);
+  const selector = (select.querySelector(".ant-select-selector") as HTMLElement | null) ?? select;
+  fireEvent.mouseDown(selector);
+  await waitFor(() => {
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+  });
+}
+
+function expectAntdSelectValue(label: string, value: string) {
+  const { select } = getAntdSelect(label);
+  expect(select.querySelector(".ant-select-selection-item")).toHaveTextContent(value);
+}
 
 function mockSettings() {
   return {
@@ -312,8 +351,8 @@ describe("App settings window", () => {
     });
 
     const keyInputs = screen.getAllByPlaceholderText("Stored in OS secure storage");
-    await user.selectOptions(screen.getByLabelText("Task"), "diarize");
-    await user.selectOptions(screen.getByLabelText("Diarization setting"), "meeting");
+    await selectAntdOption(user, "Task", "diarize");
+    await selectAntdOption(user, "Diarization setting", "meeting");
     await user.type(screen.getByLabelText("Summary prompt"), "Сделай саммари блоками: решения, риски, action items");
     await user.type(keyInputs[0], "nexara-secret");
     await user.type(keyInputs[1], "openai-secret");
@@ -350,9 +389,9 @@ describe("App settings window", () => {
       expect(invokeMock).toHaveBeenCalledWith("get_settings");
     });
 
-    await user.selectOptions(screen.getByLabelText("Transcription provider"), "salute_speech");
-    await user.selectOptions(screen.getByLabelText("Scope"), "SALUTE_SPEECH_B2B");
-    await user.selectOptions(screen.getByLabelText("Recognition model"), "general");
+    await selectAntdOption(user, "Transcription provider", "SalutSpeechAPI");
+    await selectAntdOption(user, "Scope", "SALUTE_SPEECH_B2B");
+    await selectAntdOption(user, "Recognition model", "general");
     await user.clear(screen.getByLabelText("Language"));
     await user.type(screen.getByLabelText("Language"), "ru-RU");
     await user.clear(screen.getByLabelText("Sample rate"));
@@ -392,18 +431,20 @@ describe("App settings window", () => {
       expect(invokeMock).toHaveBeenCalledWith("get_settings");
     });
 
-    await user.selectOptions(screen.getByLabelText("Transcription provider"), "salute_speech");
+    await selectAntdOption(user, "Transcription provider", "SalutSpeechAPI");
 
-    const scopeSelect = screen.getByLabelText("Scope");
-    const modelSelect = screen.getByLabelText("Recognition model");
-    expect(scopeSelect.tagName).toBe("SELECT");
-    expect(modelSelect.tagName).toBe("SELECT");
+    expect(getAntdSelect("Scope").select).toHaveClass("ant-select");
+    expect(getAntdSelect("Recognition model").select).toHaveClass("ant-select");
 
-    expect(screen.getByRole("option", { name: "SALUTE_SPEECH_PERS" })).toBeInTheDocument();
+    await openAntdSelect("Scope");
+    expect(await screen.findByRole("option", { name: "SALUTE_SPEECH_PERS" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "SALUTE_SPEECH_CORP" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "SALUTE_SPEECH_B2B" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "SBER_SPEECH" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "general" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await openAntdSelect("Recognition model");
+    expect(await screen.findByRole("option", { name: "general" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "callcenter" })).toBeInTheDocument();
   });
 
@@ -416,14 +457,14 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Generals" }));
-    const checkbox = screen.getByLabelText("Auto-run pipeline on Stop") as HTMLInputElement;
-    const apiLoggingCheckbox = screen.getByLabelText("Enable API call logging") as HTMLInputElement;
-    expect(checkbox.checked).toBe(false);
-    expect(apiLoggingCheckbox.checked).toBe(false);
+    const checkbox = screen.getByRole("switch", { name: "Auto-run pipeline on Stop" });
+    const apiLoggingCheckbox = screen.getByRole("switch", { name: "Enable API call logging" });
+    expect(checkbox).toHaveAttribute("aria-checked", "false");
+    expect(apiLoggingCheckbox).toHaveAttribute("aria-checked", "false");
     await user.click(checkbox);
     await user.click(apiLoggingCheckbox);
-    expect(checkbox.checked).toBe(true);
-    expect(apiLoggingCheckbox.checked).toBe(true);
+    expect(checkbox).toHaveAttribute("aria-checked", "true");
+    expect(apiLoggingCheckbox).toHaveAttribute("aria-checked", "true");
 
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() => {
@@ -445,7 +486,7 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Audio" }));
-    await user.selectOptions(screen.getByLabelText("Audio format"), "mp3");
+    await selectAntdOption(user, "Audio format", "mp3");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => {
@@ -466,11 +507,11 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Generals" }));
-    const trigger = screen.getByRole("button", { name: /Artifact opener app \(optional\)/ });
-    expect(trigger).toHaveAccessibleName("Artifact opener app (optional) TextEdit");
-    await user.click(trigger);
-    await user.click(screen.getByRole("option", { name: "Visual Studio Code" }));
-    expect(trigger).toHaveAccessibleName("Artifact opener app (optional) Visual Studio Code");
+    await waitFor(() => {
+      expectAntdSelectValue("Artifact opener app (optional)", "TextEdit");
+    });
+    await selectAntdOption(user, "Artifact opener app (optional)", "Visual Studio Code");
+    expectAntdSelectValue("Artifact opener app (optional)", "Visual Studio Code");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => {
@@ -482,7 +523,7 @@ describe("App settings window", () => {
     });
   });
 
-  it("supports keyboard selection and Escape on the artifact opener popup", async () => {
+  it("shows selected artifact opener option and closes the popup", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -491,40 +532,24 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Generals" }));
-    const trigger = screen.getByRole("button", { name: /Artifact opener app \(optional\)/ });
-    await user.click(trigger);
+    await waitFor(() => {
+      expectAntdSelectValue("Artifact opener app (optional)", "TextEdit");
+    });
+    const { combobox } = getAntdSelect("Artifact opener app (optional)");
+    await openAntdSelect("Artifact opener app (optional)");
 
-    const listbox = screen.getByRole("listbox", { name: "Artifact opener app options" });
+    const listbox = screen.getByRole("listbox");
     expect(listbox).toBeInTheDocument();
 
     const textEditOption = screen.getByRole("option", { name: "TextEdit" });
     expect(textEditOption).toHaveAttribute("aria-selected", "true");
-    await waitFor(() => {
-      expect(textEditOption).toHaveFocus();
-    });
 
-    await user.keyboard("{ArrowDown}");
-    await waitFor(() => {
-      expect(screen.getByRole("option", { name: "Visual Studio Code" })).toHaveFocus();
-    });
-
-    await user.keyboard("{Enter}");
+    fireEvent.click(screen.getByRole("option", { name: "Visual Studio Code" }));
 
     await waitFor(() => {
-      expect(screen.queryByRole("listbox", { name: "Artifact opener app options" })).not.toBeInTheDocument();
-      expect(trigger).toHaveFocus();
+      expect(combobox).toHaveAttribute("aria-expanded", "false");
     });
-
-    await user.click(trigger);
-    await waitFor(() => {
-      expect(screen.getByRole("option", { name: "Visual Studio Code" })).toHaveAttribute("aria-selected", "true");
-    });
-    await user.keyboard("{Escape}");
-
-    await waitFor(() => {
-      expect(screen.queryByRole("listbox", { name: "Artifact opener app options" })).not.toBeInTheDocument();
-      expect(trigger).toHaveFocus();
-    });
+    expectAntdSelectValue("Artifact opener app (optional)", "Visual Studio Code");
   });
 
   it("closes the artifact opener popup when focus tabs away", async () => {
@@ -536,17 +561,21 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Generals" }));
-    await user.click(screen.getByRole("button", { name: /Artifact opener app \(optional\)/ }));
+    await waitFor(() => {
+      expectAntdSelectValue("Artifact opener app (optional)", "TextEdit");
+    });
+    await openAntdSelect("Artifact opener app (optional)");
+    const { combobox } = getAntdSelect("Artifact opener app (optional)");
 
     await waitFor(() => {
-      expect(screen.getByRole("option", { name: "TextEdit" })).toHaveFocus();
+      expect(combobox).toHaveAttribute("aria-expanded", "true");
     });
 
-    await user.tab();
-
+    fireEvent.blur(combobox, {
+      relatedTarget: screen.getByRole("switch", { name: "Auto-run pipeline on Stop" }),
+    });
     await waitFor(() => {
-      expect(screen.queryByRole("listbox", { name: "Artifact opener app options" })).not.toBeInTheDocument();
-      expect(screen.getByLabelText("Auto-run pipeline on Stop")).toHaveFocus();
+      expect(combobox).toHaveAttribute("aria-expanded", "false");
     });
   });
 

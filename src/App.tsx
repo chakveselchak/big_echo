@@ -2,11 +2,23 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
-  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import {
+  Button,
+  Dropdown,
+  Input,
+  InputNumber,
+  Menu,
+  Modal,
+  Select,
+  Slider,
+  Switch,
+  Tabs,
+  type InputRef,
+  type MenuProps,
+} from "antd";
 import {
   audioFormatOptions,
   fixedSources,
@@ -26,7 +38,7 @@ import { useRecordingController } from "./features/recording/useRecordingControl
 import { useSessions } from "./features/sessions/useSessions";
 import { useSettingsForm } from "./features/settings/useSettingsForm";
 import { initializeAnalytics } from "./lib/analytics";
-import { formatSecretSaveState, getErrorMessage, splitTags } from "./lib/appUtils";
+import { formatSecretSaveState, getErrorMessage } from "./lib/appUtils";
 import { getCurrentWindowLabel, tauriConvertFileSrc, tauriInvoke } from "./lib/tauri";
 import { formatAppStatus, formatSessionStatus } from "./status";
 import vscodeIcon from "./assets/editor-icons/vscode.svg";
@@ -196,8 +208,8 @@ function SessionAudioPlayer({
 
   return (
     <div className={`session-audio-player${isDisabled ? " is-disabled" : ""}`}>
-      <button
-        type="button"
+      <Button
+        htmlType="button"
         className="session-audio-toggle"
         aria-label={isPlaying ? "Пауза" : "Воспроизвести аудио"}
         onClick={() => void togglePlayback()}
@@ -213,17 +225,17 @@ function SessionAudioPlayer({
             <path d="M6 4.5 14.5 10 6 15.5Z" />
           )}
         </svg>
-      </button>
-      <input
+      </Button>
+      <Slider
         className="session-audio-slider"
-        type="range"
-        min="0"
-        max="100"
-        step="1"
+        min={0}
+        max={100}
+        step={1}
         aria-label="Позиция аудио"
+        {...({ ariaLabelForHandle: "Позиция аудио" } as { ariaLabelForHandle: string })}
         value={Math.round(progressPercent)}
-        style={{ "--session-audio-progress": `${Math.round(progressPercent)}%` } as CSSProperties}
-        onChange={(e) => handleSeek(Number(e.target.value))}
+        tooltip={{ open: false }}
+        onChange={(value) => handleSeek(Number(value))}
         disabled={isDisabled || durationSeconds <= 0}
       />
       <audio
@@ -254,16 +266,12 @@ export function App() {
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
   const [trayMuteError, setTrayMuteError] = useState<string | null>(null);
-  const [isOpenerDropdownOpen, setIsOpenerDropdownOpen] = useState(false);
-  const [openerActiveIndex, setOpenerActiveIndex] = useState(0);
   const appMainRef = useRef<HTMLElement | null>(null);
-  const openerDropdownRef = useRef<HTMLDivElement | null>(null);
-  const openerTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const openerOptionRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const wasOpenerDropdownOpenRef = useRef(false);
-  const sessionSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const sessionSearchInputRef = useRef<InputRef | null>(null);
   const artifactPreviewBodyRef = useRef<HTMLPreElement | null>(null);
   const deleteDialogRef = useRef<HTMLDivElement | null>(null);
+  const deleteCancelButtonRef = useRef<HTMLElement | null>(null);
+  const deleteConfirmButtonRef = useRef<HTMLElement | null>(null);
   const artifactDialogRef = useRef<HTMLDivElement | null>(null);
   const summaryPromptDialogRef = useRef<HTMLDivElement | null>(null);
   const sessionContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -310,12 +318,6 @@ export function App() {
     { id: "", name: "System default", icon_fallback: "", icon_data_url: null },
     ...openerOptions,
   ];
-  const selectedOpenerLabel =
-    openerMenuOptions.find((app) => app.id === settings?.artifact_open_app)?.name ?? "System default";
-  const selectedOpenerIndex = Math.max(
-    0,
-    openerMenuOptions.findIndex((app) => app.id === settings?.artifact_open_app)
-  );
   const {
     artifactPreview,
     closeArtifactPreview,
@@ -326,6 +328,7 @@ export function App() {
     getSummary,
     getText,
     importAudioSession,
+    knownTags,
     loadSessions,
     openSessionFolder,
     openSessionArtifact,
@@ -342,6 +345,8 @@ export function App() {
     summaryPendingBySession,
     textPendingBySession,
   } = useSessions({ setStatus, lastSessionId, setLastSessionId });
+  const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
+  const knownTagOptions = knownTags.map((tag) => ({ value: tag, label: tag }));
   const hasSessions = sessions.length > 0;
   const normalizedSessionSearchQuery = sessionSearchQuery.trim();
   const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
@@ -393,24 +398,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const onDocumentMouseDown = (event: MouseEvent) => {
-      if (!isOpenerDropdownOpen) return;
-      if (!openerDropdownRef.current) return;
-      if (openerDropdownRef.current.contains(event.target as Node)) return;
-      closeOpenerDropdown({ restoreFocus: false });
-    };
-    document.addEventListener("mousedown", onDocumentMouseDown);
-    return () => document.removeEventListener("mousedown", onDocumentMouseDown);
-  }, [isOpenerDropdownOpen]);
-
-  useEffect(() => {
     if (isTrayWindow || isSettingsWindow) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key.toLowerCase() !== "f") return;
       if (!event.metaKey && !event.ctrlKey) return;
       event.preventDefault();
-      sessionSearchInputRef.current?.focus();
-      sessionSearchInputRef.current?.select();
+      const searchInput = sessionSearchInputRef.current?.input;
+      searchInput?.focus();
+      searchInput?.select();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -444,9 +439,10 @@ export function App() {
       if (restoreFocusRef.current && document.contains(restoreFocusRef.current)) {
         restoreFocusRef.current.focus();
       } else {
+        const searchInputElement = sessionSearchInputRef.current?.input ?? null;
         const fallbackFocusTarget =
-          sessionSearchInputRef.current && document.contains(sessionSearchInputRef.current)
-            ? sessionSearchInputRef.current
+          searchInputElement && document.contains(searchInputElement)
+            ? searchInputElement
             : getFocusableElements(appMainRef.current)[0] ?? appMainRef.current;
         fallbackFocusTarget?.focus();
       }
@@ -460,7 +456,9 @@ export function App() {
     if (!sessionContextMenu) return;
 
     const onDocumentPointerDown = (event: PointerEvent) => {
-      if (sessionContextMenuRef.current?.contains(event.target as Node)) return;
+      const target = event.target;
+      if (target instanceof Node && sessionContextMenuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".session-context-menu-popup")) return;
       setSessionContextMenu(null);
     };
     const onDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -480,123 +478,6 @@ export function App() {
       window.removeEventListener("scroll", onWindowScroll, true);
     };
   }, [sessionContextMenu]);
-
-  function closeOpenerDropdown({ restoreFocus = true }: { restoreFocus?: boolean } = {}) {
-    setIsOpenerDropdownOpen(false);
-    if (restoreFocus) {
-      openerTriggerRef.current?.focus();
-    }
-  }
-
-  function focusOpenerIndex(index: number) {
-    const nextIndex = Math.max(0, Math.min(index, openerMenuOptions.length - 1));
-    setOpenerActiveIndex(nextIndex);
-    openerOptionRefs.current[nextIndex]?.focus();
-  }
-
-  function openOpenerDropdown() {
-    setOpenerActiveIndex(selectedOpenerIndex);
-    setIsOpenerDropdownOpen(true);
-  }
-
-  function selectOpenerApp(appId: string) {
-    if (!settings) return;
-    setSettings({ ...settings, artifact_open_app: appId });
-    closeOpenerDropdown();
-  }
-
-  function handleOpenerDropdownBlur(event: ReactFocusEvent<HTMLDivElement>) {
-    if (!isOpenerDropdownOpen) return;
-    const nextFocused = event.relatedTarget;
-    if (!(nextFocused instanceof Node)) {
-      closeOpenerDropdown({ restoreFocus: false });
-      return;
-    }
-    if (openerDropdownRef.current?.contains(nextFocused)) return;
-    closeOpenerDropdown({ restoreFocus: false });
-  }
-
-  function handleOpenerTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "Escape" && isOpenerDropdownOpen) {
-      event.preventDefault();
-      closeOpenerDropdown();
-      return;
-    }
-    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      openOpenerDropdown();
-    }
-  }
-
-  function handleOpenerMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeOpenerDropdown();
-      return;
-    }
-
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      focusOpenerIndex((openerActiveIndex + 1) % openerMenuOptions.length);
-      return;
-    }
-
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      focusOpenerIndex((openerActiveIndex - 1 + openerMenuOptions.length) % openerMenuOptions.length);
-      return;
-    }
-
-    if (event.key === "Home") {
-      event.preventDefault();
-      focusOpenerIndex(0);
-      return;
-    }
-
-    if (event.key === "End") {
-      event.preventDefault();
-      focusOpenerIndex(openerMenuOptions.length - 1);
-      return;
-    }
-
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      selectOpenerApp(openerMenuOptions[openerActiveIndex]?.id ?? "");
-    }
-  }
-
-  function handleDialogKeyDown(
-    event: ReactKeyboardEvent<HTMLDivElement>,
-    dialogNode: HTMLElement | null,
-    closeDialog: () => void
-  ) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeDialog();
-      return;
-    }
-
-    if (event.key !== "Tab") return;
-
-    const focusables = getFocusableElements(dialogNode);
-    if (focusables.length === 0) {
-      event.preventDefault();
-      dialogNode?.focus();
-      return;
-    }
-
-    const currentIndex = focusables.findIndex((element) => element === document.activeElement);
-    const nextIndex = event.shiftKey
-      ? currentIndex <= 0
-        ? focusables.length - 1
-        : currentIndex - 1
-      : currentIndex === focusables.length - 1
-        ? 0
-        : currentIndex + 1;
-
-    event.preventDefault();
-    (focusables[nextIndex] ?? dialogNode)?.focus();
-  }
 
   async function openSummaryPromptDialogForSession(detail: SessionMetaView) {
     const persistedPrompt = detail.custom_summary_prompt?.trim() ?? "";
@@ -674,22 +555,24 @@ export function App() {
     });
   }
 
-  function runSessionContextMenuAction(action: () => void) {
-    setSessionContextMenu(null);
-    action();
-  }
-
   function refreshSessions() {
     setRefreshAnimationCount((count) => count + 1);
     void loadSessions();
   }
 
-  useEffect(() => {
-    if (isOpenerDropdownOpen && !wasOpenerDropdownOpenRef.current) {
-      focusOpenerIndex(selectedOpenerIndex);
+  function handleDeleteDialogKeyDown(event: ReactKeyboardEvent) {
+    if (event.key !== "Tab") return;
+    const cancelButton = deleteCancelButtonRef.current;
+    const deleteButton = deleteConfirmButtonRef.current;
+    if (!cancelButton || !deleteButton) return;
+    if (event.shiftKey && document.activeElement === cancelButton) {
+      event.preventDefault();
+      deleteButton.focus();
+    } else if (!event.shiftKey && document.activeElement === deleteButton) {
+      event.preventDefault();
+      cancelButton.focus();
     }
-    wasOpenerDropdownOpenRef.current = isOpenerDropdownOpen;
-  }, [isOpenerDropdownOpen, selectedOpenerIndex]);
+  }
 
   useEffect(() => {
     if (isTrayWindow || isSettingsWindow || mainTab !== "sessions") return;
@@ -708,15 +591,88 @@ export function App() {
   const sessionContextMenuSummaryPending = sessionContextMenuItem
     ? Boolean(summaryPendingBySession[sessionContextMenuItem.session_id])
     : false;
+  const sessionContextMenuLabel = (key: string, label: string) => (
+    <span className="session-context-menu-label" data-session-context-menu-label={key}>
+      {label}
+    </span>
+  );
+  const sessionContextMenuItems: MenuProps["items"] = sessionContextMenuItem
+    ? [
+        {
+          key: "folder",
+          label: sessionContextMenuLabel("folder", "Открыть папку сессии"),
+        },
+        ...(sessionContextMenuItem.has_transcript_text
+          ? [
+              {
+                key: "open-text",
+                label: sessionContextMenuLabel("open-text", "Открыть текст"),
+              },
+            ]
+          : []),
+        ...(sessionContextMenuItem.has_summary_text
+          ? [
+              {
+                key: "open-summary",
+                label: sessionContextMenuLabel("open-summary", "Открыть саммари"),
+              },
+            ]
+          : []),
+        {
+          key: "text",
+          label: sessionContextMenuLabel("text", "Сгенерировать текст"),
+          disabled:
+            sessionContextMenuItem.status === "recording" ||
+            sessionContextMenuTextPending ||
+            sessionContextMenuSummaryPending,
+        },
+        {
+          key: "summary",
+          label: sessionContextMenuLabel("summary", "Сгенерировать саммари"),
+          disabled:
+            sessionContextMenuItem.status === "recording" ||
+            !sessionContextMenuItem.has_transcript_text ||
+            sessionContextMenuSummaryPending ||
+            sessionContextMenuTextPending,
+        },
+        {
+          key: "prompt",
+          label: sessionContextMenuLabel("prompt", "Настроить промпт саммари"),
+        },
+        {
+          key: "delete",
+          label: sessionContextMenuLabel("delete", "Удалить"),
+          danger: true,
+        },
+      ]
+    : [];
+
+  function runSessionContextMenuItem(key: string) {
+    if (!sessionContextMenuItem) return;
+    setSessionContextMenu(null);
+    if (key === "folder") {
+      void openSessionFolder(sessionContextMenuItem.session_dir);
+    } else if (key === "open-text") {
+      void openSessionArtifact(sessionContextMenuItem.session_id, "transcript");
+    } else if (key === "open-summary") {
+      void openSessionArtifact(sessionContextMenuItem.session_id, "summary");
+    } else if (key === "text") {
+      void getText(sessionContextMenuItem.session_id);
+    } else if (key === "summary") {
+      void getSummary(sessionContextMenuItem.session_id);
+    } else if (key === "prompt" && sessionContextMenuDetail) {
+      void openSummaryPromptDialogForSession(sessionContextMenuDetail);
+    } else if (key === "delete") {
+      requestDeleteSession(sessionContextMenuItem.session_id, sessionContextMenuItem.status === "recording");
+    }
+  }
 
   function renderSettingsFields() {
     if (!settings) return null;
     const isOpusFormat = settings.audio_format === "opus";
     const isNexaraProvider = settings.transcription_provider === "nexara";
     const openerOptions = textEditorApps.length > 0 ? textEditorApps : openerUiFallback;
-    const selectedOpenerApp = openerOptions.find((app) => app.id === settings.artifact_open_app) ?? null;
     const artifactOpenerLabelId = "artifact-opener-label";
-    const artifactOpenerValueId = "artifact-opener-value";
     const snapshot = savedSettingsSnapshot;
     const isDirty = (field: keyof PublicSettings) => Boolean(snapshot && settings[field] !== snapshot[field]);
     const isMacosPermissionLoading = macosSystemAudioPermissionLoadState === "loading";
@@ -756,24 +712,25 @@ export function App() {
       { id: "audiototext", label: "AudioToText" },
       { id: "audio", label: "Audio" },
     ];
+    const settingsTabItems = tabButtons.map((tab) => ({
+      key: tab.id,
+      label: (
+        <>
+          {tab.label}
+          {dirtyByTab[tab.id] && <span className="settings-tab-dirty-dot" aria-hidden="true" />}
+        </>
+      ),
+    }));
 
     return (
       <div className="settings-tabs settings-layout">
-        <div className="settings-tab-list" role="tablist" aria-label="Settings sections">
-          {tabButtons.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              className={`settings-tab-button${settingsTab === tab.id ? " is-active" : ""}`}
-              aria-selected={settingsTab === tab.id}
-              onClick={() => setSettingsTab(tab.id)}
-            >
-              {tab.label}
-              {dirtyByTab[tab.id] && <span className="settings-tab-dirty-dot" aria-hidden="true" />}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          className="settings-tab-list"
+          activeKey={settingsTab}
+          aria-label="Settings sections"
+          items={settingsTabItems}
+          onChange={(key) => setSettingsTab(key as SettingsTab)}
+        />
 
         <div className="settings-tab-panel" role="tabpanel">
           {settingsTab === "audiototext" && (
@@ -783,58 +740,46 @@ export function App() {
                 <div className="settings-tab-grid">
                   <label className="field">
                     Transcription provider
-                    <select
+                    <Select
+                      aria-label="Transcription provider"
                       value={settings.transcription_provider}
-                      onChange={(e) => setSettings({ ...settings, transcription_provider: e.target.value })}
-                    >
-                      {transcriptionProviderOptions.map((value) => (
-                        <option key={value} value={value}>
-                          {value === "nexara" ? "nexara" : "SalutSpeechAPI"}
-                        </option>
-                      ))}
-                    </select>
+                      options={transcriptionProviderOptions.map((value) => ({
+                        value,
+                        label: value === "nexara" ? "nexara" : "SalutSpeechAPI",
+                      }))}
+                      onChange={(value) => setSettings({ ...settings, transcription_provider: value })}
+                    />
                   </label>
                   {isNexaraProvider ? (
                     <>
                       <label className="field">
                         Transcription URL
-                        <input
+                        <Input
                           value={settings.transcription_url}
                           onChange={(e) => setSettings({ ...settings, transcription_url: e.target.value })}
                         />
                       </label>
                       <label className="field">
                         Task
-                        <select
+                        <Select
+                          aria-label="Task"
                           value={settings.transcription_task}
-                          onChange={(e) => setSettings({ ...settings, transcription_task: e.target.value })}
-                        >
-                          {transcriptionTaskOptions.map((value) => (
-                            <option key={value} value={value}>
-                              {value}
-                            </option>
-                          ))}
-                        </select>
+                          options={transcriptionTaskOptions.map((value) => ({ value, label: value }))}
+                          onChange={(value) => setSettings({ ...settings, transcription_task: value })}
+                        />
                       </label>
                       <label className="field">
                         Diarization setting
-                        <select
+                        <Select
+                          aria-label="Diarization setting"
                           value={settings.transcription_diarization_setting}
-                          onChange={(e) =>
-                            setSettings({ ...settings, transcription_diarization_setting: e.target.value })
-                          }
-                        >
-                          {diarizationSettingOptions.map((value) => (
-                            <option key={value} value={value}>
-                              {value}
-                            </option>
-                          ))}
-                        </select>
+                          options={diarizationSettingOptions.map((value) => ({ value, label: value }))}
+                          onChange={(value) => setSettings({ ...settings, transcription_diarization_setting: value })}
+                        />
                       </label>
                       <label className="field">
                         Nexara API key
-                        <input
-                          type="password"
+                        <Input.Password
                           value={nexaraKey}
                           onChange={(e) => {
                             setNexaraKey(e.target.value);
@@ -848,64 +793,57 @@ export function App() {
                     <>
                       <label className="field">
                         Scope
-                        <select
+                        <Select
+                          aria-label="Scope"
                           value={settings.salute_speech_scope}
-                          onChange={(e) => setSettings({ ...settings, salute_speech_scope: e.target.value })}
-                        >
-                          {saluteSpeechScopeOptions.map((value) => (
-                            <option key={value} value={value}>
-                              {value}
-                            </option>
-                          ))}
-                        </select>
+                          virtual={false}
+                          options={saluteSpeechScopeOptions.map((value) => ({ value, label: value }))}
+                          onChange={(value) => setSettings({ ...settings, salute_speech_scope: value })}
+                        />
                       </label>
                       <label className="field">
                         Recognition model
-                        <select
+                        <Select
+                          aria-label="Recognition model"
                           value={settings.salute_speech_model}
-                          onChange={(e) => setSettings({ ...settings, salute_speech_model: e.target.value })}
-                        >
-                          {saluteSpeechRecognitionModelOptions.map((value) => (
-                            <option key={value} value={value}>
-                              {value}
-                            </option>
-                          ))}
-                        </select>
+                          virtual={false}
+                          options={saluteSpeechRecognitionModelOptions.map((value) => ({ value, label: value }))}
+                          onChange={(value) => setSettings({ ...settings, salute_speech_model: value })}
+                        />
                       </label>
                       <label className="field">
                         Language
-                        <input
+                        <Input
                           value={settings.salute_speech_language}
                           onChange={(e) => setSettings({ ...settings, salute_speech_language: e.target.value })}
                         />
                       </label>
                       <label className="field">
                         Sample rate
-                        <input
-                          type="number"
+                        <InputNumber
+                          aria-label="Sample rate"
                           value={settings.salute_speech_sample_rate}
-                          onChange={(e) =>
-                            setSettings({ ...settings, salute_speech_sample_rate: Number(e.target.value) || 0 })
+                          onChange={(value) =>
+                            setSettings({ ...settings, salute_speech_sample_rate: Number(value) || 0 })
                           }
                         />
                       </label>
                       <label className="field">
                         Channels count
-                        <input
-                          type="number"
+                        <InputNumber
+                          aria-label="Channels count"
                           value={settings.salute_speech_channels_count}
-                          onChange={(e) =>
+                          onChange={(value) =>
                             setSettings({
                               ...settings,
-                              salute_speech_channels_count: Number(e.target.value) || 0,
+                              salute_speech_channels_count: Number(value) || 0,
                             })
                           }
                         />
                       </label>
                       <label className="field">
                         SalutSpeech authorization key
-                        <input
-                          type="password"
+                        <Input.Password
                           value={salutSpeechAuthKey}
                           onChange={(e) => {
                             setSalutSpeechAuthKey(e.target.value);
@@ -924,14 +862,14 @@ export function App() {
                 <div className="settings-tab-grid">
                   <label className="field">
                     Summary URL
-                    <input
+                    <Input
                       value={settings.summary_url}
                       onChange={(e) => setSettings({ ...settings, summary_url: e.target.value })}
                     />
                   </label>
                   <label className="field">
                     Summary prompt
-                    <textarea
+                    <Input.TextArea
                       value={settings.summary_prompt}
                       onChange={(e) => setSettings({ ...settings, summary_prompt: e.target.value })}
                       rows={4}
@@ -939,15 +877,14 @@ export function App() {
                   </label>
                   <label className="field">
                     OpenAI model
-                    <input
+                    <Input
                       value={settings.openai_model}
                       onChange={(e) => setSettings({ ...settings, openai_model: e.target.value })}
                     />
                   </label>
                   <label className="field">
                     OpenAI API key
-                    <input
-                      type="password"
+                    <Input.Password
                       value={openaiKey}
                       onChange={(e) => {
                         setOpenaiKey(e.target.value);
@@ -966,12 +903,12 @@ export function App() {
               <label className="field">
                 Recording root
                 <div className="input-with-action">
-                  <input
+                  <Input
                     value={settings.recording_root}
                     onChange={(e) => setSettings({ ...settings, recording_root: e.target.value })}
                   />
-                  <button
-                    type="button"
+                  <Button
+                    htmlType="button"
                     className="input-action-button"
                     aria-label="Choose recording root folder"
                     onClick={() => {
@@ -988,73 +925,20 @@ export function App() {
                         strokeWidth="1.5"
                       />
                     </svg>
-                  </button>
+                  </Button>
                 </div>
               </label>
               <div className="field">
                 <span id={artifactOpenerLabelId}>Artifact opener app (optional)</span>
-                <div className="opener-dropdown" ref={openerDropdownRef} onBlur={handleOpenerDropdownBlur}>
-                  <button
-                    ref={openerTriggerRef}
-                    type="button"
-                    className="opener-dropdown-trigger"
-                    aria-labelledby={`${artifactOpenerLabelId} ${artifactOpenerValueId}`}
-                    aria-haspopup="listbox"
-                    aria-expanded={isOpenerDropdownOpen}
-                    aria-controls="artifact-opener-listbox"
-                    onClick={() => {
-                      if (isOpenerDropdownOpen) {
-                        closeOpenerDropdown();
-                        return;
-                      }
-                      openOpenerDropdown();
-                    }}
-                    onKeyDown={handleOpenerTriggerKeyDown}
-                  >
-                    {selectedOpenerApp ? (
-                      <>
-                        {(selectedOpenerApp.icon_data_url || localIconForEditor(selectedOpenerApp.name)) ? (
-                          <img
-                            className="opener-app-icon"
-                            src={selectedOpenerApp.icon_data_url || localIconForEditor(selectedOpenerApp.name) || ""}
-                            alt=""
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <span className="opener-app-fallback-icon" aria-hidden="true">
-                            {selectedOpenerApp.icon_fallback}
-                          </span>
-                        )}
-                        <span id={artifactOpenerValueId}>{selectedOpenerApp.name}</span>
-                      </>
-                    ) : (
-                      <span id={artifactOpenerValueId}>{selectedOpenerLabel}</span>
-                    )}
-                  </button>
-
-                  {isOpenerDropdownOpen && (
-                    <div
-                      id="artifact-opener-listbox"
-                      className="opener-dropdown-menu"
-                      role="listbox"
-                      aria-label="Artifact opener app options"
-                      onKeyDown={handleOpenerMenuKeyDown}
-                    >
-                      {openerMenuOptions.map((editor, index) => (
-                        <div
-                          key={editor.id || "system-default"}
-                          ref={(node) => {
-                            openerOptionRefs.current[index] = node;
-                          }}
-                          role="option"
-                          tabIndex={-1}
-                          aria-selected={settings.artifact_open_app === editor.id}
-                          className={`opener-dropdown-option${
-                            settings.artifact_open_app === editor.id ? " is-active" : ""
-                          }`}
-                          onClick={() => selectOpenerApp(editor.id)}
-                          onMouseEnter={() => setOpenerActiveIndex(index)}
-                        >
+                <div className="opener-dropdown">
+                  <Select
+                    aria-labelledby={artifactOpenerLabelId}
+                    value={settings.artifact_open_app}
+                    virtual={false}
+                    options={openerMenuOptions.map((editor) => ({
+                      value: editor.id,
+                      label: (
+                        <span className="opener-dropdown-option-label">
                           {editor.id && (editor.icon_data_url || localIconForEditor(editor.name)) ? (
                             <img
                               className="opener-app-icon"
@@ -1068,26 +952,27 @@ export function App() {
                             </span>
                           ) : null}
                           <span>{editor.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        </span>
+                      ),
+                    }))}
+                    onChange={(value) => setSettings({ ...settings, artifact_open_app: value })}
+                  />
                 </div>
               </div>
               <label className="field">
                 <span>Auto-run pipeline on Stop</span>
-                <input
-                  type="checkbox"
+                <Switch
+                  aria-label="Auto-run pipeline on Stop"
                   checked={Boolean(settings.auto_run_pipeline_on_stop)}
-                  onChange={(e) => setSettings({ ...settings, auto_run_pipeline_on_stop: e.target.checked })}
+                  onChange={(checked) => setSettings({ ...settings, auto_run_pipeline_on_stop: checked })}
                 />
               </label>
               <label className="field">
                 <span>Enable API call logging</span>
-                <input
-                  type="checkbox"
+                <Switch
+                  aria-label="Enable API call logging"
                   checked={Boolean(settings.api_call_logging_enabled)}
-                  onChange={(e) => setSettings({ ...settings, api_call_logging_enabled: e.target.checked })}
+                  onChange={(checked) => setSettings({ ...settings, api_call_logging_enabled: checked })}
                 />
               </label>
             </div>
@@ -1097,29 +982,25 @@ export function App() {
             <div className="settings-tab-grid">
               <label className="field">
                 Audio format
-                <select
+                <Select
+                  aria-label="Audio format"
                   value={settings.audio_format}
-                  onChange={(e) => setSettings({ ...settings, audio_format: e.target.value })}
-                >
-                  {audioFormatOptions.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
+                  options={audioFormatOptions.map((value) => ({ value, label: value }))}
+                  onChange={(value) => setSettings({ ...settings, audio_format: value })}
+                />
               </label>
               <label className="field">
                 Opus bitrate kbps
-                <input
-                  type="number"
+                <InputNumber
+                  aria-label="Opus bitrate kbps"
                   value={settings.opus_bitrate_kbps}
                   disabled={!isOpusFormat}
-                  onChange={(e) => setSettings({ ...settings, opus_bitrate_kbps: Number(e.target.value) || 24 })}
+                  onChange={(value) => setSettings({ ...settings, opus_bitrate_kbps: Number(value) || 24 })}
                 />
               </label>
               <label className="field">
                 Mic device name
-                <input
+                <Input
                   value={settings.mic_device_name}
                   onChange={(e) => setSettings({ ...settings, mic_device_name: e.target.value })}
                 />
@@ -1133,25 +1014,24 @@ export function App() {
                 <>
                   <label className="field">
                     System source device name
-                    <input
+                    <Input
                       value={settings.system_device_name}
                       onChange={(e) => setSettings({ ...settings, system_device_name: e.target.value })}
                     />
                   </label>
                   <div className="button-row">
-                    <button className="secondary-button" onClick={autoDetectSystemSource}>
+                    <Button onClick={autoDetectSystemSource}>
                       Auto-detect system source
-                    </button>
+                    </Button>
                   </div>
                   {audioDevices.length > 0 && (
                     <div className="device-card">
                       <strong>Available input devices</strong>
                       <div className="device-list">
                         {audioDevices.map((dev) => (
-                          <button
+                          <Button
                             key={dev}
-                            type="button"
-                            className="secondary-button"
+                            htmlType="button"
                             onClick={() =>
                               setSettings((prev) =>
                                 prev
@@ -1160,12 +1040,12 @@ export function App() {
                                       mic_device_name: prev.mic_device_name || dev,
                                       system_device_name: prev.system_device_name || dev,
                                     }
-                                  : prev
+                                    : prev
                               )
                             }
                           >
                             {dev}
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     </div>
@@ -1186,9 +1066,9 @@ export function App() {
                         Recording permission.
                       </div>
                       <div className="button-row">
-                        <button className="secondary-button" onClick={() => void openMacosSystemAudioSettings()}>
+                        <Button onClick={() => void openMacosSystemAudioSettings()}>
                           Open System Settings
-                        </button>
+                        </Button>
                       </div>
                     </>
                   ) : (
@@ -1196,9 +1076,9 @@ export function App() {
                       <strong>System audio is captured natively by macOS</strong>
                       <div>Grant Screen & System Audio Recording permission in System Settings.</div>
                       <div className="button-row">
-                        <button className="secondary-button" onClick={() => void openMacosSystemAudioSettings()}>
+                        <Button onClick={() => void openMacosSystemAudioSettings()}>
                           Open System Settings
-                        </button>
+                        </Button>
                       </div>
                     </>
                   )}
@@ -1221,12 +1101,12 @@ export function App() {
           </div>
         )}
         <div className="settings-actions">
-          <button className="primary-button" onClick={saveSettings} disabled={!canSaveSettings}>
+          <Button type="primary" onClick={saveSettings} disabled={!canSaveSettings}>
             Save settings
-          </button>
-          <button className="secondary-button" onClick={saveApiKeys}>
+          </Button>
+          <Button onClick={saveApiKeys}>
             Save API keys
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -1264,9 +1144,13 @@ export function App() {
         <div className="tray-top-bar">
           <p className="status-line">Status: {formatAppStatus(status)}</p>
           {showMacosSystemAudioSettingsShortcut && (
-            <button className="tray-settings-link" onClick={() => void openMacosSystemAudioSettings()}>
+            <Button
+              type="link"
+              className="tray-settings-link"
+              onClick={() => void openMacosSystemAudioSettings()}
+            >
               Open System Settings
-            </button>
+            </Button>
           )}
         </div>
         {trayMuteError && (
@@ -1277,17 +1161,20 @@ export function App() {
         <div className="tray-meta-grid">
           <label className="field tray-source-field">
             Source
-            <select value={source} onChange={(e) => setSource(e.target.value)}>
-              {fixedSources.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            <Select
+              aria-label="Source"
+              value={source}
+              options={fixedSourceOptions}
+              onChange={(value) => setSource(value)}
+            />
           </label>
           <label className="field tray-topic-field">
             Topic (optional)
-            <input value={topic} onChange={(e) => setTopic(e.target.value)} />
+            <Input
+              aria-label="Topic (optional)"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+            />
           </label>
         </div>
         <div className="tray-audio-rows">
@@ -1304,23 +1191,20 @@ export function App() {
             trailing={
               <label className="tray-audio-device">
                 <span className="sr-only">Mic device</span>
-                <select
+                <Select
                   aria-label="Mic device"
                   value={settings?.mic_device_name ?? ""}
-                  onChange={(e) => {
-                    void saveSettingsPatch({ mic_device_name: e.target.value }).catch((err) =>
+                  options={[
+                    { value: "", label: "Auto" },
+                    ...audioDevices.map((dev) => ({ value: dev, label: dev })),
+                  ]}
+                  onChange={(value) => {
+                    void saveSettingsPatch({ mic_device_name: value }).catch((err) =>
                       setStatus(`error: ${String(err)}`)
                     );
                   }}
                   disabled={status === "recording"}
-                >
-                  <option value="">Auto</option>
-                  {audioDevices.map((dev) => (
-                    <option key={`mic-${dev}`} value={dev}>
-                      {dev}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
             }
           />
@@ -1352,41 +1236,38 @@ export function App() {
               isMacosSystemAudioUnsupported ? (
                 <label className="tray-audio-device">
                   <span className="sr-only">System device</span>
-                  <select
+                  <Select
                     aria-label="System device"
                     value={settings?.system_device_name ?? ""}
-                    onChange={(e) => {
-                      void saveSettingsPatch({ system_device_name: e.target.value }).catch((err) =>
+                    options={[
+                      { value: "", label: "Auto" },
+                      ...audioDevices.map((dev) => ({ value: dev, label: dev })),
+                    ]}
+                    onChange={(value) => {
+                      void saveSettingsPatch({ system_device_name: value }).catch((err) =>
                         setStatus(`error: ${String(err)}`)
                       );
                     }}
                     disabled={status === "recording"}
-                  >
-                    <option value="">Auto</option>
-                    {audioDevices.map((dev) => (
-                      <option key={`sys-${dev}`} value={dev}>
-                        {dev}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
               ) : null
             }
           />
         </div>
         <div className="button-row">
-          <button
+          <Button
             className="primary-button rec-button"
             onClick={() => void handleStartFromTray()}
             disabled={status === "recording"}
           >
             <span className="rec-dot" />
             Rec
-          </button>
-          <button className="secondary-button" onClick={() => void handleStopFromTray()} disabled={status !== "recording"}>
+          </Button>
+          <Button className="secondary-button" onClick={() => void handleStopFromTray()} disabled={status !== "recording"}>
             <span className="stop-square" />
             Stop
-          </button>
+          </Button>
         </div>
       </main>
     );
@@ -1405,24 +1286,24 @@ export function App() {
   return (
     <main className="app-shell mac-window mac-content" ref={appMainRef}>
       <div className="main-tabs" role="tablist" aria-label="Main sections">
-        <button
-          type="button"
+        <Button
+          htmlType="button"
           role="tab"
           className={`main-tab-button${mainTab === "sessions" ? " is-active" : ""}`}
           aria-selected={mainTab === "sessions"}
           onClick={() => setMainTab("sessions")}
         >
           Sessions
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          htmlType="button"
           role="tab"
           className={`main-tab-button${mainTab === "settings" ? " is-active" : ""}`}
           aria-selected={mainTab === "settings"}
           onClick={() => setMainTab("settings")}
         >
           Settings
-        </button>
+        </Button>
       </div>
 
       {mainTab === "settings" ? (
@@ -1437,15 +1318,15 @@ export function App() {
                 Search sessions
               </label>
               <div className="session-toolbar-actions">
-                <button
-                  type="button"
+                <Button
+                  htmlType="button"
                   className="secondary-button session-import-button"
                   onClick={() => void importAudioSession()}
                 >
                   Загрузить аудио
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  htmlType="button"
                   className="refresh-icon-button"
                   aria-label="Refresh sessions"
                   title="Refresh sessions"
@@ -1473,36 +1354,18 @@ export function App() {
                       strokeLinejoin="round"
                     />
                   </svg>
-                </button>
+                </Button>
               </div>
             </div>
             <div className="session-toolbar-search">
-              <input
+              <Input.Search
                 id="session-search-input"
                 ref={sessionSearchInputRef}
                 aria-label="Search sessions"
                 value={sessionSearchQuery}
                 onChange={(e) => setSessionSearchQuery(e.target.value)}
+                allowClear
               />
-              <span className="session-search-icon" aria-hidden="true">
-                <svg viewBox="0 0 20 20">
-                  <circle
-                    cx="8.5"
-                    cy="8.5"
-                    r="4.75"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                  />
-                  <path
-                    d="M12 12l4.25 4.25"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </span>
             </div>
           </div>
           <div className="sessions-grid">
@@ -1545,27 +1408,27 @@ export function App() {
                     <div className="session-card-actions">
                       <div className="session-labels">
                         {item.has_transcript_text && (
-                          <button
-                            type="button"
+                          <Button
+                            htmlType="button"
                             className={`session-label session-label-action session-label-text${transcriptMatch ? " match-hit" : ""}`}
                             onClick={() => void openSessionArtifact(item.session_id, "transcript")}
                           >
                             текст
-                          </button>
+                          </Button>
                         )}
                         {item.has_summary_text && (
-                          <button
-                            type="button"
+                          <Button
+                            htmlType="button"
                             className={`session-label session-label-action session-label-summary${summaryMatch ? " match-hit" : ""}`}
                             onClick={() => void openSessionArtifact(item.session_id, "summary")}
                           >
                             саммари
-                          </button>
+                          </Button>
                         )}
                       </div>
                       <div className="session-card-icon-actions">
-                        <button
-                          type="button"
+                        <Button
+                          htmlType="button"
                           className="icon-button delete-session-button"
                           aria-label="Удалить сессию"
                           title="Удалить сессию"
@@ -1577,9 +1440,9 @@ export function App() {
                               fill="currentColor"
                             />
                           </svg>
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          htmlType="button"
                           className="icon-button session-folder-link"
                           aria-label="Открыть папку сессии"
                           title="Открыть папку сессии"
@@ -1612,44 +1475,29 @@ export function App() {
                               strokeLinejoin="round"
                             />
                           </svg>
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
                   <div className="session-edit-grid">
                     <label className={`field${sourceMatch ? " match-hit" : ""}`}>
                       Source
-                      <select
+                      <Select
+                        aria-label="Source"
                         value={detail.source}
-                        onChange={(e) =>
+                        options={fixedSourceOptions}
+                        onChange={(value) =>
                           setSessionDetails((prev) => ({
                             ...prev,
-                            [item.session_id]: { ...detail, source: e.target.value },
-                          }))
-                        }
-                      >
-                        {fixedSources.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className={`field${notesMatch ? " match-hit" : ""}`}>
-                      Notes
-                      <input
-                        value={detail.notes}
-                        onChange={(e) =>
-                          setSessionDetails((prev) => ({
-                            ...prev,
-                            [item.session_id]: { ...detail, notes: e.target.value },
+                            [item.session_id]: { ...detail, source: value },
                           }))
                         }
                       />
                     </label>
                     <label className={`field${topicMatch ? " match-hit" : ""}`}>
                       Topic
-                      <input
+                      <Input
+                        aria-label="Topic"
                         value={detail.topic}
                         onChange={(e) =>
                           setSessionDetails((prev) => ({
@@ -1661,15 +1509,30 @@ export function App() {
                     </label>
                     <label className={`field${tagsMatch ? " match-hit" : ""}`}>
                       Tags
-                      <input
-                        value={tagsText}
+                      <Select
+                        aria-label="Tags"
+                        mode="tags"
+                        value={detail.tags}
+                        options={knownTagOptions}
+                        tokenSeparators={[","]}
+                        onChange={(value) =>
+                          setSessionDetails((prev) => ({
+                            ...prev,
+                            [item.session_id]: { ...detail, tags: value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={`field${notesMatch ? " match-hit" : ""}`}>
+                      Notes
+                      <Input.TextArea
+                        aria-label="Notes"
+                        value={detail.notes}
+                        autoSize={{ minRows: 1, maxRows: 4 }}
                         onChange={(e) =>
                           setSessionDetails((prev) => ({
                             ...prev,
-                            [item.session_id]: {
-                              ...detail,
-                              tags: splitTags(e.target.value),
-                            },
+                            [item.session_id]: { ...detail, notes: e.target.value },
                           }))
                         }
                       />
@@ -1678,7 +1541,7 @@ export function App() {
                   <div className="session-card-footer">
                     <div className="session-card-footer-actions">
                       <div className="button-row">
-                        <button
+                        <Button
                           className="secondary-button"
                           onClick={() => getText(item.session_id)}
                           disabled={item.status === "recording" || textPending || summaryPending}
@@ -1691,13 +1554,13 @@ export function App() {
                           ) : (
                             "Get text"
                           )}
-                        </button>
+                        </Button>
                         {textPending && (
                           <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
                             Loading text
                           </span>
                         )}
-                        <button
+                        <Button
                           className="secondary-button"
                           onClick={() => getSummary(item.session_id)}
                           disabled={
@@ -1712,9 +1575,9 @@ export function App() {
                           ) : (
                             "Get Summary"
                           )}
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          htmlType="button"
                           className="icon-button session-summary-prompt-button"
                           aria-label="Настроить промпт саммари"
                           title="Настроить промпт саммари"
@@ -1730,7 +1593,7 @@ export function App() {
                               strokeLinejoin="round"
                             />
                           </svg>
-                        </button>
+                        </Button>
                         {summaryPending && (
                           <span
                             className="visually-hidden"
@@ -1770,228 +1633,139 @@ export function App() {
             )}
           </div>
           {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (
-            <div
-              ref={sessionContextMenuRef}
-              className="session-context-menu"
-              role="menu"
-              aria-label="Действия сессии"
-              style={{ left: sessionContextMenu.x, top: sessionContextMenu.y }}
+            <Dropdown
+              open
+              menu={{ items: [] }}
+              dropdownRender={() => (
+                <Menu
+                  aria-label="Действия сессии"
+                  className="session-context-menu-popup"
+                  items={sessionContextMenuItems}
+                  onClick={({ key }) => runSessionContextMenuItem(String(key))}
+                />
+              )}
+              trigger={["click"]}
+              onOpenChange={(open) => {
+                if (!open) setSessionContextMenu(null);
+              }}
             >
-              <button
-                type="button"
-                role="menuitem"
-                className="session-context-menu-item"
-                onClick={() =>
-                  runSessionContextMenuAction(() => {
-                    void openSessionFolder(sessionContextMenuItem.session_dir);
-                  })
-                }
-              >
-                Открыть папку сессии
-              </button>
-              {sessionContextMenuItem.has_transcript_text && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="session-context-menu-item"
-                  onClick={() =>
-                    runSessionContextMenuAction(() => {
-                      void openSessionArtifact(sessionContextMenuItem.session_id, "transcript");
-                    })
-                  }
-                >
-                  Открыть текст
-                </button>
-              )}
-              {sessionContextMenuItem.has_summary_text && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="session-context-menu-item"
-                  onClick={() =>
-                    runSessionContextMenuAction(() => {
-                      void openSessionArtifact(sessionContextMenuItem.session_id, "summary");
-                    })
-                  }
-                >
-                  Открыть саммари
-                </button>
-              )}
-              <button
-                type="button"
-                role="menuitem"
-                className="session-context-menu-item"
-                onClick={() =>
-                  runSessionContextMenuAction(() => {
-                    void getText(sessionContextMenuItem.session_id);
-                  })
-                }
-                disabled={
-                  sessionContextMenuItem.status === "recording" ||
-                  sessionContextMenuTextPending ||
-                  sessionContextMenuSummaryPending
-                }
-              >
-                Сгенерировать текст
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="session-context-menu-item"
-                onClick={() =>
-                  runSessionContextMenuAction(() => {
-                    void getSummary(sessionContextMenuItem.session_id);
-                  })
-                }
-                disabled={
-                  sessionContextMenuItem.status === "recording" ||
-                  !sessionContextMenuItem.has_transcript_text ||
-                  sessionContextMenuSummaryPending ||
-                  sessionContextMenuTextPending
-                }
-              >
-                Сгенерировать саммари
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="session-context-menu-item"
-                onClick={() =>
-                  runSessionContextMenuAction(() => {
-                    void openSummaryPromptDialogForSession(sessionContextMenuDetail);
-                  })
-                }
-              >
-                Настроить промпт саммари
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="session-context-menu-item session-context-menu-item-danger"
-                onClick={() =>
-                  runSessionContextMenuAction(() =>
-                    requestDeleteSession(
-                      sessionContextMenuItem.session_id,
-                      sessionContextMenuItem.status === "recording"
+              <span
+                ref={sessionContextMenuRef}
+                className="session-context-menu"
+                style={{ left: sessionContextMenu.x, top: sessionContextMenu.y }}
+              />
+            </Dropdown>
+          )}
+        <Modal
+          open={Boolean(deleteTarget)}
+          title="Подтверждение удаления"
+          closable={false}
+          onCancel={() => setDeleteTarget(null)}
+          wrapProps={{ onKeyDown: handleDeleteDialogKeyDown }}
+          afterOpenChange={(open) => {
+            if (open) window.setTimeout(() => deleteCancelButtonRef.current?.focus(), 0);
+          }}
+          footer={[
+            <Button
+              key="cancel"
+              ref={(button) => {
+                deleteCancelButtonRef.current = button;
+              }}
+              autoFocus
+              onClick={() => setDeleteTarget(null)}
+              disabled={deletePendingSessionId !== null}
+            >
+              Отмена
+            </Button>,
+            <Button
+              key="delete"
+              ref={(button) => {
+                deleteConfirmButtonRef.current = button;
+              }}
+              danger
+              onClick={() => void confirmDeleteSession()}
+              loading={deletePendingSessionId !== null}
+            >
+              Удалить
+            </Button>,
+          ]}
+        >
+          <div ref={deleteDialogRef}>
+            <p>
+              {deleteTarget?.force
+                ? "Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?"
+                : "Удалить сессию и все связанные файлы?"}
+            </p>
+          </div>
+        </Modal>
+        <Modal
+          open={Boolean(artifactPreview)}
+          title="Просмотр артефакта"
+          closable={false}
+          onCancel={closeArtifactPreview}
+          footer={[
+            <Button key="close" onClick={closeArtifactPreview}>
+              Закрыть
+            </Button>,
+          ]}
+          aria-label="Просмотр артефакта"
+        >
+          {artifactPreview && (
+            <div className="artifact-preview-card" ref={artifactDialogRef}>
+              <div className="session-title-line">
+                <strong>{artifactPreview.artifactKind === "transcript" ? "Текст" : "Саммари"}</strong>
+              </div>
+              <div className="session-path">{artifactPreview.path}</div>
+              <pre ref={artifactPreviewBodyRef} className="artifact-preview-text">
+                {renderHighlightedText(artifactPreview.text, artifactPreview.query)}
+              </pre>
+            </div>
+          )}
+        </Modal>
+        <Modal
+          open={Boolean(summaryPromptDialog)}
+          title="Промпт саммари"
+          closable={false}
+          onCancel={() => setSummaryPromptDialog(null)}
+          footer={[
+            <Button
+              key="cancel"
+              onClick={() => setSummaryPromptDialog(null)}
+              disabled={summaryPromptDialog?.saving}
+            >
+              Отмена
+            </Button>,
+            <Button
+              key="ok"
+              onClick={() => void confirmSummaryPromptDialog()}
+              loading={summaryPromptDialog?.saving}
+            >
+              Ок
+            </Button>,
+          ]}
+        >
+          {summaryPromptDialog && (
+            <div className="summary-prompt-card" ref={summaryPromptDialogRef}>
+              <label className="field">
+                <Input.TextArea
+                  rows={8}
+                  value={summaryPromptDialog.value}
+                  onChange={(event) =>
+                    setSummaryPromptDialog((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            value: event.target.value,
+                          }
+                        : prev
                     )
-                  )
-                }
-              >
-                Удалить
-              </button>
+                  }
+                  disabled={summaryPromptDialog.saving}
+                />
+              </label>
             </div>
           )}
-        {deleteTarget && (
-            <div
-              className="confirm-overlay"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Подтверждение удаления"
-              onKeyDown={(event) => handleDialogKeyDown(event, deleteDialogRef.current, () => setDeleteTarget(null))}
-            >
-              <div className="confirm-card" ref={deleteDialogRef} tabIndex={-1}>
-                <p>
-                  {deleteTarget.force
-                    ? "Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?"
-                    : "Удалить сессию и все связанные файлы?"}
-                </p>
-                <div className="button-row">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => setDeleteTarget(null)}
-                    disabled={deletePendingSessionId !== null}
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    className="secondary-button danger-button"
-                    type="button"
-                    onClick={() => void confirmDeleteSession()}
-                    disabled={deletePendingSessionId !== null}
-                  >
-                    {deletePendingSessionId !== null ? "Удаление..." : "Удалить"}
-                  </button>
-                </div>
-              </div>
-            </div>
-        )}
-        {artifactPreview && (
-            <div
-              className="confirm-overlay"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Просмотр артефакта"
-              onKeyDown={(event) => handleDialogKeyDown(event, artifactDialogRef.current, closeArtifactPreview)}
-            >
-              <div className="confirm-card artifact-preview-card" ref={artifactDialogRef} tabIndex={-1}>
-                <div className="session-title-line">
-                  <strong>{artifactPreview.artifactKind === "transcript" ? "Текст" : "Саммари"}</strong>
-                </div>
-                <div className="session-path">{artifactPreview.path}</div>
-                <pre ref={artifactPreviewBodyRef} className="artifact-preview-text">
-                  {renderHighlightedText(artifactPreview.text, artifactPreview.query)}
-                </pre>
-                <div className="button-row">
-                  <button className="secondary-button" type="button" onClick={closeArtifactPreview}>
-                    Закрыть
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        {summaryPromptDialog && (
-            <div
-              className="confirm-overlay"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Промпт саммари"
-              onKeyDown={(event) =>
-                handleDialogKeyDown(event, summaryPromptDialogRef.current, () => setSummaryPromptDialog(null))
-              }
-            >
-              <div className="confirm-card summary-prompt-card" ref={summaryPromptDialogRef} tabIndex={-1}>
-                <div className="session-title-line">
-                  <strong>Промпт саммари</strong>
-                </div>
-                <label className="field">
-                  <textarea
-                    rows={8}
-                    value={summaryPromptDialog.value}
-                    onChange={(event) =>
-                      setSummaryPromptDialog((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              value: event.target.value,
-                            }
-                          : prev
-                      )
-                    }
-                    disabled={summaryPromptDialog.saving}
-                  />
-                </label>
-                <div className="button-row">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => setSummaryPromptDialog(null)}
-                    disabled={summaryPromptDialog.saving}
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => void confirmSummaryPromptDialog()}
-                    disabled={summaryPromptDialog.saving}
-                  >
-                    {summaryPromptDialog.saving ? "Сохранение..." : "Ок"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+        </Modal>
         </section>
       )}
     </main>

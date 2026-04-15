@@ -1,8 +1,41 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
+
+function getAntdSelect(label: string) {
+  const combobox = screen.getByRole("combobox", { name: label });
+  const select = combobox.closest(".ant-select");
+  expect(select).not.toBeNull();
+  return { combobox, select: select as HTMLElement };
+}
+
+async function selectAntdOption(label: string, optionName: string) {
+  const { combobox, select } = getAntdSelect(label);
+  const selector = (select.querySelector(".ant-select-selector") as HTMLElement | null) ?? select;
+  fireEvent.mouseDown(selector);
+  await waitFor(() => {
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+  });
+  const option = await waitFor(() => {
+    const activeDropdown = Array.from(document.body.querySelectorAll<HTMLElement>(".ant-select-dropdown")).find(
+      (dropdown) => !dropdown.classList.contains("ant-select-dropdown-hidden")
+    );
+    expect(activeDropdown).toBeDefined();
+    const activeOption = Array.from(
+      activeDropdown?.querySelectorAll<HTMLElement>(".ant-select-item-option") ?? []
+    ).find((element) => element.textContent?.includes(optionName));
+    expect(activeOption).toBeDefined();
+    return activeOption as HTMLElement;
+  });
+  fireEvent.click(option);
+  fireEvent.keyDown(combobox, { key: "Escape", code: "Escape" });
+  fireEvent.blur(combobox);
+  await waitFor(() => {
+    expect(select.querySelector(".ant-select-selection-item")).toHaveTextContent(optionName);
+  });
+}
 
 async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promise<unknown> {
   if (cmd === "get_ui_sync_state") {
@@ -73,6 +106,17 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 
+function getTraySourceSelect() {
+  const combobox = screen.getByRole("combobox", { name: "Source" });
+  const select = combobox.closest(".ant-select");
+  expect(select).not.toBeNull();
+  return { combobox, select: select as HTMLElement };
+}
+
+function expectTraySourceValue(value: string) {
+  expect(getTraySourceSelect().select.querySelector(".ant-select-selection-item")).toHaveTextContent(value);
+}
+
 describe("Tray window", () => {
   afterEach(() => {
     listeners.clear();
@@ -97,7 +141,7 @@ describe("Tray window", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Source")).toHaveValue("facetime");
+      expectTraySourceValue("facetime");
       expect(screen.getByLabelText("Topic (optional)")).toHaveValue("1:1");
     });
   });
@@ -120,7 +164,7 @@ describe("Tray window", () => {
     render(<App />);
 
     expect(screen.queryByText("Recorder")).not.toBeInTheDocument();
-    const sourceField = screen.getByLabelText("Source");
+    const sourceField = getTraySourceSelect().combobox;
     const topicField = screen.getByLabelText("Topic (optional)");
     expect(sourceField).toBeInTheDocument();
     expect(topicField).toBeInTheDocument();
@@ -157,7 +201,7 @@ describe("Tray window", () => {
       ({ container } = render(<App />));
     });
 
-    const sourceField = screen.getByLabelText("Source");
+    const sourceField = getTraySourceSelect().combobox;
     const topicField = screen.getByLabelText("Topic (optional)");
     const trayMetaGrid = container!.querySelector(".tray-meta-grid");
     const trayButtonRow = container!.querySelector(".tray-shell .button-row");
@@ -364,8 +408,8 @@ describe("Tray window", () => {
 
     expect(screen.queryByText("System audio is captured natively by macOS.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Mic device")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "System device" })).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Mic device" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });
 
@@ -414,7 +458,6 @@ describe("Tray window", () => {
   });
 
   it("shows audio device selectors near live levels and saves selected devices", async () => {
-    const user = userEvent.setup();
     render(<App />);
 
     await waitFor(() => {
@@ -422,13 +465,11 @@ describe("Tray window", () => {
       expect(invokeMock).toHaveBeenCalledWith("list_audio_input_devices");
     });
 
-    const micSelect = screen.getByLabelText("Mic device");
-    const systemSelect = screen.getByLabelText("System device");
-    expect(micSelect).toBeInTheDocument();
-    expect(systemSelect).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Mic device" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "System device" })).toBeInTheDocument();
 
-    await user.selectOptions(micSelect, "Built-in Microphone");
-    await user.selectOptions(systemSelect, "BlackHole 2ch");
+    await selectAntdOption("Mic device", "Built-in Microphone");
+    await selectAntdOption("System device", "BlackHole 2ch");
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
@@ -453,7 +494,7 @@ describe("Tray window", () => {
     const micRow = screen.getByText("Mic").closest(".tray-audio-row");
     const micMain = screen.getByLabelText("Mic activity").closest(".tray-audio-main");
     const micMute = screen.getByRole("button", { name: "Mute microphone" });
-    const micSelect = screen.getByLabelText("Mic device");
+    const micSelect = getAntdSelect("Mic device").select;
 
     expect(micRow).toHaveClass("has-inline-trailing");
     expect(micMain).not.toBeNull();

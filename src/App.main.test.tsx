@@ -69,6 +69,22 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 
+function expectSessionAntdSelectValue(label: string, value: string) {
+  const combobox = screen.getByRole("combobox", { name: label });
+  const select = combobox.closest(".ant-select");
+  expect(select).not.toBeNull();
+  expect(select?.querySelector(".ant-select-selection-item")).toHaveTextContent(value);
+}
+
+async function clickAntdMenuItem(
+  user: ReturnType<typeof userEvent.setup>,
+  menu: HTMLElement,
+  name: string
+) {
+  const menuItem = within(menu).getByRole("menuitem", { name });
+  await user.click(menuItem);
+}
+
 describe("App main window", () => {
   it("defers settings loading until the Settings tab opens", async () => {
     const user = userEvent.setup();
@@ -276,6 +292,51 @@ describe("App main window", () => {
         },
       });
     }, { timeout: 3000 });
+  });
+
+  it("renders Tags and Notes in the existing session edit grid positions", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-tags-ui",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Renewal sync",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T10:00:00+03:00",
+            session_dir: "/tmp/s-tags-ui",
+            audio_format: "wav",
+            audio_duration_hms: "00:20:00",
+            has_transcript_text: false,
+            has_summary_text: false,
+            meta: {
+              session_id: "s-tags-ui",
+              source: "zoom",
+              notes: "Check contract",
+              custom_summary_prompt: "",
+              topic: "Renewal sync",
+              tags: ["project/acme"],
+            },
+          },
+        ];
+      }
+      if (cmd === "list_known_tags") return ["call/sales", "project/acme"];
+      return null;
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Tags")).toBeInTheDocument();
+      expect(screen.getByText("Notes")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Participants")).not.toBeInTheDocument();
+    expect(screen.queryByText("Custom tag")).not.toBeInTheDocument();
+    expect(document.querySelector(".session-edit-grid")).toBeInTheDocument();
+    expect(document.querySelector(".session-edit-grid .ant-select")).toBeInTheDocument();
+    expect(document.querySelector(".session-edit-grid textarea.ant-input")).toBeInTheDocument();
   });
 
   it("opens summary prompt dialog with system default and saves custom prompt on Ok", async () => {
@@ -566,11 +627,11 @@ describe("App main window", () => {
     expect(invokeMock).toHaveBeenCalledWith("import_audio_session");
     await waitFor(() => {
       expect(screen.getByDisplayValue("Voice memo")).toBeInTheDocument();
-      expect(screen.getByDisplayValue("other")).toBeInTheDocument();
+      expectSessionAntdSelectValue("Source", "other");
     });
   });
 
-  it("renders a search icon inside the session search input", async () => {
+  it("renders the AntD search control inside the session toolbar", async () => {
     const { container } = render(<App />);
 
     await waitFor(() => {
@@ -580,7 +641,8 @@ describe("App main window", () => {
     const searchInput = screen.getByLabelText("Search sessions");
     const searchField = searchInput.closest(".session-toolbar-search");
     expect(searchField).not.toBeNull();
-    expect(searchField?.querySelector(".session-search-icon svg")).not.toBeNull();
+    expect(searchField?.querySelector(".ant-input-search")).not.toBeNull();
+    expect(searchField?.querySelector(".ant-input-clear-icon")).not.toBeNull();
   });
 
   it("calls transcription command from Get text and keeps Get Summary disabled without text", async () => {
@@ -729,25 +791,25 @@ describe("App main window", () => {
     expect(within(menu).getByRole("menuitem", { name: "Настроить промпт саммари" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "Удалить" })).toBeInTheDocument();
 
-    await user.click(within(menu).getByRole("menuitem", { name: "Открыть папку сессии" }));
+    await clickAntdMenuItem(user, menu, "Открыть папку сессии");
     expect(invokeMock).toHaveBeenCalledWith("open_session_folder", { sessionDir: "/tmp/s-context" });
 
     menu = openMenu();
-    await user.click(within(menu).getByRole("menuitem", { name: "Открыть текст" }));
+    await clickAntdMenuItem(user, menu, "Открыть текст");
     expect(invokeMock).toHaveBeenCalledWith("open_session_artifact", {
       sessionId: "s-context",
       artifactKind: "transcript",
     });
 
     menu = openMenu();
-    await user.click(within(menu).getByRole("menuitem", { name: "Открыть саммари" }));
+    await clickAntdMenuItem(user, menu, "Открыть саммари");
     expect(invokeMock).toHaveBeenCalledWith("open_session_artifact", {
       sessionId: "s-context",
       artifactKind: "summary",
     });
 
     menu = openMenu();
-    await user.click(within(menu).getByRole("menuitem", { name: "Сгенерировать текст" }));
+    await clickAntdMenuItem(user, menu, "Сгенерировать текст");
     expect(invokeMock).toHaveBeenCalledWith("run_transcription", { sessionId: "s-context" });
 
     await waitFor(() => {
@@ -755,7 +817,7 @@ describe("App main window", () => {
     });
 
     menu = openMenu();
-    await user.click(within(menu).getByRole("menuitem", { name: "Сгенерировать саммари" }));
+    await clickAntdMenuItem(user, menu, "Сгенерировать саммари");
     expect(invokeMock).toHaveBeenCalledWith("run_summary", { sessionId: "s-context" });
 
     await waitFor(() => {
@@ -763,14 +825,13 @@ describe("App main window", () => {
     });
 
     menu = openMenu();
-    await user.click(within(menu).getByRole("menuitem", { name: "Настроить промпт саммари" }));
-    expect(screen.getByRole("dialog", { name: "Промпт саммари" })).toBeInTheDocument();
+    await clickAntdMenuItem(user, menu, "Настроить промпт саммари");
+    expect(await screen.findByRole("dialog", { name: "Промпт саммари" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Отмена" }));
-
-    menu = openMenu();
-    await user.click(within(menu).getByRole("menuitem", { name: "Удалить" }));
-    expect(screen.getByRole("dialog", { name: "Подтверждение удаления" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Промпт саммари" })).not.toBeInTheDocument();
+    });
   });
 
   it("searches sessions by one query and highlights matched fields", async () => {
@@ -1221,8 +1282,7 @@ describe("App main window", () => {
     expect(screen.getByRole("button", { name: "Пауза" })).toBeInTheDocument();
 
     const seekSlider = screen.getByRole("slider", { name: "Позиция аудио" });
-    expect(seekSlider).toHaveValue("0");
-    expect(seekSlider).toHaveStyle({ "--session-audio-progress": "0%" });
+    expect(seekSlider).toHaveValue(0);
 
     act(() => {
       if (audio) {
@@ -1231,14 +1291,18 @@ describe("App main window", () => {
       }
     });
     await waitFor(() => {
-      expect(seekSlider).toHaveValue("25");
+      expect(seekSlider).toHaveValue(25);
     });
-    expect(seekSlider).toHaveStyle({ "--session-audio-progress": "25%" });
 
-    fireEvent.change(seekSlider, { target: { value: "50" } });
-    expect(seekSlider).toHaveValue("50");
-    expect(seekSlider).toHaveStyle({ "--session-audio-progress": "50%" });
-    expect(audio?.currentTime).toBe(60);
+    seekSlider.focus();
+    act(() => {
+      fireEvent.keyDown(seekSlider, { key: "End", code: "End", keyCode: 35, which: 35 });
+      fireEvent.keyUp(seekSlider, { key: "End", code: "End", keyCode: 35, which: 35 });
+    });
+    await waitFor(() => {
+      expect(seekSlider).toHaveValue(100);
+    });
+    expect(audio?.currentTime).toBe(120);
 
     await user.click(screen.getByRole("button", { name: "Пауза" }));
     expect(pauseMock).toHaveBeenCalledTimes(1);

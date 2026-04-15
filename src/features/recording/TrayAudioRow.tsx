@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { Button } from "antd";
 
 import { TrayAudioWave } from "./TrayAudioWave";
 
@@ -66,8 +67,8 @@ export function TrayAudioRow({
           </div>
         )}
         {trailing ? <div className={`tray-audio-trailing${inlineTrailing ? " is-inline" : ""}`}>{trailing}</div> : null}
-        <button
-          type="button"
+        <Button
+          htmlType="button"
           className={`tray-audio-mute${muted ? " is-muted" : ""}`}
           aria-label={buttonLabel}
           aria-pressed={muted}
@@ -78,7 +79,7 @@ export function TrayAudioRow({
             <TrayAudioIcon icon={icon} />
           </span>
           <span className="tray-audio-slash" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
     </div>
   );
