@@ -7,6 +7,7 @@ use crate::command_core::{
 use crate::pipeline;
 use crate::settings::public_settings::load_settings;
 use crate::settings::secret_store::get_secret;
+use crate::storage::markdown_artifact::{strip_frontmatter, write_markdown_artifact};
 use crate::storage::session_store::{load_meta, save_meta};
 use crate::storage::sqlite_repo::{
     add_event, clear_retry_job, fetch_due_retry_jobs, get_meta_path, schedule_retry_job,
@@ -59,6 +60,16 @@ fn salute_speech_auth_url_for_logging() -> String {
 fn salute_speech_api_base_url_for_logging() -> String {
     std::env::var("BIGECHO_SALUTE_SPEECH_API_URL")
         .unwrap_or_else(|_| SALUTE_SPEECH_DEFAULT_API_BASE_URL.to_string())
+}
+
+fn read_transcript_body_for_summary(transcript_path: &Path) -> Result<String, String> {
+    let text = fs::read_to_string(transcript_path)
+        .map_err(|_| "Transcript file is missing".to_string())?;
+    let body = strip_frontmatter(&text).trim();
+    if body.is_empty() {
+        return Err("Transcript file is empty".to_string());
+    }
+    Ok(body.to_string())
 }
 
 fn transcription_request_log_detail(
@@ -177,7 +188,6 @@ pub async fn run_pipeline_core(
     let needs_transcription = matches!(mode, PipelineMode::Full | PipelineMode::TranscriptionOnly);
     let needs_summary = matches!(mode, PipelineMode::Full | PipelineMode::SummaryOnly);
 
-    let mut transcript: Option<String> = None;
     if needs_transcription {
         log_api_call(
             "api_transcription_request",
@@ -225,11 +235,11 @@ pub async fn run_pipeline_core(
             "api_transcription_success",
             format!("transcript_chars={}", transcribed.chars().count()),
         );
-        fs::write(
-            session_dir.join(&meta.artifacts.transcript_file),
+        write_markdown_artifact(
+            &session_dir.join(&meta.artifacts.transcript_file),
+            &meta,
             &transcribed,
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         mark_pipeline_transcribed(&mut meta);
         save_meta(&meta_path, &meta)?;
         upsert_session(&data_dir, &meta, session_dir, &meta_path)?;
@@ -239,7 +249,6 @@ pub async fn run_pipeline_core(
             "transcribed",
             "Transcript created",
         )?;
-        transcript = Some(transcribed);
     }
 
     if needs_summary {
@@ -252,18 +261,8 @@ pub async fn run_pipeline_core(
                 let prompt = meta.custom_summary_prompt.trim();
                 (!prompt.is_empty()).then(|| prompt.to_string())
             });
-        let transcript_for_summary = if let Some(text) = transcript {
-            text
-        } else {
-            let transcript_path = session_dir.join(&meta.artifacts.transcript_file);
-            let text = fs::read_to_string(&transcript_path)
-                .map_err(|_| "Transcript file is missing".to_string())?;
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                return Err("Transcript file is empty".to_string());
-            }
-            trimmed.to_string()
-        };
+        let transcript_path = session_dir.join(&meta.artifacts.transcript_file);
+        let transcript_for_summary = read_transcript_body_for_summary(&transcript_path)?;
 
         log_api_call(
             "api_summary_request",
@@ -302,8 +301,11 @@ pub async fn run_pipeline_core(
             "api_summary_success",
             format!("summary_chars={}", summary.chars().count()),
         );
-        fs::write(session_dir.join(&meta.artifacts.summary_file), &summary)
-            .map_err(|e| e.to_string())?;
+        write_markdown_artifact(
+            &session_dir.join(&meta.artifacts.summary_file),
+            &meta,
+            &summary,
+        )?;
         mark_pipeline_done(&mut meta);
         save_meta(&meta_path, &meta)?;
         upsert_session(&data_dir, &meta, session_dir, &meta_path)?;
@@ -371,6 +373,7 @@ pub fn spawn_retry_worker(dirs: AppDirs) {
 mod tests {
     use super::*;
     use crate::settings::public_settings::PublicSettings;
+    use tempfile::tempdir;
 
     fn sample_settings() -> PublicSettings {
         PublicSettings {
@@ -409,5 +412,20 @@ mod tests {
         assert!(detail.contains("auth_url="));
         assert!(detail.contains("api_base_url="));
         assert!(!detail.contains("url=https://api.nexara.ru/api/v1/audio/transcriptions"));
+    }
+
+    #[test]
+    fn transcript_body_for_summary_strips_markdown_frontmatter() {
+        let tmp = tempdir().expect("tempdir");
+        let transcript_path = tmp.path().join("transcript.md");
+        std::fs::write(
+            &transcript_path,
+            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\nnotes: \"Discuss renewal\"\ntopic: \"Renewal sync\"\n---\n\n  # Transcript\n\nSpeaker 1: Hello  \n",
+        )
+        .expect("write transcript");
+
+        let body = read_transcript_body_for_summary(&transcript_path).expect("summary body");
+
+        assert_eq!(body, "# Transcript\n\nSpeaker 1: Hello");
     }
 }
