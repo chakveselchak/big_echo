@@ -1,4 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
@@ -29,16 +31,23 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { AppRoot } from "./AppRoot";
+import styles from "./theme/glassTheme.module.css";
+
+const glassThemeCss = readFileSync(resolve(process.cwd(), "src/theme/glassTheme.module.css"), "utf8");
 
 describe("AppRoot", () => {
-  it("wraps the app with Ant Design glass theme classes", async () => {
+  it("wraps the app with Ant Design glass theme class", async () => {
     render(<AppRoot />);
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("list_sessions");
     });
 
+    const antApp = document.querySelector(".ant-app");
+
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(document.querySelector(".ant-app")).toBeInTheDocument();
+    expect(antApp).toBeInTheDocument();
+    expect(antApp).toHaveClass(styles.app);
+    expect(glassThemeCss).not.toMatch(/\.app\s*{[^}]*min-height/s);
   });
 });
