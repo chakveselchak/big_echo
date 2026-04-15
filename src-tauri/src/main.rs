@@ -1041,6 +1041,32 @@ mod ipc_runtime_tests {
         format!("http://{addr}")
     }
 
+    fn spawn_mock_pipeline_capture_server() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let addr = listener.local_addr().expect("local addr");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured_requests = Arc::clone(&requests);
+        thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let request = read_http_request(&mut stream);
+                let body = if request.starts_with("POST /transcribe ") {
+                    r#"{"text":"mock transcript"}"#
+                } else if request.starts_with("POST /summary ") {
+                    r#"{"choices":[{"message":{"content":"mock summary"}}]}"#
+                } else {
+                    r#"{"error":"not found"}"#
+                };
+                captured_requests
+                    .lock()
+                    .expect("lock requests")
+                    .push(request);
+                write_http_json_response(&mut stream, body);
+            }
+        });
+        (format!("http://{addr}"), requests)
+    }
+
     fn spawn_summary_capture_server() -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind summary server");
         let addr = listener.local_addr().expect("local addr");
@@ -1127,6 +1153,25 @@ mod ipc_runtime_tests {
             .write_all(response.as_bytes())
             .expect("write response");
         stream.flush().expect("flush response");
+    }
+
+    fn request_json_payload(request: &str) -> serde_json::Value {
+        let request_body = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        serde_json::from_str(request_body).expect("valid json payload")
+    }
+
+    fn expected_pipeline_markdown_artifact(body: &str) -> String {
+        format!(
+            "---\nsource: \"zoom\"\ntags:\n  - \"zoom\"\nnotes: \"Notes\"\ntopic: \"Weekly sync\"\n---\n\n{body}"
+        )
+    }
+
+    fn assert_summary_request_user_content(request: &str, expected: &str) {
+        let payload = request_json_payload(request);
+        assert_eq!(payload["messages"][1]["content"].as_str(), Some(expected));
     }
 
     fn seed_pipeline_ready_session(
@@ -1335,7 +1380,7 @@ mod ipc_runtime_tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("webview should be created");
-        let base_url = spawn_mock_pipeline_server();
+        let (base_url, requests) = spawn_mock_pipeline_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-success", &base_url);
         let mut settings = load_settings(&app_data_dir).expect("load settings");
         settings.api_call_logging_enabled = true;
@@ -1356,8 +1401,17 @@ mod ipc_runtime_tests {
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
         let summary =
             std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
-        assert_eq!(transcript, "mock transcript");
-        assert_eq!(summary, "mock summary");
+        assert_eq!(
+            transcript,
+            expected_pipeline_markdown_artifact("mock transcript")
+        );
+        assert_eq!(summary, expected_pipeline_markdown_artifact("mock summary"));
+        let captured = requests.lock().expect("lock requests");
+        let summary_request = captured
+            .iter()
+            .find(|request| request.starts_with("POST /summary "))
+            .expect("summary request should be captured");
+        assert_summary_request_user_content(summary_request, "mock transcript");
         let api_log =
             std::fs::read_to_string(session_dir.join("api_calls.txt")).expect("read api_calls.txt");
         assert!(api_log.contains("api_transcription_request"));
@@ -1422,8 +1476,11 @@ mod ipc_runtime_tests {
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
         let summary =
             std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
-        assert_eq!(transcript, "mock transcript");
-        assert_eq!(summary, "mock summary");
+        assert_eq!(
+            transcript,
+            expected_pipeline_markdown_artifact("mock transcript")
+        );
+        assert_eq!(summary, expected_pipeline_markdown_artifact("mock summary"));
 
         let listed = list_sessions(&app_data_dir).expect("list sessions");
         assert_eq!(listed[0].status, "done");
@@ -1456,7 +1513,10 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-get-text");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        assert_eq!(transcript, "mock transcript");
+        assert_eq!(
+            transcript,
+            expected_pipeline_markdown_artifact("mock transcript")
+        );
         assert!(!session_dir.join("summary.md").exists());
 
         let listed = list_sessions(&app_data_dir).expect("list sessions");
@@ -1469,11 +1529,14 @@ mod ipc_runtime_tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("webview should be created");
-        let base_url = spawn_mock_pipeline_server();
+        let (base_url, requests) = spawn_summary_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-summary-only", &base_url);
         let session_dir = app_data_dir.join("sessions").join("session-summary-only");
-        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
-            .expect("write transcript");
+        std::fs::write(
+            session_dir.join("transcript.txt"),
+            expected_pipeline_markdown_artifact("existing transcript"),
+        )
+        .expect("write transcript");
 
         let response = get_ipc_response(
             &webview,
@@ -1487,7 +1550,9 @@ mod ipc_runtime_tests {
 
         let summary =
             std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
-        assert_eq!(summary, "mock summary");
+        assert_eq!(summary, expected_pipeline_markdown_artifact("mock summary"));
+        let captured = requests.lock().expect("lock requests");
+        assert_summary_request_user_content(&captured[0], "existing transcript");
     }
 
     #[test]
