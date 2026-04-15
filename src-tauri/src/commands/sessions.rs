@@ -401,15 +401,17 @@ fn search_session_artifacts_in_dir(
     }
 }
 
-fn add_tags_to_known_index(state: &AppState, tags: &[String]) -> Result<(), String> {
-    let mut known = state
-        .known_tags
+fn update_active_session_metadata(state: &AppState, meta: &SessionMeta) -> Result<(), String> {
+    let mut active = state
+        .active_session
         .lock()
-        .map_err(|_| "known tags lock poisoned".to_string())?;
-    for tag in tags {
-        if let Some(normalized) = crate::storage::tag_index::normalize_tag(tag) {
-            known.insert(normalized);
-        }
+        .map_err(|_| "state lock poisoned".to_string())?;
+    if active
+        .as_ref()
+        .map(|active_meta| active_meta.session_id.as_str())
+        == Some(meta.session_id.as_str())
+    {
+        *active = Some(meta.clone());
     }
     Ok(())
 }
@@ -664,6 +666,14 @@ pub fn update_session_details(
     state: tauri::State<AppState>,
     payload: UpdateSessionDetailsRequest,
 ) -> Result<String, String> {
+    update_session_details_impl(dirs.inner(), state.inner(), payload)
+}
+
+fn update_session_details_impl(
+    dirs: &AppDirs,
+    state: &AppState,
+    payload: UpdateSessionDetailsRequest,
+) -> Result<String, String> {
     let meta_path = get_meta_path(&dirs.app_data_dir, &payload.session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
     let mut meta = load_meta(&meta_path)?;
@@ -696,7 +706,8 @@ pub fn update_session_details(
         &session_dir.join(&meta.artifacts.summary_file),
         &meta,
     )?;
-    add_tags_to_known_index(state.inner(), &meta.tags)?;
+    update_active_session_metadata(state, &meta)?;
+    rebuild_known_tags(dirs, state)?;
     add_event(
         &dirs.app_data_dir,
         &meta.session_id,
@@ -855,6 +866,94 @@ mod tests {
             tags,
             vec!["call/sales".to_string(), "project/acme".to_string()]
         );
+    }
+
+    #[test]
+    fn known_tags_rebuild_after_update_removes_replaced_tags() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        fs::create_dir_all(&app_data_dir).expect("app data");
+        let session_dir = tmp.path().join("s-retag");
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let meta_path = session_dir.join("meta.json");
+        let meta = SessionMeta::new(
+            "s-retag".to_string(),
+            "zoom".to_string(),
+            vec!["old".to_string()],
+            "Topic".to_string(),
+            String::new(),
+        );
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
+        let state = AppState::default();
+        let dirs = AppDirs { app_data_dir };
+
+        assert_eq!(
+            list_known_tags_impl(&dirs, &state).expect("initial tags"),
+            vec!["old".to_string()]
+        );
+        update_session_details_impl(
+            &dirs,
+            &state,
+            UpdateSessionDetailsRequest {
+                session_id: "s-retag".to_string(),
+                source: "zoom".to_string(),
+                notes: String::new(),
+                custom_summary_prompt: String::new(),
+                topic: "Topic".to_string(),
+                tags: vec!["new".to_string()],
+            },
+        )
+        .expect("update details");
+
+        assert_eq!(
+            list_known_tags_impl(&dirs, &state).expect("updated tags"),
+            vec!["new".to_string()]
+        );
+    }
+
+    #[test]
+    fn update_session_details_refreshes_matching_active_session_metadata() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        fs::create_dir_all(&app_data_dir).expect("app data");
+        let session_dir = tmp.path().join("s-active");
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let meta_path = session_dir.join("meta.json");
+        let meta = SessionMeta::new(
+            "s-active".to_string(),
+            "zoom".to_string(),
+            vec!["old".to_string()],
+            "Old topic".to_string(),
+            "Old notes".to_string(),
+        );
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
+        let state = AppState::default();
+        *state.active_session.lock().expect("active session lock") = Some(meta);
+        let dirs = AppDirs { app_data_dir };
+
+        update_session_details_impl(
+            &dirs,
+            &state,
+            UpdateSessionDetailsRequest {
+                session_id: "s-active".to_string(),
+                source: "slack".to_string(),
+                notes: "Fresh notes".to_string(),
+                custom_summary_prompt: String::new(),
+                topic: "Fresh topic".to_string(),
+                tags: vec!["new".to_string()],
+            },
+        )
+        .expect("update details");
+
+        let active = state.active_session.lock().expect("active session lock");
+        let active = active.as_ref().expect("active session");
+        assert_eq!(active.source, "slack");
+        assert_eq!(active.primary_tag, "slack");
+        assert_eq!(active.topic, "Fresh topic");
+        assert_eq!(active.notes, "Fresh notes");
+        assert_eq!(active.tags, vec!["new".to_string()]);
     }
 
     #[test]
