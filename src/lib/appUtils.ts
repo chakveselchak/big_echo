@@ -7,7 +7,7 @@ export function formatSecretSaveState(state: SecretSaveState): string {
   return "";
 }
 
-export function splitParticipants(value: string): string[] {
+export function splitTags(value: string): string[] {
   return value
     .split(",")
     .map((v) => v.trim())

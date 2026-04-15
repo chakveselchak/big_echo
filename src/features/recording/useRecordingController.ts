@@ -7,7 +7,7 @@ import {
   UiSyncStateView,
 } from "../../appTypes";
 import { captureAnalyticsEvent } from "../../lib/analytics";
-import { clamp01, parseEventPayload, splitParticipants } from "../../lib/appUtils";
+import { clamp01, parseEventPayload, splitTags } from "../../lib/appUtils";
 import { tauriEmit, tauriInvoke, tauriListen } from "../../lib/tauri";
 import { defaultRecordingMuteState, nextRecordingMuteState } from "./trayAudio";
 
@@ -145,7 +145,7 @@ export function useRecordingController({
       source,
       notes: notesInput,
       topic,
-      tags: splitParticipants(tagsInput),
+      tags: splitTags(tagsInput),
       surface: "main",
     });
   }

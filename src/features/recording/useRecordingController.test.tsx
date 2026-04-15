@@ -110,7 +110,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -122,7 +122,7 @@ describe("useRecordingController", () => {
         isTrayWindow: false,
         topic,
         setTopic,
-        tagsInput: participants,
+        tagsInput,
         source,
         setSource,
         notesInput: customTag,
@@ -175,7 +175,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -188,7 +188,7 @@ describe("useRecordingController", () => {
           isTrayWindow: false,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -229,7 +229,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -242,7 +242,7 @@ describe("useRecordingController", () => {
           isTrayWindow: false,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -297,7 +297,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -310,7 +310,7 @@ describe("useRecordingController", () => {
           isTrayWindow: false,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -347,7 +347,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -360,7 +360,7 @@ describe("useRecordingController", () => {
           isTrayWindow: true,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -410,7 +410,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -423,7 +423,7 @@ describe("useRecordingController", () => {
           isTrayWindow: true,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -472,7 +472,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -485,7 +485,7 @@ describe("useRecordingController", () => {
           isTrayWindow: true,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -559,7 +559,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -572,7 +572,7 @@ describe("useRecordingController", () => {
           isTrayWindow: true,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -620,7 +620,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -633,7 +633,7 @@ describe("useRecordingController", () => {
           isTrayWindow: true,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -688,7 +688,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -701,7 +701,7 @@ describe("useRecordingController", () => {
           isTrayWindow: true,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -764,7 +764,7 @@ describe("useRecordingController", () => {
 
     const { result } = renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -779,7 +779,7 @@ describe("useRecordingController", () => {
           isTrayWindow: false,
           topic,
           setTopic,
-          tagsInput: participants,
+          tagsInput,
           source,
           setSource,
           notesInput: customTag,
@@ -843,7 +843,7 @@ describe("useRecordingController", () => {
 
     renderHook(() => {
       const [topic, setTopic] = useState("");
-      const [participants] = useState("");
+      const [tagsInput] = useState("");
       const [source, setSource] = useState("slack");
       const [customTag] = useState("");
       const [session, setSession] = useState<StartResponse | null>(null);
@@ -855,7 +855,7 @@ describe("useRecordingController", () => {
         isTrayWindow: true,
         topic,
         setTopic,
-        tagsInput: participants,
+        tagsInput,
         source,
         setSource,
         notesInput: customTag,

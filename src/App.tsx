@@ -26,7 +26,7 @@ import { useRecordingController } from "./features/recording/useRecordingControl
 import { useSessions } from "./features/sessions/useSessions";
 import { useSettingsForm } from "./features/settings/useSettingsForm";
 import { initializeAnalytics } from "./lib/analytics";
-import { formatSecretSaveState, getErrorMessage, splitParticipants } from "./lib/appUtils";
+import { formatSecretSaveState, getErrorMessage, splitTags } from "./lib/appUtils";
 import { getCurrentWindowLabel, tauriConvertFileSrc, tauriInvoke } from "./lib/tauri";
 import { formatAppStatus, formatSessionStatus } from "./status";
 import vscodeIcon from "./assets/editor-icons/vscode.svg";
@@ -1668,7 +1668,7 @@ export function App() {
                             ...prev,
                             [item.session_id]: {
                               ...detail,
-                              tags: splitParticipants(e.target.value),
+                              tags: splitTags(e.target.value),
                             },
                           }))
                         }
