@@ -183,6 +183,13 @@ fn start_recording_impl(
         save_meta(&abs_dir.join("meta.json"), &meta)?;
         let data_dir = dirs.app_data_dir.clone();
         upsert_session(&data_dir, &meta, &abs_dir, &abs_dir.join("meta.json"))?;
+        if let Ok(mut known) = state.known_tags.lock() {
+            for tag in &meta.tags {
+                if let Some(normalized) = crate::storage::tag_index::normalize_tag(tag) {
+                    known.insert(normalized);
+                }
+            }
+        }
         add_event(
             &data_dir,
             &meta.session_id,

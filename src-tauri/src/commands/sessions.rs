@@ -401,6 +401,49 @@ fn search_session_artifacts_in_dir(
     }
 }
 
+fn add_tags_to_known_index(state: &AppState, tags: &[String]) -> Result<(), String> {
+    let mut known = state
+        .known_tags
+        .lock()
+        .map_err(|_| "known tags lock poisoned".to_string())?;
+    for tag in tags {
+        if let Some(normalized) = crate::storage::tag_index::normalize_tag(tag) {
+            known.insert(normalized);
+        }
+    }
+    Ok(())
+}
+
+fn rebuild_known_tags(dirs: &AppDirs, state: &AppState) -> Result<(), String> {
+    let tags = crate::storage::tag_index::collect_known_tags(&dirs.app_data_dir)?;
+    let mut known = state
+        .known_tags
+        .lock()
+        .map_err(|_| "known tags lock poisoned".to_string())?;
+    *known = tags.into_iter().collect();
+    *state
+        .known_tags_hydrated
+        .lock()
+        .map_err(|_| "known tags hydrated lock poisoned".to_string())? = true;
+    Ok(())
+}
+
+fn list_known_tags_impl(dirs: &AppDirs, state: &AppState) -> Result<Vec<String>, String> {
+    let hydrated = *state
+        .known_tags_hydrated
+        .lock()
+        .map_err(|_| "known tags hydrated lock poisoned".to_string())?;
+    if !hydrated {
+        rebuild_known_tags(dirs, state)?;
+    }
+
+    let known = state
+        .known_tags
+        .lock()
+        .map_err(|_| "known tags lock poisoned".to_string())?;
+    Ok(known.iter().cloned().collect())
+}
+
 #[tauri::command]
 pub fn open_session_folder(session_dir: String) -> Result<String, String> {
     let target = PathBuf::from(session_dir);
@@ -496,12 +539,21 @@ pub fn delete_session(
     if !deleted {
         return Err("Session not found".to_string());
     }
+    rebuild_known_tags(dirs.inner(), state.inner())?;
     Ok("deleted".to_string())
 }
 
 #[tauri::command]
 pub fn list_sessions(dirs: tauri::State<AppDirs>) -> Result<Vec<SessionListItem>, String> {
     repo_list_sessions(&dirs.app_data_dir)
+}
+
+#[tauri::command]
+pub fn list_known_tags(
+    dirs: tauri::State<AppDirs>,
+    state: tauri::State<AppState>,
+) -> Result<Vec<String>, String> {
+    list_known_tags_impl(dirs.inner(), state.inner())
 }
 
 #[tauri::command]
@@ -609,6 +661,7 @@ pub fn get_session_meta(
 #[tauri::command]
 pub fn update_session_details(
     dirs: tauri::State<AppDirs>,
+    state: tauri::State<AppState>,
     payload: UpdateSessionDetailsRequest,
 ) -> Result<String, String> {
     let meta_path = get_meta_path(&dirs.app_data_dir, &payload.session_id)?
@@ -621,10 +674,12 @@ pub fn update_session_details(
         payload.source.trim().to_string()
     };
 
+    let tags = crate::storage::tag_index::normalize_tags(payload.tags);
+
     meta.source = source.clone();
     meta.primary_tag = source;
-    meta.notes = payload.notes;
-    meta.tags = payload.tags;
+    meta.notes = payload.notes.trim().to_string();
+    meta.tags = tags;
     meta.custom_summary_prompt = payload.custom_summary_prompt.trim().to_string();
     meta.topic = payload.topic.trim().to_string();
 
@@ -633,6 +688,15 @@ pub fn update_session_details(
         .ok_or_else(|| "Invalid session directory".to_string())?;
     save_meta(&meta_path, &meta)?;
     upsert_session(&dirs.app_data_dir, &meta, session_dir, &meta_path)?;
+    crate::storage::markdown_artifact::refresh_markdown_frontmatter(
+        &session_dir.join(&meta.artifacts.transcript_file),
+        &meta,
+    )?;
+    crate::storage::markdown_artifact::refresh_markdown_frontmatter(
+        &session_dir.join(&meta.artifacts.summary_file),
+        &meta,
+    )?;
+    add_tags_to_known_index(state.inner(), &meta.tags)?;
     add_event(
         &dirs.app_data_dir,
         &meta.session_id,
@@ -762,6 +826,34 @@ mod tests {
                 mic_muted: true,
                 system_muted: false,
             }
+        );
+    }
+
+    #[test]
+    fn known_tags_command_hydrates_sorted_tags_from_metadata() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        fs::create_dir_all(&app_data_dir).expect("app data");
+        let session_dir = tmp.path().join("s-known");
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let meta_path = session_dir.join("meta.json");
+        let meta = SessionMeta::new(
+            "s-known".to_string(),
+            "zoom".to_string(),
+            vec!["project/acme".to_string(), "call/sales".to_string()],
+            "Topic".to_string(),
+            String::new(),
+        );
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
+        let state = AppState::default();
+        let dirs = AppDirs { app_data_dir };
+
+        let tags = list_known_tags_impl(&dirs, &state).expect("known tags");
+
+        assert_eq!(
+            tags,
+            vec!["call/sales".to_string(), "project/acme".to_string()]
         );
     }
 

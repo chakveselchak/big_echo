@@ -20,8 +20,9 @@ use commands::recording::{
 };
 use commands::sessions::{
     delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state,
-    import_audio_session, list_sessions, open_session_artifact, open_session_folder,
-    read_session_artifact, search_session_artifacts, set_ui_sync_state, update_session_details,
+    import_audio_session, list_known_tags, list_sessions, open_session_artifact,
+    open_session_folder, read_session_artifact, search_session_artifacts, set_ui_sync_state,
+    update_session_details,
 };
 use commands::settings::{
     detect_system_source_device, get_macos_system_audio_permission_status, get_settings,
@@ -1005,6 +1006,7 @@ mod ipc_runtime_tests {
                 open_session_artifact,
                 read_session_artifact,
                 delete_session,
+                list_known_tags,
                 get_session_meta,
                 update_session_details,
                 start_recording,
@@ -1307,6 +1309,17 @@ mod ipc_runtime_tests {
 
         let base_url = spawn_mock_pipeline_server();
         seed_pipeline_ready_session(&app_data_dir, "session-details", &base_url);
+        let session_dir = app_data_dir.join("sessions").join("session-details");
+        std::fs::write(
+            session_dir.join("transcript.txt"),
+            expected_pipeline_markdown_artifact("Original transcript"),
+        )
+        .expect("write transcript");
+        std::fs::write(
+            session_dir.join("summary.md"),
+            expected_pipeline_markdown_artifact("Original summary"),
+        )
+        .expect("write summary");
 
         let update_response = get_ipc_response(
             &webview,
@@ -1315,11 +1328,11 @@ mod ipc_runtime_tests {
                 json!({
                     "payload": {
                         "session_id":"session-details",
-                        "source":"telegram",
-                        "notes":"Follow up on renewal",
-                        "customSummaryPrompt":"Сделай саммари только по решениям",
-                        "topic":"",
-                        "tags":["client-a", "renewal"]
+                        "source":" telegram ",
+                        "notes":" Follow up on renewal ",
+                        "customSummaryPrompt":" Сделай саммари только по решениям ",
+                        "topic":" ",
+                        "tags":[" renewal ", "client-a", "renewal", " "]
                     }
                 }),
             ),
@@ -1344,6 +1357,16 @@ mod ipc_runtime_tests {
             serde_json::from_value::<Vec<String>>(details["tags"].clone()).expect("tags"),
             vec!["client-a".to_string(), "renewal".to_string()]
         );
+        let transcript =
+            std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
+        assert!(transcript.contains("source: \"telegram\"\n"));
+        assert!(transcript.contains("  - \"client-a\"\n  - \"renewal\"\n"));
+        assert!(transcript.contains("notes: \"Follow up on renewal\"\n"));
+        assert!(transcript.ends_with("Original transcript"));
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        assert!(summary.contains("source: \"telegram\"\n"));
+        assert!(summary.ends_with("Original summary"));
     }
 
     #[test]
@@ -2151,6 +2174,7 @@ fn main() {
             read_session_artifact,
             delete_session,
             list_sessions,
+            list_known_tags,
             search_session_artifacts,
             import_audio_session,
             get_ui_sync_state,
