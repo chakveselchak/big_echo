@@ -191,7 +191,13 @@ fn import_audio_session_from_path(
 
     fs::create_dir_all(&session_dir).map_err(|e| e.to_string())?;
 
-    let mut meta = SessionMeta::new(session_id.clone(), vec!["other".to_string()], topic, vec![]);
+    let mut meta = SessionMeta::new(
+        session_id.clone(),
+        "other".to_string(),
+        vec![],
+        topic,
+        String::new(),
+    );
     meta.status = SessionStatus::Recorded;
     meta.created_at_iso = now.to_rfc3339();
     meta.started_at_iso = now.to_rfc3339();
@@ -590,20 +596,13 @@ pub fn get_session_meta(
     let meta_path = get_meta_path(&dirs.app_data_dir, &session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
     let meta = load_meta(&meta_path)?;
-    let custom_tag = meta
-        .tags
-        .iter()
-        .skip(1)
-        .find(|v| !v.trim().is_empty())
-        .cloned()
-        .unwrap_or_default();
     Ok(SessionMetaView {
         session_id: meta.session_id,
-        source: meta.primary_tag,
-        custom_tag,
+        source: meta.source,
+        notes: meta.notes,
         custom_summary_prompt: meta.custom_summary_prompt,
         topic: meta.topic,
-        participants: meta.participants,
+        tags: meta.tags,
     })
 }
 
@@ -617,26 +616,17 @@ pub fn update_session_details(
     let mut meta = load_meta(&meta_path)?;
 
     let source = if payload.source.trim().is_empty() {
-        meta.primary_tag.clone()
+        meta.source.clone()
     } else {
         payload.source.trim().to_string()
     };
-    let custom_tag = payload.custom_tag.trim().to_string();
-    let mut tags = vec![source.clone()];
-    if !custom_tag.is_empty() {
-        tags.push(custom_tag.clone());
-    }
 
+    meta.source = source.clone();
     meta.primary_tag = source;
-    meta.tags = tags;
+    meta.notes = payload.notes;
+    meta.tags = payload.tags;
     meta.custom_summary_prompt = payload.custom_summary_prompt.trim().to_string();
     meta.topic = payload.topic.trim().to_string();
-    meta.participants = payload
-        .participants
-        .into_iter()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .collect();
 
     let session_dir = meta_path
         .parent()
@@ -647,7 +637,7 @@ pub fn update_session_details(
         &dirs.app_data_dir,
         &meta.session_id,
         "session_details_updated",
-        "Source/topic/participants/summary prompt updated",
+        "Source/topic/tags/notes/summary prompt updated",
     )?;
     Ok("updated".to_string())
 }
@@ -665,9 +655,10 @@ mod tests {
     fn sample_meta() -> SessionMeta {
         let mut meta = SessionMeta::new(
             "s1".to_string(),
+            "slack".to_string(),
             vec!["slack".to_string()],
             "Topic".to_string(),
-            vec![],
+            "Notes".to_string(),
         );
         meta.artifacts = SessionArtifacts {
             audio_file: "audio.opus".to_string(),
@@ -749,9 +740,10 @@ mod tests {
         }
         *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
             "active-session".to_string(),
+            "telegram".to_string(),
             vec!["telegram".to_string()],
             "Daily sync".to_string(),
-            vec![],
+            String::new(),
         ));
         state
             .recording_control
@@ -815,7 +807,8 @@ mod tests {
         let session_dir = PathBuf::from(&response.session_dir);
 
         assert_eq!(response.status, "recorded");
-        assert!(session_dir.starts_with(recording_root.join(Local::now().format("%d.%m.%Y").to_string())));
+        assert!(session_dir
+            .starts_with(recording_root.join(Local::now().format("%d.%m.%Y").to_string())));
         assert!(!session_dir
             .components()
             .any(|component| component.as_os_str() == "other"));
@@ -825,15 +818,17 @@ mod tests {
         assert!(session_dir.join("audio.wav").exists());
         assert!(session_dir.join("meta.json").exists());
         assert!(session_dir
-            .join("transcript_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".txt")
+            .join("transcript_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".md")
             .exists());
         assert!(session_dir
             .join("summary_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".md")
             .exists());
 
         let meta = load_meta(&session_dir.join("meta.json")).expect("load meta");
+        assert_eq!(meta.source, "other");
         assert_eq!(meta.primary_tag, "other");
-        assert_eq!(meta.tags, vec!["other".to_string()]);
+        assert!(meta.tags.is_empty());
+        assert_eq!(meta.notes, "");
         assert_eq!(meta.status, SessionStatus::Recorded);
         assert_eq!(meta.artifacts.audio_file, "audio.wav");
 

@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 pub struct SessionListMeta {
     pub session_id: String,
     pub source: String,
-    pub custom_tag: String,
+    pub notes: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,19 +273,12 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     );
                 item.has_summary_text = summary_ok
                     && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
-                let custom_tag = meta
-                    .tags
-                    .iter()
-                    .skip(1)
-                    .find(|value| !value.trim().is_empty())
-                    .cloned()
-                    .unwrap_or_default();
                 item.meta = Some(SessionListMeta {
                     session_id: meta.session_id.clone(),
-                    source: meta.primary_tag.clone(),
-                    custom_tag,
+                    source: meta.source.clone(),
+                    notes: meta.notes.clone(),
                     topic: meta.topic.clone(),
-                    participants: meta.participants.clone(),
+                    tags: meta.tags.clone(),
                 });
             }
         }
@@ -462,9 +455,10 @@ mod tests {
 
         let mut meta = SessionMeta::new(
             "s-derived".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Weekly sync".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.started_at_iso = started.to_rfc3339();
         meta.ended_at_iso = Some(ended.to_rfc3339());

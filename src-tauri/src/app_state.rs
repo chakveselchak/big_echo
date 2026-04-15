@@ -64,9 +64,10 @@ pub struct LiveInputLevelsView {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StartRecordingRequest {
-    pub tags: Vec<String>,
+    pub source: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
+    pub notes: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,19 +81,19 @@ pub struct StartRecordingResponse {
 pub struct UpdateSessionDetailsRequest {
     pub session_id: String,
     pub source: String,
-    pub custom_tag: String,
+    pub notes: String,
     #[serde(default, alias = "customSummaryPrompt")]
     pub custom_summary_prompt: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SessionMetaView {
     pub session_id: String,
     pub source: String,
-    pub custom_tag: String,
+    pub notes: String,
     pub custom_summary_prompt: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
 }

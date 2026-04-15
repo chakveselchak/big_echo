@@ -43,9 +43,10 @@ mod tests {
         let path = tmp.path().join("meta.json");
         let mut meta = SessionMeta::new(
             "session-md".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Topic".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.artifacts = SessionArtifacts {
             audio_file: "audio.opus".to_string(),
@@ -65,9 +66,10 @@ mod tests {
         let path = tmp.path().join("meta.json");
         let mut meta = SessionMeta::new(
             "session-txt".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Topic".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.artifacts = SessionArtifacts {
             audio_file: "audio.opus".to_string(),
@@ -87,9 +89,10 @@ mod tests {
         let path = tmp.path().join("meta.json");
         let meta = SessionMeta::new(
             "legacy-session".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Topic".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         let mut body = serde_json::to_value(&meta).expect("serialize meta");
         body.as_object_mut()

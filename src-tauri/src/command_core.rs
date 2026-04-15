@@ -8,12 +8,9 @@ pub enum PipelineInvocation {
     Manual,
 }
 
-pub fn validate_start_request(topic: &str, participants: &[String]) -> Result<(), String> {
+pub fn validate_start_request(topic: &str) -> Result<(), String> {
     if topic.chars().count() > 200 {
         return Err("Topic is too long (max 200 chars)".to_string());
-    }
-    if participants.len() > 32 {
-        return Err("Too many participants (max 32)".to_string());
     }
     Ok(())
 }
@@ -73,38 +70,24 @@ mod tests {
     fn sample_meta() -> SessionMeta {
         SessionMeta::new(
             "session-1".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Weekly sync".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         )
     }
 
     #[test]
     fn start_validation_allows_empty_topic() {
-        let participants = vec!["Alice".to_string()];
-        let result = validate_start_request("", &participants);
+        let result = validate_start_request("");
         assert_eq!(result, Ok(()));
     }
 
     #[test]
-    fn start_validation_allows_empty_participants() {
-        let participants: Vec<String> = Vec::new();
-        let result = validate_start_request("Planning", &participants);
-        assert_eq!(result, Ok(()));
-    }
-
-    #[test]
-    fn start_validation_rejects_too_long_topic() {
+    fn start_validation_rejects_long_topic() {
         let topic = "x".repeat(201);
-        let result = validate_start_request(&topic, &[]);
+        let result = validate_start_request(&topic);
         assert_eq!(result, Err("Topic is too long (max 200 chars)".to_string()));
-    }
-
-    #[test]
-    fn start_validation_rejects_too_many_participants() {
-        let participants: Vec<String> = (0..33).map(|i| format!("P{i}")).collect();
-        let result = validate_start_request("Planning", &participants);
-        assert_eq!(result, Err("Too many participants (max 32)".to_string()));
     }
 
     #[test]

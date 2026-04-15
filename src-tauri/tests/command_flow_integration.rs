@@ -24,9 +24,10 @@ fn prepare_session() -> (
 
     let meta = SessionMeta::new(
         "session-1".to_string(),
+        "zoom".to_string(),
         vec!["zoom".to_string()],
         "Weekly sync".to_string(),
-        vec!["Alice".to_string()],
+        "Notes".to_string(),
     );
 
     save_meta(&meta_path, &meta).expect("save meta");

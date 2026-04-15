@@ -9,9 +9,9 @@ mod settings;
 mod storage;
 mod text_editors;
 
-use app_state::{AppDirs, AppState};
 #[cfg(test)]
 use app_state::StartRecordingResponse;
+use app_state::{AppDirs, AppState};
 use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
 use commands::recording::{
@@ -44,8 +44,8 @@ use storage::sqlite_repo::{add_event, upsert_session};
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, Listener, Manager, PhysicalPosition, Position, RunEvent, Theme,
-    WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Listener, Manager, PhysicalPosition, Position, RunEvent, Theme, WebviewUrl,
+    WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{Builder as GlobalShortcutBuilder, ShortcutState};
 
@@ -849,9 +849,10 @@ mod ipc_runtime_tests {
     fn audio_duration_is_formatted_as_hh_mm_ss() {
         let mut meta = SessionMeta::new(
             "s-duration".to_string(),
+            "slack".to_string(),
             vec!["slack".to_string()],
             "".to_string(),
-            vec![],
+            String::new(),
         );
         meta.started_at_iso = "2026-03-11T10:00:00+03:00".to_string();
         meta.ended_at_iso = Some("2026-03-11T11:02:03+03:00".to_string());
@@ -1048,7 +1049,10 @@ mod ipc_runtime_tests {
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
             let request = read_http_request(&mut stream);
-            captured_requests.lock().expect("lock requests").push(request);
+            captured_requests
+                .lock()
+                .expect("lock requests")
+                .push(request);
             write_http_json_response(
                 &mut stream,
                 r#"{"choices":[{"message":{"content":"mock summary"}}]}"#,
@@ -1163,9 +1167,10 @@ mod ipc_runtime_tests {
         let meta_path = session_dir.join("meta.json");
         let mut meta = SessionMeta::new(
             session_id.to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Weekly sync".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.artifacts.audio_file =
             crate::audio::file_writer::audio_file_name(&settings.audio_format);
@@ -1215,9 +1220,10 @@ mod ipc_runtime_tests {
         let meta_path = session_dir.join("meta.json");
         let mut meta = SessionMeta::new(
             session_id.to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Weekly sync".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.artifacts.audio_file = "audio.opus".to_string();
         meta.artifacts.transcript_file = "transcript.txt".to_string();
@@ -1227,7 +1233,7 @@ mod ipc_runtime_tests {
     }
 
     #[test]
-    fn invoke_start_allows_empty_topic_and_participants() {
+    fn invoke_start_allows_empty_topic() {
         let (app, _) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
@@ -1237,7 +1243,7 @@ mod ipc_runtime_tests {
             invoke_request(
                 "start_recording",
                 json!({
-                    "payload": {"tags":["zoom"], "topic":"", "participants":[]}
+                    "payload": {"source":"", "tags":["zoom"], "topic":"", "notes":""}
                 }),
             ),
         );
@@ -1265,10 +1271,10 @@ mod ipc_runtime_tests {
                     "payload": {
                         "session_id":"session-details",
                         "source":"telegram",
-                        "custom_tag":"client-a",
+                        "notes":"Follow up on renewal",
                         "customSummaryPrompt":"Сделай саммари только по решениям",
                         "topic":"",
-                        "participants":["Alice", "Bob"]
+                        "tags":["client-a", "renewal"]
                     }
                 }),
             ),
@@ -1283,16 +1289,15 @@ mod ipc_runtime_tests {
         let get_out = extract_ok_json(get_response.expect("get should succeed"));
         let details = get_out.as_object().expect("session details object");
         assert_eq!(details["source"], "telegram");
-        assert_eq!(details["custom_tag"], "client-a");
+        assert_eq!(details["notes"], "Follow up on renewal");
         assert_eq!(
             details["custom_summary_prompt"],
             "Сделай саммари только по решениям"
         );
         assert_eq!(details["topic"], "");
         assert_eq!(
-            serde_json::from_value::<Vec<String>>(details["participants"].clone())
-                .expect("participants"),
-            vec!["Alice".to_string(), "Bob".to_string()]
+            serde_json::from_value::<Vec<String>>(details["tags"].clone()).expect("tags"),
+            vec!["client-a".to_string(), "renewal".to_string()]
         );
     }
 
@@ -1349,7 +1354,8 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-success");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
         assert_eq!(transcript, "mock transcript");
         assert_eq!(summary, "mock summary");
         let api_log =
@@ -1414,7 +1420,8 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-retry-success");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
         assert_eq!(transcript, "mock transcript");
         assert_eq!(summary, "mock summary");
 
@@ -1478,7 +1485,8 @@ mod ipc_runtime_tests {
             "done".to_string()
         );
 
-        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
         assert_eq!(summary, "mock summary");
     }
 
@@ -1531,7 +1539,9 @@ mod ipc_runtime_tests {
             .expect("webview should be created");
         let (base_url, requests) = spawn_summary_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-summary-persisted", &base_url);
-        let session_dir = app_data_dir.join("sessions").join("session-summary-persisted");
+        let session_dir = app_data_dir
+            .join("sessions")
+            .join("session-summary-persisted");
         std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
             .expect("write transcript");
 
@@ -1542,7 +1552,10 @@ mod ipc_runtime_tests {
 
         let response = get_ipc_response(
             &webview,
-            invoke_request("run_summary", json!({ "sessionId":"session-summary-persisted" })),
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId":"session-summary-persisted" }),
+            ),
         )
         .expect("run_summary should succeed");
         assert_eq!(
@@ -1571,13 +1584,18 @@ mod ipc_runtime_tests {
             .expect("webview should be created");
         let (base_url, requests) = spawn_summary_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-summary-default", &base_url);
-        let session_dir = app_data_dir.join("sessions").join("session-summary-default");
+        let session_dir = app_data_dir
+            .join("sessions")
+            .join("session-summary-default");
         std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
             .expect("write transcript");
 
         let response = get_ipc_response(
             &webview,
-            invoke_request("run_summary", json!({ "sessionId":"session-summary-default" })),
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId":"session-summary-default" }),
+            ),
         )
         .expect("run_summary should succeed");
         assert_eq!(
@@ -1674,9 +1692,10 @@ mod ipc_runtime_tests {
             let mut active = state.active_session.lock().expect("active session lock");
             *active = Some(SessionMeta::new(
                 "session-delete-active".to_string(),
+                "zoom".to_string(),
                 vec!["zoom".to_string()],
                 "Broken active".to_string(),
-                vec![],
+                String::new(),
             ));
         }
 
@@ -2099,10 +2118,7 @@ fn main() {
                 .get_webview_window("main")
                 .and_then(|window| window.is_visible().ok())
                 .unwrap_or(false);
-            if should_reveal_main_window_on_app_reopen(
-                has_visible_windows,
-                main_window_visible,
-            ) {
+            if should_reveal_main_window_on_app_reopen(has_visible_windows, main_window_visible) {
                 let _ = focus_main_window(app_handle);
             }
         }
