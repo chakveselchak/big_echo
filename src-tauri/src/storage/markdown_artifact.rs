@@ -8,7 +8,7 @@ use std::path::Path;
 pub fn render_frontmatter(meta: &SessionMeta) -> String {
     let mut rendered = String::from("---\n");
     rendered.push_str("source: ");
-    rendered.push_str(&yaml_quote(&meta.source));
+    rendered.push_str(&yaml_quote(meta.source.trim()));
     rendered.push('\n');
     rendered.push_str("tags:\n");
     for tag in meta
@@ -21,20 +21,9 @@ pub fn render_frontmatter(meta: &SessionMeta) -> String {
         rendered.push_str(&yaml_quote(tag));
         rendered.push('\n');
     }
-    rendered.push_str("notes: ");
-    if meta.notes.contains('\n') {
-        rendered.push_str("|\n");
-        for line in meta.notes.split('\n') {
-            rendered.push_str("  ");
-            rendered.push_str(line);
-            rendered.push('\n');
-        }
-    } else {
-        rendered.push_str(&yaml_quote(&meta.notes));
-        rendered.push('\n');
-    }
+    rendered.push_str(&render_notes(&meta.notes));
     rendered.push_str("topic: ");
-    rendered.push_str(&yaml_quote(&meta.topic));
+    rendered.push_str(&yaml_quote(meta.topic.trim()));
     rendered.push_str("\n---\n\n");
     rendered
 }
@@ -74,7 +63,7 @@ pub fn strip_frontmatter(text: &str) -> &str {
 
 pub fn render_markdown_artifact(meta: &SessionMeta, body: &str) -> String {
     let mut rendered = render_frontmatter(meta);
-    rendered.push_str(strip_frontmatter(body));
+    rendered.push_str(strip_frontmatter(body).trim_start_matches('\n'));
     rendered
 }
 
@@ -83,8 +72,32 @@ pub fn write_markdown_artifact(path: &Path, meta: &SessionMeta, body: &str) -> R
 }
 
 pub fn refresh_markdown_frontmatter(path: &Path, meta: &SessionMeta) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
     let body = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    if body.trim().is_empty() {
+        return Ok(());
+    }
     write_markdown_artifact(path, meta, &body)
+}
+
+fn render_notes(notes: &str) -> String {
+    let normalized = notes.replace('\r', "");
+    if normalized.trim().is_empty() {
+        return "notes: \"\"\n".to_string();
+    }
+    if !normalized.contains('\n') {
+        return format!("notes: {}\n", yaml_quote(normalized.trim()));
+    }
+
+    let mut rendered = String::from("notes: |\n");
+    for line in normalized.lines() {
+        rendered.push_str("  ");
+        rendered.push_str(line);
+        rendered.push('\n');
+    }
+    rendered
 }
 
 fn opening_frontmatter_len(text: &str) -> Option<usize> {
@@ -221,6 +234,20 @@ mod tests {
             written,
             "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\n---\n\n# Summary\n"
         );
+    }
+
+    #[test]
+    fn refresh_markdown_frontmatter_ignores_missing_or_empty_files() {
+        let tmp = tempdir().expect("tempdir");
+        let missing_path = tmp.path().join("missing.md");
+        let empty_path = tmp.path().join("empty.md");
+        std::fs::write(&empty_path, "\n").expect("write empty markdown");
+
+        refresh_markdown_frontmatter(&missing_path, &sample_meta()).expect("ignore missing");
+        refresh_markdown_frontmatter(&empty_path, &sample_meta()).expect("ignore empty");
+
+        assert!(!missing_path.exists());
+        assert_eq!(std::fs::read_to_string(&empty_path).expect("read empty"), "\n");
     }
 
     fn markdownish_unclosed() -> &'static str {
