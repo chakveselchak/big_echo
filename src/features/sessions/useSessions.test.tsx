@@ -144,6 +144,52 @@ describe("useSessions", () => {
     });
   });
 
+  it("ignores stale known tag responses when refreshes resolve out of order", async () => {
+    const knownTagResolvers: Array<(tags: string[]) => void> = [];
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") return [];
+      if (cmd === "list_known_tags") {
+        return new Promise<string[]>((resolve) => {
+          knownTagResolvers.push(resolve);
+        });
+      }
+      return null;
+    });
+
+    const { result } = renderHook(() =>
+      useSessions({ setStatus: vi.fn(), lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    let firstLoad!: Promise<void>;
+    await act(async () => {
+      firstLoad = result.current.loadSessions();
+    });
+
+    let secondLoad!: Promise<void>;
+    await act(async () => {
+      secondLoad = result.current.loadSessions();
+    });
+
+    expect(knownTagResolvers).toHaveLength(2);
+
+    await act(async () => {
+      knownTagResolvers[1](["new"]);
+      await secondLoad;
+    });
+
+    await waitFor(() => {
+      expect(result.current.knownTags).toEqual(["new"]);
+    });
+
+    await act(async () => {
+      knownTagResolvers[0](["old"]);
+      await firstLoad;
+    });
+
+    expect(result.current.knownTags).toEqual(["new"]);
+  });
+
   it("imports an audio file as a native session and reloads the list", async () => {
     let listCalls = 0;
     invokeMock.mockImplementation(async (cmd: string) => {

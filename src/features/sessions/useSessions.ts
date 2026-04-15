@@ -84,9 +84,13 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const autosaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
   const artifactSearchRequestIdRef = useRef(0);
+  const knownTagsRequestIdRef = useRef(0);
 
   async function loadKnownTags() {
+    const requestId = knownTagsRequestIdRef.current + 1;
+    knownTagsRequestIdRef.current = requestId;
     const tags = await tauriInvoke<string[]>("list_known_tags");
+    if (knownTagsRequestIdRef.current !== requestId) return;
     setKnownTags(normalizeTags(tags ?? []));
   }
 
