@@ -1,10 +1,15 @@
 import { useMemo } from "react";
-import { theme, type ConfigProviderProps } from "antd";
+import type { ConfigProviderProps } from "antd/es/config-provider";
+import theme from "antd/es/theme";
 import clsx from "clsx";
 import styles from "./glassTheme.module.css";
 
-export function useGlassTheme(): ConfigProviderProps {
-  return useMemo<ConfigProviderProps>(
+type GlassThemeConfig = ConfigProviderProps & {
+  appClassName: string;
+};
+
+export function useGlassTheme(): GlassThemeConfig {
+  return useMemo<GlassThemeConfig>(
     () => ({
       theme: {
         algorithm: theme.defaultAlgorithm,
@@ -18,84 +23,44 @@ export function useGlassTheme(): ConfigProviderProps {
           motionDurationFast: "0.05s",
         },
       },
-      app: {
-        className: styles.app,
-      },
+      appClassName: styles.app,
       card: {
-        classNames: {
-          root: styles.cardRoot,
-        },
+        className: styles.cardRoot,
       },
       modal: {
         classNames: {
-          container: styles.modalContainer,
+          content: styles.modalContent,
         },
       },
       button: {
-        classNames: ({ props }) => ({
-          root: clsx(
-            styles.buttonRoot,
-            (props.variant !== "solid" || props.color === "default" || props.type === "default") &&
-              styles.buttonRootDefaultColor
-          ),
-        }),
+        className: styles.buttonRoot,
       },
       alert: {
         className: clsx(styles.glassBox, styles.notBackdropFilter),
       },
       dropdown: {
-        classNames: {
-          root: styles.dropdownRoot,
-        },
+        className: styles.dropdownRoot,
       },
       select: {
-        classNames: {
-          root: clsx(styles.glassBox, styles.notBackdropFilter),
-          popup: {
-            root: styles.glassBox,
-          },
-        },
+        className: clsx(styles.glassBox, styles.notBackdropFilter),
       },
       input: {
-        classNames: {
-          root: clsx(styles.glassBox, styles.notBackdropFilter),
-        },
+        className: clsx(styles.glassBox, styles.notBackdropFilter),
       },
       inputNumber: {
-        classNames: {
-          root: clsx(styles.glassBox, styles.notBackdropFilter),
-        },
-      },
-      popover: {
-        classNames: {
-          container: styles.glassBox,
-        },
+        className: clsx(styles.glassBox, styles.notBackdropFilter),
       },
       switch: {
-        classNames: {
-          root: styles.switchRoot,
-        },
+        className: styles.switchRoot,
       },
       radio: {
-        classNames: {
-          root: styles.radioButtonRoot,
-        },
+        className: styles.radioButtonRoot,
       },
       segmented: {
         className: styles.segmentedRoot,
       },
       progress: {
-        classNames: {
-          track: styles.glassBorder,
-        },
-        styles: {
-          track: {
-            height: 12,
-          },
-          rail: {
-            height: 12,
-          },
-        },
+        className: styles.glassBorder,
       },
     }),
     []

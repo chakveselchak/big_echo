@@ -1,13 +1,14 @@
-import { App as AntdApp, ConfigProvider } from "antd";
+import AntdApp from "antd/es/app";
+import ConfigProvider from "antd/es/config-provider";
 import { App } from "./App";
 import { useGlassTheme } from "./theme/useGlassTheme";
 
 export function AppRoot() {
-  const configProps = useGlassTheme();
+  const { appClassName, ...configProps } = useGlassTheme();
 
   return (
     <ConfigProvider {...configProps}>
-      <AntdApp>
+      <AntdApp className={appClassName}>
         <App />
       </AntdApp>
     </ConfigProvider>
