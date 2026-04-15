@@ -63,7 +63,7 @@ pub fn strip_frontmatter(text: &str) -> &str {
 
 pub fn render_markdown_artifact(meta: &SessionMeta, body: &str) -> String {
     let mut rendered = render_frontmatter(meta);
-    rendered.push_str(strip_frontmatter(body).trim_start_matches('\n'));
+    rendered.push_str(body.trim_start_matches('\n'));
     rendered
 }
 
@@ -75,10 +75,11 @@ pub fn refresh_markdown_frontmatter(path: &Path, meta: &SessionMeta) -> Result<(
     if !path.exists() {
         return Ok(());
     }
-    let body = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    if body.trim().is_empty() {
+    let current = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    if current.trim().is_empty() {
         return Ok(());
     }
+    let body = strip_frontmatter(&current).to_string();
     write_markdown_artifact(path, meta, &body)
 }
 
@@ -191,15 +192,15 @@ mod tests {
     }
 
     #[test]
-    fn render_markdown_artifact_strips_existing_body_frontmatter() {
+    fn render_markdown_artifact_preserves_markdown_horizontal_rules() {
         let meta = sample_meta();
-        let body = "---\nsource: \"old\"\n---\n\n# Transcript\nBody";
+        let body = "---\n\n# Summary\n\n---\n\nBody";
 
         let artifact = render_markdown_artifact(&meta, body);
 
         assert_eq!(
             artifact,
-            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\n---\n\n# Transcript\nBody"
+            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\n---\n\n---\n\n# Summary\n\n---\n\nBody"
         );
     }
 
