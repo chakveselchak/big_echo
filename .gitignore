@@ -1,6 +1,7 @@
 src/.DS_Store
 .DS_Store
 .worktrees/
+.superpowers/
 node_modules
 src-tauri/target
 dist
