@@ -7,11 +7,14 @@ export function formatSecretSaveState(state: SecretSaveState): string {
   return "";
 }
 
+export function normalizeTags(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
+  );
+}
+
 export function splitTags(value: string): string[] {
-  return value
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
+  return normalizeTags(value.split(","));
 }
 
 export function parseEventPayload<T>(event: unknown): T | null {

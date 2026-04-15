@@ -30,6 +30,9 @@ const { captureAnalyticsEventMock, invokeMock } = vi.hoisted(() => ({
         tags: ["Alice"],
       };
     }
+    if (cmd === "list_known_tags") {
+      return [];
+    }
     return args ?? null;
   }),
 }));
@@ -87,11 +90,11 @@ describe("useSessions", () => {
             has_summary_text: false,
             meta: {
               session_id: "s-inline",
-              source: "meet",
-              notes: "inline-tag",
+              source: "slack",
+              notes: "Inline note",
               custom_summary_prompt: "Inline summary prompt",
-              topic: "Inline meta",
-              tags: ["Alice", "Bob"],
+              topic: "Inline topic",
+              tags: ["project/acme", "call/sales"],
             },
           },
         ];
@@ -113,12 +116,32 @@ describe("useSessions", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.sessionDetails["s-inline"]?.notes).toBe("inline-tag");
+      expect(result.current.sessionDetails["s-inline"]?.notes).toBe("Inline note");
       expect(result.current.sessionDetails["s-inline"]?.custom_summary_prompt).toBe("Inline summary prompt");
-      expect(result.current.sessionDetails["s-inline"]?.tags).toEqual(["Alice", "Bob"]);
+      expect(result.current.sessionDetails["s-inline"]?.tags).toEqual(["project/acme", "call/sales"]);
     });
 
     expect(invokeMock).not.toHaveBeenCalledWith("get_session_meta", { sessionId: "s-inline" });
+  });
+
+  it("loads known tags for autocomplete", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") return [];
+      if (cmd === "list_known_tags") return ["call/sales", "project/acme"];
+      return null;
+    });
+
+    const { result } = renderHook(() =>
+      useSessions({ setStatus: vi.fn(), lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    await waitFor(() => {
+      expect(result.current.knownTags).toEqual(["call/sales", "project/acme"]);
+    });
   });
 
   it("imports an audio file as a native session and reloads the list", async () => {

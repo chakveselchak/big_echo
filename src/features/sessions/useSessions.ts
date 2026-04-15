@@ -8,7 +8,7 @@ import {
   StartResponse,
 } from "../../appTypes";
 import { captureAnalyticsEvent } from "../../lib/analytics";
-import { getErrorMessage } from "../../lib/appUtils";
+import { getErrorMessage, normalizeTags } from "../../lib/appUtils";
 import { tauriInvoke } from "../../lib/tauri";
 
 type SessionArtifactSearchHit = {
@@ -71,6 +71,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const [sessionDetails, setSessionDetails] = useState<Record<string, SessionMetaView>>({});
   const [savedSessionDetails, setSavedSessionDetails] = useState<Record<string, SessionMetaView>>({});
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
+  const [knownTags, setKnownTags] = useState<string[]>([]);
   const [sessionArtifactSearchHits, setSessionArtifactSearchHits] = useState<Record<string, SessionArtifactSearchHit>>(
     {}
   );
@@ -83,6 +84,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const autosaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
   const artifactSearchRequestIdRef = useRef(0);
+
+  async function loadKnownTags() {
+    const tags = await tauriInvoke<string[]>("list_known_tags");
+    setKnownTags(normalizeTags(tags ?? []));
+  }
 
   async function loadSessions() {
     const data = await tauriInvoke<SessionListItem[]>("list_sessions");
@@ -103,6 +109,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     const nextDetails = Object.fromEntries(details);
     setSessionDetails(nextDetails);
     setSavedSessionDetails(nextDetails);
+    await loadKnownTags().catch(() => undefined);
   }
 
   async function getText(sessionId: string) {
@@ -184,6 +191,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       },
     });
     setSavedSessionDetails((prev) => ({ ...prev, [sessionId]: detail }));
+    await loadKnownTags().catch(() => undefined);
   }
 
   async function saveSessionDetails(sessionId: string, detail: SessionMetaView) {
@@ -297,6 +305,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       }
       setDeleteTarget(null);
       setStatus("session_deleted");
+      await loadKnownTags().catch(() => undefined);
     } catch (err) {
       setStatus(`error: ${getErrorMessage(err)}`);
     } finally {
@@ -413,6 +422,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     getSummary,
     getText,
     importAudioSession,
+    knownTags,
     loadSessions,
     openSessionFolder,
     openSessionArtifact,
