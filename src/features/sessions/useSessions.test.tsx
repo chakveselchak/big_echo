@@ -24,10 +24,10 @@ const { captureAnalyticsEventMock, invokeMock } = vi.hoisted(() => ({
       return {
         session_id: "s1",
         source: "zoom",
-        custom_tag: "client-a",
+        notes: "client-a",
         custom_summary_prompt: "Сделай саммари по решениям",
         topic: "Weekly sync",
-        participants: ["Alice"],
+        tags: ["Alice"],
       };
     }
     return args ?? null;
@@ -65,7 +65,7 @@ describe("useSessions", () => {
       expect(invokeMock).toHaveBeenCalledWith("list_sessions");
       expect(invokeMock).toHaveBeenCalledWith("get_session_meta", { sessionId: "s1" });
       expect(result.current.sessions).toHaveLength(1);
-      expect(result.current.sessionDetails.s1?.custom_tag).toBe("client-a");
+      expect(result.current.sessionDetails.s1?.notes).toBe("client-a");
       expect(result.current.sessionDetails.s1?.custom_summary_prompt).toBe("Сделай саммари по решениям");
     });
   });
@@ -88,10 +88,10 @@ describe("useSessions", () => {
             meta: {
               session_id: "s-inline",
               source: "meet",
-              custom_tag: "inline-tag",
+              notes: "inline-tag",
               custom_summary_prompt: "Inline summary prompt",
               topic: "Inline meta",
-              participants: ["Alice", "Bob"],
+              tags: ["Alice", "Bob"],
             },
           },
         ];
@@ -113,9 +113,9 @@ describe("useSessions", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.sessionDetails["s-inline"]?.custom_tag).toBe("inline-tag");
+      expect(result.current.sessionDetails["s-inline"]?.notes).toBe("inline-tag");
       expect(result.current.sessionDetails["s-inline"]?.custom_summary_prompt).toBe("Inline summary prompt");
-      expect(result.current.sessionDetails["s-inline"]?.participants).toEqual(["Alice", "Bob"]);
+      expect(result.current.sessionDetails["s-inline"]?.tags).toEqual(["Alice", "Bob"]);
     });
 
     expect(invokeMock).not.toHaveBeenCalledWith("get_session_meta", { sessionId: "s-inline" });
@@ -144,9 +144,9 @@ describe("useSessions", () => {
             meta: {
               session_id: "s-imported",
               source: "other",
-              custom_tag: "",
+              notes: "",
               topic: "Dictaphone note",
-              participants: [],
+              tags: [],
             },
           },
         ];
@@ -207,10 +207,10 @@ describe("useSessions", () => {
         return {
           session_id: "s1",
           source: "zoom",
-          custom_tag: "client-a",
+          notes: "client-a",
           custom_summary_prompt: "Сделай саммари по решениям",
           topic: "Weekly sync",
-          participants: ["Alice"],
+          tags: ["Alice"],
         };
       }
       return args ?? null;

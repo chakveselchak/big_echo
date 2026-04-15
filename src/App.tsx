@@ -247,9 +247,9 @@ function SessionAudioPlayer({
 export function App() {
   const [mainTab, setMainTab] = useState<MainTab>("sessions");
   const [topic, setTopic] = useState("");
-  const [participants, setParticipants] = useState("");
+  const [tagsInput] = useState("");
   const [source, setSource] = useState("slack");
-  const [customTag, setCustomTag] = useState("");
+  const [notesInput] = useState("");
   const [session, setSession] = useState<StartResponse | null>(null);
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
@@ -361,12 +361,10 @@ export function App() {
     isTrayWindow,
     topic,
     setTopic,
-    participants,
-    setParticipants,
+    tagsInput,
     source,
     setSource,
-    customTag,
-    setCustomTag,
+    notesInput,
     session,
     setSession,
     lastSessionId,
@@ -654,10 +652,10 @@ export function App() {
       sessionDetails[item.session_id] ?? {
         session_id: item.session_id,
         source: item.primary_tag,
-        custom_tag: "",
+        notes: "",
         custom_summary_prompt: "",
         topic: item.topic,
-        participants: [],
+        tags: [],
       }
     );
   }
@@ -1515,10 +1513,10 @@ export function App() {
               const pipelineState = pipelineStateBySession[item.session_id];
               const query = sessionSearchQuery.trim().toLowerCase();
               const sourceMatch = query !== "" && detail.source.toLowerCase().includes(query);
-              const customMatch = query !== "" && detail.custom_tag.toLowerCase().includes(query);
+              const notesMatch = query !== "" && detail.notes.toLowerCase().includes(query);
               const topicMatch = query !== "" && detail.topic.toLowerCase().includes(query);
-              const participantsText = detail.participants.join(", ");
-              const participantsMatch = query !== "" && participantsText.toLowerCase().includes(query);
+              const tagsText = detail.tags.join(", ");
+              const tagsMatch = query !== "" && tagsText.toLowerCase().includes(query);
               const pathMatch = query !== "" && item.session_dir.toLowerCase().includes(query);
               const statusMatch = query !== "" && item.status.toLowerCase().includes(query);
               const artifactHit = sessionArtifactSearchHits[item.session_id];
@@ -1637,14 +1635,14 @@ export function App() {
                         ))}
                       </select>
                     </label>
-                    <label className={`field${customMatch ? " match-hit" : ""}`}>
-                      Custom tag
+                    <label className={`field${notesMatch ? " match-hit" : ""}`}>
+                      Notes
                       <input
-                        value={detail.custom_tag}
+                        value={detail.notes}
                         onChange={(e) =>
                           setSessionDetails((prev) => ({
                             ...prev,
-                            [item.session_id]: { ...detail, custom_tag: e.target.value },
+                            [item.session_id]: { ...detail, notes: e.target.value },
                           }))
                         }
                       />
@@ -1661,16 +1659,16 @@ export function App() {
                         }
                       />
                     </label>
-                    <label className={`field${participantsMatch ? " match-hit" : ""}`}>
-                      Participants
+                    <label className={`field${tagsMatch ? " match-hit" : ""}`}>
+                      Tags
                       <input
-                        value={participantsText}
+                        value={tagsText}
                         onChange={(e) =>
                           setSessionDetails((prev) => ({
                             ...prev,
                             [item.session_id]: {
                               ...detail,
-                              participants: splitParticipants(e.target.value),
+                              tags: splitParticipants(e.target.value),
                             },
                           }))
                         }

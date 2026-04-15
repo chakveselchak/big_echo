@@ -135,9 +135,10 @@ describe("Tray window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("start_recording", {
         payload: {
-          tags: ["slack"],
+          source: "slack",
+          tags: [],
+          notes: "",
           topic: "Daily sync",
-          participants: [],
         },
       });
     });
@@ -184,9 +185,10 @@ describe("Tray window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("start_recording", {
         payload: {
-          tags: ["slack"],
+          source: "slack",
+          tags: [],
+          notes: "",
           topic: "",
-          participants: [],
         },
       });
     });
@@ -198,9 +200,9 @@ describe("Tray window", () => {
         payload: {
           session_id: "tray-session",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "Daily sync",
-          participants: [],
+          tags: [],
         },
       });
     });

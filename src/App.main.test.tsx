@@ -151,9 +151,10 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("start_recording", {
         payload: {
-          tags: ["telegram"],
+          source: "telegram",
+          tags: [],
+          notes: "",
           topic: "Q1 planning",
-          participants: [],
         },
       });
     });
@@ -203,9 +204,10 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("start_recording", {
         payload: {
-          tags: ["slack"],
+          source: "slack",
+          tags: [],
+          notes: "",
           topic: "",
-          participants: [],
         },
       });
     });
@@ -234,10 +236,10 @@ describe("App main window", () => {
         return {
           session_id: "s2",
           source: "zoom",
-          custom_tag: "alpha",
+          notes: "alpha",
           custom_summary_prompt: "",
           topic: "Initial topic",
-          participants: ["Alice"],
+          tags: ["Alice"],
         };
       }
       if (cmd === "update_session_details") {
@@ -267,10 +269,10 @@ describe("App main window", () => {
         payload: {
           session_id: "s2",
           source: "zoom",
-          custom_tag: "alpha",
+          notes: "alpha",
           custom_summary_prompt: "",
           topic: "Edited topic",
-          participants: ["Alice"],
+          tags: ["Alice"],
         },
       });
     }, { timeout: 3000 });
@@ -329,10 +331,10 @@ describe("App main window", () => {
         return {
           session_id: "s-prompt",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           custom_summary_prompt: "",
           topic: "Prompt session",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "update_session_details") {
@@ -361,10 +363,10 @@ describe("App main window", () => {
         payload: {
           session_id: "s-prompt",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           custom_summary_prompt: "Итог: решения, риски, следующие шаги",
           topic: "Prompt session",
-          participants: [],
+          tags: [],
         },
       });
     });
@@ -400,9 +402,9 @@ describe("App main window", () => {
         return {
           session_id: "s-format",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Format demo",
-          participants: [],
+          tags: [],
         };
       }
       return null;
@@ -438,9 +440,9 @@ describe("App main window", () => {
         return {
           session_id: "s-folder",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Folder demo",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "open_session_folder") {
@@ -537,9 +539,9 @@ describe("App main window", () => {
             meta: {
               session_id: "s-imported",
               source: "other",
-              custom_tag: "",
+              notes: "",
               topic: "Voice memo",
-              participants: [],
+              tags: [],
             },
           },
         ];
@@ -610,9 +612,9 @@ describe("App main window", () => {
         return {
           session_id: "s3",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "Retry me",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "run_transcription") {
@@ -692,10 +694,10 @@ describe("App main window", () => {
         return {
           session_id: "s-context",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           custom_summary_prompt: "",
           topic: "Context menu session",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "open_session_folder") return "opened";
@@ -831,17 +833,17 @@ describe("App main window", () => {
           return {
             session_id: "s5",
             source: "slack",
-            custom_tag: "project-beta",
+            notes: "project-beta",
             topic: "Roadmap",
-            participants: ["Bob"],
+            tags: ["Bob"],
           };
         }
         return {
           session_id: "s4",
           source: "zoom",
-          custom_tag: "project-alpha",
+          notes: "project-alpha",
           topic: "Budget planning",
-          participants: ["Alice"],
+          tags: ["Alice"],
         };
       }
       return null;
@@ -924,17 +926,17 @@ describe("App main window", () => {
           return {
             session_id: "s9",
             source: "slack",
-            custom_tag: "",
+            notes: "",
             topic: "Standup",
-            participants: [],
+            tags: [],
           };
         }
         return {
           session_id: "s8",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Product demo",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "search_session_artifacts") {
@@ -1011,9 +1013,9 @@ describe("App main window", () => {
         return {
           session_id: "s10",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Renewal risks",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "search_session_artifacts") {
@@ -1122,9 +1124,9 @@ describe("App main window", () => {
         return {
           session_id: "s6",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Open folder",
-          participants: [],
+          tags: [],
         };
       }
       return null;
@@ -1179,9 +1181,9 @@ describe("App main window", () => {
         return {
           session_id: "s-audio",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "Audio demo",
-          participants: [],
+          tags: [],
         };
       }
       return null;
@@ -1293,9 +1295,9 @@ describe("App main window", () => {
         return {
           session_id: "s7",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Delete me",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "delete_session") {
@@ -1376,9 +1378,9 @@ describe("App main window", () => {
         return {
           session_id: "s7",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Delete me",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "delete_session") {
@@ -1451,9 +1453,9 @@ describe("App main window", () => {
         return {
           session_id: "s-dialog",
           source: "zoom",
-          custom_tag: "",
+          notes: "",
           topic: "Dialog focus",
-          participants: [],
+          tags: [],
         };
       }
       return null;
@@ -1514,9 +1516,9 @@ describe("App main window", () => {
         return {
           session_id: "s8",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "Stuck recording",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "delete_session") {
@@ -1574,9 +1576,9 @@ describe("App main window", () => {
         return {
           session_id: "s4",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "Retry loading",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "run_transcription") {
@@ -1637,9 +1639,9 @@ describe("App main window", () => {
         return {
           session_id: "s9",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "Summary loading",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "run_summary") {
@@ -1699,9 +1701,9 @@ describe("App main window", () => {
         return {
           session_id: "s5",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "Retry error",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "run_summary") {
@@ -1752,9 +1754,9 @@ describe("App main window", () => {
         return {
           session_id: "s6",
           source: "slack",
-          custom_tag: "",
+          notes: "",
           topic: "With artifacts",
-          participants: [],
+          tags: [],
         };
       }
       if (cmd === "open_session_artifact") {

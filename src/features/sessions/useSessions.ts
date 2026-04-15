@@ -27,7 +27,7 @@ type UseSessionsOptions = {
   setLastSessionId: (sessionId: string | null) => void;
 };
 
-function sameParticipants(left: string[], right: string[]) {
+function sameTags(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
@@ -35,21 +35,23 @@ function sameSessionMeta(left: SessionMetaView, right: SessionMetaView) {
   return (
     left.session_id === right.session_id &&
     left.source === right.source &&
-    left.custom_tag === right.custom_tag &&
+    left.notes === right.notes &&
     (left.custom_summary_prompt ?? "") === (right.custom_summary_prompt ?? "") &&
     left.topic === right.topic &&
-    sameParticipants(left.participants, right.participants)
+    sameTags(left.tags, right.tags)
   );
 }
 
 function sessionMetaSignature(meta: SessionMetaView) {
-  return `${meta.session_id}\n${meta.source}\n${meta.custom_tag}\n${meta.custom_summary_prompt ?? ""}\n${meta.topic}\n${meta.participants.join("\u001f")}`;
+  return `${meta.session_id}\n${meta.source}\n${meta.notes}\n${meta.custom_summary_prompt ?? ""}\n${meta.topic}\n${meta.tags.join("\u001f")}`;
 }
 
 function normalizeSessionMeta(meta: SessionMetaView): SessionMetaView {
   return {
     ...meta,
+    notes: meta.notes ?? "",
     custom_summary_prompt: meta.custom_summary_prompt ?? "",
+    tags: meta.tags ?? [],
   };
 }
 
@@ -57,10 +59,10 @@ function fallbackSessionMeta(item: SessionListItem): SessionMetaView {
   return {
     session_id: item.session_id,
     source: item.primary_tag,
-    custom_tag: "",
+    notes: "",
     custom_summary_prompt: "",
     topic: item.topic,
-    participants: [],
+    tags: [],
   };
 }
 
@@ -175,10 +177,10 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       payload: {
         session_id: sessionId,
         source: detail.source,
-        custom_tag: detail.custom_tag,
+        notes: detail.notes,
         custom_summary_prompt: detail.custom_summary_prompt ?? "",
         topic: detail.topic,
-        participants: detail.participants,
+        tags: detail.tags,
       },
     });
     setSavedSessionDetails((prev) => ({ ...prev, [sessionId]: detail }));
@@ -379,9 +381,9 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     return sessions.filter((item) => {
       const detail = sessionDetails[item.session_id];
       const sourceValue = (detail?.source ?? item.primary_tag).toLowerCase();
-      const customValue = (detail?.custom_tag ?? "").toLowerCase();
+      const notesValue = (detail?.notes ?? "").toLowerCase();
       const topicValue = (detail?.topic ?? item.topic ?? "").toLowerCase();
-      const participantsValue = (detail?.participants ?? []).join(", ").toLowerCase();
+      const tagsValue = (detail?.tags ?? []).join(", ").toLowerCase();
       const pathValue = item.session_dir.toLowerCase();
       const statusValue = item.status.toLowerCase();
       const dateValue = item.display_date_ru.toLowerCase();
@@ -390,9 +392,9 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       if (!query) return true;
       return (
         sourceValue.includes(query) ||
-        customValue.includes(query) ||
+        notesValue.includes(query) ||
         topicValue.includes(query) ||
-        participantsValue.includes(query) ||
+        tagsValue.includes(query) ||
         pathValue.includes(query) ||
         statusValue.includes(query) ||
         dateValue.includes(query) ||

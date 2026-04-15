@@ -57,10 +57,10 @@ export type SessionListItem = {
 export type SessionMetaView = {
   session_id: string;
   source: string;
-  custom_tag: string;
+  notes: string;
   custom_summary_prompt?: string;
   topic: string;
-  participants: string[];
+  tags: string[];
 };
 
 export type UiSyncStateView = {
