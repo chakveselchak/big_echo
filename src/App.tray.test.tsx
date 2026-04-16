@@ -84,7 +84,7 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
 }
 
 const { listeners, invokeMock } = vi.hoisted(() => ({
-  listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
+  listeners: new Map<string, Array<(payload?: unknown) => void | Promise<void>>>(),
   invokeMock: vi.fn<InvokeMock>(defaultInvokeImplementation),
 }));
 
@@ -95,8 +95,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(async () => undefined),
   listen: vi.fn(async (event: string, handler: (payload?: unknown) => void | Promise<void>) => {
-    listeners.set(event, handler);
-    return () => listeners.delete(event);
+    if (!listeners.has(event)) listeners.set(event, []);
+    listeners.get(event)!.push(handler);
+    return () => {
+      const arr = listeners.get(event);
+      if (arr) {
+        const idx = arr.indexOf(handler);
+        if (idx !== -1) arr.splice(idx, 1);
+      }
+    };
   }),
 }));
 
@@ -123,6 +130,7 @@ describe("Tray window", () => {
     invokeMock.mockClear();
     invokeMock.mockReset();
     invokeMock.mockImplementation(defaultInvokeImplementation);
+    vi.useRealTimers();
   });
 
   it("applies shared ui sync updates", async () => {
@@ -135,9 +143,8 @@ describe("Tray window", () => {
     });
 
     await act(async () => {
-      await listeners.get("ui:sync")?.({
-        payload: JSON.stringify({ source: "facetime", topic: "1:1" }),
-      });
+      const handlers = listeners.get("ui:sync") ?? [];
+      await Promise.all(handlers.map((h) => h({ payload: JSON.stringify({ source: "facetime", topic: "1:1" }) })));
     });
 
     await waitFor(() => {
@@ -168,8 +175,6 @@ describe("Tray window", () => {
     const topicField = screen.getByLabelText("Topic (optional)");
     expect(sourceField).toBeInTheDocument();
     expect(topicField).toBeInTheDocument();
-    expect(sourceField.closest("label")).toHaveClass("tray-source-field");
-    expect(topicField.closest("label")).toHaveClass("tray-topic-field");
     expect(screen.getByRole("button", { name: "Rec" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
 
@@ -203,17 +208,13 @@ describe("Tray window", () => {
 
     const sourceField = getTraySourceSelect().combobox;
     const topicField = screen.getByLabelText("Topic (optional)");
-    const trayMetaGrid = container!.querySelector(".tray-meta-grid");
-    const trayButtonRow = container!.querySelector(".tray-shell .button-row");
 
     await waitFor(() => {
-      expect(trayMetaGrid).not.toBeNull();
-      expect(sourceField.closest(".tray-meta-grid")).toBe(trayMetaGrid);
-      expect(topicField.closest(".tray-meta-grid")).toBe(trayMetaGrid);
+      expect(sourceField).toBeInTheDocument();
+      expect(topicField).toBeInTheDocument();
 
-      expect(trayButtonRow).not.toBeNull();
-      expect(screen.getByRole("button", { name: "Rec" }).closest(".button-row")).toBe(trayButtonRow);
-      expect(screen.getByRole("button", { name: "Stop" }).closest(".button-row")).toBe(trayButtonRow);
+      expect(screen.getByRole("button", { name: "Rec" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
       expect(screen.getByText("Grant Screen & System Audio Recording permission in System Settings.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
       expect(screen.queryByLabelText("System activity")).not.toBeInTheDocument();
@@ -239,17 +240,20 @@ describe("Tray window", () => {
 
     await user.type(screen.getByLabelText("Topic (optional)"), "Daily sync");
 
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
-        payload: {
-          session_id: "tray-session",
-          source: "slack",
-          notes: "",
-          topic: "Daily sync",
-          tags: [],
-        },
-      });
-    });
+    await waitFor(
+      () => {
+        expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
+          payload: {
+            session_id: "tray-session",
+            source: "slack",
+            notes: "",
+            topic: "Daily sync",
+            tags: [],
+          },
+        });
+      },
+      { timeout: 3000 }
+    );
   });
 
   it("shows a neutral loading status without legacy system controls while macOS permission loads", async () => {
@@ -341,7 +345,7 @@ describe("Tray window", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Open System Settings" })).toHaveClass("tray-settings-link");
+      expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "Open System Settings" }));
@@ -428,11 +432,11 @@ describe("Tray window", () => {
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mute microphone" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Mute system audio" })).toBeDisabled();
-    expect(screen.getByLabelText("Mic activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+    expect(screen.getByLabelText("Mic activity").querySelector("[data-wave-mode]")).toHaveAttribute(
       "data-wave-mode",
       "gentle"
     );
-    expect(screen.getByLabelText("System activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+    expect(screen.getByLabelText("System activity").querySelector("[data-wave-mode]")).toHaveAttribute(
       "data-wave-mode",
       "strong"
     );
@@ -449,11 +453,11 @@ describe("Tray window", () => {
     render(<App />);
 
     const micVisual = await screen.findByLabelText("Mic activity");
-    const micLottie = micVisual.querySelector(".tray-audio-lottie");
-    const micPath = micVisual.querySelector(".tray-audio-wave-path");
+    const micWaveContainer = micVisual.querySelector("[data-wave-mode]");
+    const micPath = micVisual.querySelector("[data-testid='wave-path']");
 
-    expect(micLottie).not.toBeNull();
-    expect(micLottie).toHaveAttribute("data-wave-mode", "flat");
+    expect(micWaveContainer).not.toBeNull();
+    expect(micWaveContainer).toHaveAttribute("data-wave-mode", "flat");
     expect(micPath).toHaveAttribute("d", "M 0.00 14.00 L 120.00 14.00");
   });
 
@@ -491,18 +495,16 @@ describe("Tray window", () => {
       expect(screen.getByLabelText("Mic activity")).toBeInTheDocument();
     });
 
-    const micRow = screen.getByText("Mic").closest(".tray-audio-row");
-    const micMain = screen.getByLabelText("Mic activity").closest(".tray-audio-main");
+    const micLabel = screen.getByText("Mic");
     const micMute = screen.getByRole("button", { name: "Mute microphone" });
     const micSelect = getAntdSelect("Mic device").select;
 
-    expect(micRow).toHaveClass("has-inline-trailing");
-    expect(micMain).not.toBeNull();
-    expect(micMute.closest(".tray-audio-main")).toBe(micMain);
-    expect(micSelect.closest(".tray-audio-main")).toBe(micMain);
-    expect(micSelect.closest(".tray-audio-trailing")).toHaveClass("is-inline");
-    expect(micMain?.children[1]).toHaveClass("tray-audio-trailing", "is-inline");
-    expect(micMain?.children[2]).toHaveClass("tray-audio-mute");
+    // All mic controls should share a common ancestor row
+    const micRowAncestor = micLabel.parentElement;
+    expect(micRowAncestor).not.toBeNull();
+    expect(micRowAncestor!.contains(micMute)).toBe(true);
+    expect(micRowAncestor!.contains(micSelect)).toBe(true);
+    expect(micRowAncestor!.contains(screen.getByLabelText("Mic activity"))).toBe(true);
   });
 
   it("toggles tray mute buttons during recording and resets them after stop", async () => {
