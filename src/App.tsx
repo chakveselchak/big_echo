@@ -32,15 +32,15 @@ import {
   StartResponse,
   transcriptionProviderOptions,
   transcriptionTaskOptions,
-} from "./appTypes";
+} from "./types";
 import { TrayAudioRow } from "./features/recording/TrayAudioRow";
-import { useRecordingController } from "./features/recording/useRecordingController";
-import { useSessions } from "./features/sessions/useSessions";
-import { useSettingsForm } from "./features/settings/useSettingsForm";
+import { useRecordingController } from "./hooks/useRecordingController";
+import { useSessions } from "./hooks/useSessions";
+import { useSettingsForm } from "./hooks/useSettingsForm";
 import { initializeAnalytics } from "./lib/analytics";
 import { formatSecretSaveState, getErrorMessage } from "./lib/appUtils";
 import { getCurrentWindowLabel, tauriConvertFileSrc, tauriInvoke } from "./lib/tauri";
-import { formatAppStatus, formatSessionStatus } from "./status";
+import { formatAppStatus, formatSessionStatus } from "./lib/status";
 import vscodeIcon from "./assets/editor-icons/vscode.svg";
 import cursorIcon from "./assets/editor-icons/cursor.svg";
 import sublimeIcon from "./assets/editor-icons/sublime.svg";
