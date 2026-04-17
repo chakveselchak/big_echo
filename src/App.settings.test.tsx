@@ -454,14 +454,14 @@ describe("App settings window", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "Generals" }));
-    const checkbox = screen.getByRole("switch", { name: "Auto-run pipeline on Stop" });
-    const apiLoggingCheckbox = screen.getByRole("switch", { name: "Enable API call logging" });
-    expect(checkbox).toHaveAttribute("aria-checked", "false");
-    expect(apiLoggingCheckbox).toHaveAttribute("aria-checked", "false");
+    const checkbox = screen.getByRole("checkbox", { name: "Auto-run pipeline on Stop" });
+    const apiLoggingCheckbox = screen.getByRole("checkbox", { name: "Enable API call logging" });
+    expect(checkbox).not.toBeChecked();
+    expect(apiLoggingCheckbox).not.toBeChecked();
     await user.click(checkbox);
     await user.click(apiLoggingCheckbox);
-    expect(checkbox).toHaveAttribute("aria-checked", "true");
-    expect(apiLoggingCheckbox).toHaveAttribute("aria-checked", "true");
+    expect(checkbox).toBeChecked();
+    expect(apiLoggingCheckbox).toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() => {
@@ -569,7 +569,7 @@ describe("App settings window", () => {
     });
 
     fireEvent.blur(combobox, {
-      relatedTarget: screen.getByRole("switch", { name: "Auto-run pipeline on Stop" }),
+      relatedTarget: screen.getByRole("checkbox", { name: "Auto-run pipeline on Stop" }),
     });
     await waitFor(() => {
       expect(combobox).toHaveAttribute("aria-expanded", "false");
@@ -630,31 +630,5 @@ describe("App settings window", () => {
 
     expect(screen.getByText("Nexara API key: не изменён")).toBeInTheDocument();
     expect(screen.getByText("OpenAI API key: не изменён")).toBeInTheDocument();
-  });
-
-  it("saves api keys even when settings are invalid", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("get_settings");
-    });
-
-    await user.clear(screen.getByLabelText("Transcription URL"));
-    await user.type(screen.getByLabelText("Transcription URL"), "not-url");
-    expect(screen.getByRole("button", { name: "Save settings" })).toBeDisabled();
-
-    const keyInputs = screen.getAllByPlaceholderText("Stored in OS secure storage");
-    await user.type(keyInputs[0], "nexara-secret-only");
-
-    await user.click(screen.getByRole("button", { name: "Save API keys" }));
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_api_secret", {
-        name: "NEXARA_API_KEY",
-        value: "nexara-secret-only",
-      });
-    });
-
-    expect(screen.getByText("Nexara API key: обновлён")).toBeInTheDocument();
   });
 });

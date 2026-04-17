@@ -257,7 +257,18 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
     for row in rows {
         let mut item = row.map_err(|e| e.to_string())?;
         if let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? {
-            if let Ok(meta) = load_meta(&meta_path) {
+            match load_meta(&meta_path) {
+                Err(err) => {
+                    eprintln!(
+                        "list_sessions: failed to load meta for session {} at {}: {}",
+                        item.session_id,
+                        meta_path.display(),
+                        err
+                    );
+                    out.push(item);
+                    continue;
+                }
+                Ok(meta) => {
                 let session_dir = PathBuf::from(&item.session_dir);
                 let transcript_ok =
                     file_has_non_empty_text(&session_dir.join(&meta.artifacts.transcript_file));
@@ -280,6 +291,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     topic: meta.topic.clone(),
                     tags: meta.tags.clone(),
                 });
+                }
             }
         }
         out.push(item);

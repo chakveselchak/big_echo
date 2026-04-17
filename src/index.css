@@ -461,10 +461,6 @@ select {
   flex-wrap: wrap;
 }
 
-.session-toolbar-actions .session-import-button {
-  padding: 5px 12px;
-}
-
 .field.session-search-label {
   gap: 0;
   color: var(--text-muted);
@@ -482,7 +478,6 @@ select {
 
 .field :is(input:not([type="checkbox"]), select),
 .field textarea,
-.session-toolbar-search input,
 .opener-dropdown-trigger {
   border: 1px solid rgba(140, 151, 165, 0.28);
   background: rgba(255, 255, 255, 0.96);
@@ -499,7 +494,6 @@ select {
 }
 
 .field :is(input:not([type="checkbox"]), select),
-.session-toolbar-search input,
 .opener-dropdown-trigger {
   height: 38px;
 }
@@ -511,14 +505,29 @@ select {
   width: 100%;
 }
 
+/* Force equal height for all form controls inside session card edit grid */
+.session-edit-grid .field .ant-input,
+.session-edit-grid .field .ant-input-affix-wrapper,
+.session-edit-grid .field .ant-select-single .ant-select-selector,
+.session-edit-grid .field .ant-select-multiple .ant-select-selector,
+.session-edit-grid .field textarea.ant-input {
+  min-height: 38px;
+}
+.session-edit-grid .field input.ant-input,
+.session-edit-grid .field textarea.ant-input {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
 .session-toolbar-search {
   position: relative;
 }
 
-.session-toolbar-search input {
-  width: 100%;
+.session-toolbar-search .ant-input-affix-wrapper {
   background: rgba(245, 247, 250, 0.96);
-  padding-right: 36px;
+}
+.session-toolbar-search .ant-input-affix-wrapper .ant-input {
+  background: transparent;
 }
 
 .session-search-icon {
@@ -680,7 +689,6 @@ select {
 
 .tray-shell .field :is(input:not([type="checkbox"]), select),
 .tray-shell .field textarea,
-.tray-shell .session-toolbar-search input,
 .tray-shell .field .ant-input,
 .tray-shell .field .ant-input-affix-wrapper,
 .tray-shell .field .ant-input-number,
@@ -1672,6 +1680,14 @@ select {
 
 .retry-state-error {
   color: #9b1f1f;
+}
+
+.ant-form-item {
+  margin-bottom: 8px;
+}
+
+.session-edit-grid textarea {
+  min-height: 38px !important;
 }
 
 @keyframes spin {

@@ -79,8 +79,8 @@ export function TrayPage() {
   return (
     <Flex
       vertical
-      gap={8}
-      style={{ height: "100vh", padding: "10px 12px", boxSizing: "border-box" }}
+      gap={6}
+      style={{ height: "100vh", padding: "6px 10px", boxSizing: "border-box" }}
     >
       {/* Status bar */}
       <Flex justify="space-between" align="center">

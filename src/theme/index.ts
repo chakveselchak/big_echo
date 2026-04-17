@@ -6,6 +6,7 @@ export const appTheme: ThemeConfig = {
     colorError: "#b53434",
     borderRadius: 8,
     borderRadiusLG: 12,
+    controlHeight: 38,
     motionDurationSlow: "0.2s",
     motionDurationMid: "0.1s",
     motionDurationFast: "0.05s",

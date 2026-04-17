@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Dropdown, Menu } from "antd";
+import { Menu } from "antd";
 import type { MenuProps } from "antd";
 import type {
   DeleteTarget,
@@ -79,7 +79,6 @@ export function SessionList({
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
-  const sessionContextMenuRef = useRef<HTMLSpanElement | null>(null);
 
   const knownTagOptions = knownTags.map((tag) => ({ value: tag, label: tag }));
 
@@ -178,7 +177,6 @@ export function SessionList({
 
     const onDocumentPointerDown = (event: PointerEvent) => {
       const target = event.target;
-      if (target instanceof Node && sessionContextMenuRef.current?.contains(target)) return;
       if (target instanceof Element && target.closest(".session-context-menu-popup")) return;
       setSessionContextMenu(null);
     };
@@ -336,28 +334,16 @@ export function SessionList({
       </div>
 
       {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (
-        <Dropdown
-          open
-          menu={{ items: [] }}
-          dropdownRender={() => (
-            <Menu
-              aria-label="Действия сессии"
-              className="session-context-menu-popup"
-              items={sessionContextMenuItems}
-              onClick={({ key }) => runSessionContextMenuItem(String(key))}
-            />
-          )}
-          trigger={["click"]}
-          onOpenChange={(open) => {
-            if (!open) setSessionContextMenu(null);
-          }}
+        <div
+          className="session-context-menu-popup"
+          style={{ position: "fixed", left: sessionContextMenu.x, top: sessionContextMenu.y, zIndex: 1050 }}
         >
-          <span
-            ref={sessionContextMenuRef}
-            className="session-context-menu"
-            style={{ left: sessionContextMenu.x, top: sessionContextMenu.y, position: "fixed" }}
+          <Menu
+            aria-label="Действия сессии"
+            items={sessionContextMenuItems}
+            onClick={({ key }) => runSessionContextMenuItem(String(key))}
           />
-        </Dropdown>
+        </div>
       )}
 
       <DeleteConfirmModal

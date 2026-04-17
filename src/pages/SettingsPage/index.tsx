@@ -23,7 +23,6 @@ export function SettingsPage() {
     pickRecordingRoot,
     salutSpeechAuthKey,
     salutSpeechSecretState,
-    saveApiKeys,
     saveSettings,
     savedSettingsSnapshot,
     setNexaraKey,
@@ -181,7 +180,6 @@ export function SettingsPage() {
         <Button type="primary" onClick={() => void saveSettings()} disabled={!canSaveSettings}>
           Save settings
         </Button>
-        <Button onClick={() => void saveApiKeys()}>Save API keys</Button>
       </Flex>
     </div>
   );

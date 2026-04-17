@@ -1,4 +1,4 @@
-import { Button, Flex, Form, Input, Select, Switch } from "antd";
+import { Button, Checkbox, Flex, Form, Input, Select } from "antd";
 import type { PublicSettings, TextEditorAppOption } from "../../types";
 import { localIconForEditor } from "../../lib/appUtils";
 
@@ -116,34 +116,30 @@ export function GeneralSettings({
         />
       </Form.Item>
 
-      <Form.Item
-        label={
-          <label htmlFor="auto_run_pipeline_on_stop">
-            Auto-run pipeline on Stop{isDirty("auto_run_pipeline_on_stop") && dirtyDot}
-          </label>
-        }
-      >
-        <Switch
+      <Form.Item>
+        <Checkbox
           id="auto_run_pipeline_on_stop"
           aria-label="Auto-run pipeline on Stop"
           checked={Boolean(settings.auto_run_pipeline_on_stop)}
-          onChange={(checked) => setSettings({ ...settings, auto_run_pipeline_on_stop: checked })}
-        />
+          onChange={(event) =>
+            setSettings({ ...settings, auto_run_pipeline_on_stop: event.target.checked })
+          }
+        >
+          Auto-run pipeline on Stop{isDirty("auto_run_pipeline_on_stop") && dirtyDot}
+        </Checkbox>
       </Form.Item>
 
-      <Form.Item
-        label={
-          <label htmlFor="api_call_logging_enabled">
-            Enable API call logging{isDirty("api_call_logging_enabled") && dirtyDot}
-          </label>
-        }
-      >
-        <Switch
+      <Form.Item>
+        <Checkbox
           id="api_call_logging_enabled"
           aria-label="Enable API call logging"
           checked={Boolean(settings.api_call_logging_enabled)}
-          onChange={(checked) => setSettings({ ...settings, api_call_logging_enabled: checked })}
-        />
+          onChange={(event) =>
+            setSettings({ ...settings, api_call_logging_enabled: event.target.checked })
+          }
+        >
+          Enable API call logging{isDirty("api_call_logging_enabled") && dirtyDot}
+        </Checkbox>
       </Form.Item>
     </Form>
   );

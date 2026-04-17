@@ -27,7 +27,7 @@ export const SessionFilters = forwardRef<InputRef, SessionFiltersProps>(
           </Button>
           <Button
             htmlType="button"
-            className="refresh-icon-button"
+            className="secondary-button refresh-icon-button"
             aria-label="Refresh sessions"
             title="Refresh sessions"
             onClick={onRefresh}

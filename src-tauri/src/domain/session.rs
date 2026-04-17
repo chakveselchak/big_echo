@@ -38,15 +38,24 @@ pub struct SessionMeta {
     pub started_at_iso: String,
     pub ended_at_iso: Option<String>,
     pub display_date_ru: String,
+    // `source`, `tags` and `notes` are marked `#[serde(default)]` so that
+    // meta.json files written before commit f3872a7 (which replaced
+    // `participants`/`custom_tag` with `source`/`tags`/`notes`) can still be
+    // loaded. Legacy sessions fall back to empty values and backfill the
+    // fields on next save.
+    #[serde(default)]
     pub source: String,
     pub primary_tag: String,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
     pub notes: String,
     pub topic: String,
     #[serde(default)]
     pub custom_summary_prompt: String,
     pub status: SessionStatus,
     pub artifacts: SessionArtifacts,
+    #[serde(default)]
     pub errors: Vec<String>,
 }
 

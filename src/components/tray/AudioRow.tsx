@@ -53,8 +53,8 @@ export function AudioRow({
   const buttonLabel = muted ? `Unmute ${muteLabel}` : `Mute ${muteLabel}`;
 
   return (
-    <Flex align="center" gap={6} style={{ minHeight: 36 }}>
-      <Typography.Text style={{ width: 48, flexShrink: 0, fontSize: 13 }}>
+    <Flex align="center" gap={6} style={{ minHeight: 28 }}>
+      <Typography.Text style={{ width: 48, flexShrink: 0, fontSize: 12 }}>
         {label}
       </Typography.Text>
       <Flex flex={1} align="center" gap={6} style={{ minWidth: 0 }}>
@@ -63,7 +63,7 @@ export function AudioRow({
             {statusText}
           </Typography.Text>
         ) : (
-          <div style={{ flex: 1, height: 28 }} aria-label={animationLabel}>
+          <div style={{ flex: 1, height: 22 }} aria-label={animationLabel}>
             <AudioWave level={level} muted={muted} />
           </div>
         )}
@@ -80,7 +80,7 @@ export function AudioRow({
         aria-pressed={muted}
         disabled={disabled}
         onClick={onToggleMuted}
-        style={{ position: "relative", width: 32, height: 32, padding: 0, flexShrink: 0 }}
+        style={{ position: "relative", width: 26, height: 26, padding: 0, flexShrink: 0, opacity: 1 }}
       >
         <span style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
           <AudioIcon icon={icon} />

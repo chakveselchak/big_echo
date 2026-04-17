@@ -173,6 +173,7 @@ export function SessionCard({
             aria-label="Tags"
             mode="tags"
             value={detail.tags}
+            style={{ height: 38 }}
             options={knownTagOptions}
             tokenSeparators={[","]}
             onChange={(value) => onDetailChange({ ...detail, tags: value })}
@@ -183,7 +184,8 @@ export function SessionCard({
           <Input.TextArea
             aria-label="Notes"
             value={detail.notes}
-            autoSize={{ minRows: 1, maxRows: 4 }}
+            style={{ height: 38 }}
+            autoSize={{ minRows: 1, maxRows: 2 }}
             onChange={(e) => onDetailChange({ ...detail, notes: e.target.value })}
           />
         </label>
