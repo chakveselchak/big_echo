@@ -140,9 +140,6 @@ describe("App settings window", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.getByRole("main")).toHaveClass("mac-window");
-    expect(screen.getByRole("main")).toHaveClass("settings-layout");
-
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("get_settings");
     });

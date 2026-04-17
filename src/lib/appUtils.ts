@@ -43,3 +43,15 @@ export function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
 }
+
+import vscodeIcon from "../assets/editor-icons/vscode.svg";
+import cursorIcon from "../assets/editor-icons/cursor.svg";
+import sublimeIcon from "../assets/editor-icons/sublime.svg";
+
+export function localIconForEditor(editorName: string): string | null {
+  const lowered = editorName.toLowerCase();
+  if (lowered.includes("visual studio code") || lowered === "vscode") return vscodeIcon;
+  if (lowered.includes("cursor")) return cursorIcon;
+  if (lowered.includes("sublime")) return sublimeIcon;
+  return null;
+}

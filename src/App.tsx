@@ -35,6 +35,7 @@ import {
 } from "./types";
 import { TrayAudioRow } from "./features/recording/TrayAudioRow";
 import { TrayPage } from "./pages/TrayPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { useRecordingController } from "./hooks/useRecordingController";
 import { useSessions } from "./hooks/useSessions";
 import { useSettingsForm } from "./hooks/useSettingsForm";
@@ -1118,13 +1119,7 @@ export function App() {
   }
 
   if (isSettingsWindow) {
-    return (
-      <main className="app-shell settings-shell mac-window settings-layout" ref={appMainRef}>
-        <section className="panel">
-          {renderSettingsFields()}
-        </section>
-      </main>
-    );
+    return <SettingsPage />;
   }
 
   return (
