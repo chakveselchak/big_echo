@@ -1,4 +1,4 @@
-import { PublicSettings } from "../appTypes";
+import { PublicSettings } from "../types";
 
 const allowedAudioFormats = new Set(["opus", "mp3", "m4a", "ogg", "wav"]);
 const allowedTranscriptionProviders = new Set(["nexara", "salute_speech"]);

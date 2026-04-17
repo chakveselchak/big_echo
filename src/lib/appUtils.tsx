@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { SessionListItem } from "../types";
-import { SecretSaveState } from "../appTypes";
+import { SecretSaveState } from "../types";
 
 export function formatSecretSaveState(state: SecretSaveState): string {
   if (state === "updated") return "обновлён";

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 describe("App.css", () => {
   it("keeps the custom prompt button square and aligned with session action buttons", () => {
-    const css = readFileSync(resolve(process.cwd(), "src/App.css"), "utf8");
+    const css = readFileSync(resolve(process.cwd(), "src/index.css"), "utf8");
     const rule = css.match(/\.session-summary-prompt-button\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
 
     expect(rule).toContain("width: 36px");
