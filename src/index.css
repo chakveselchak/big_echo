@@ -429,11 +429,8 @@ select {
 
 .recording-grid,
 .search-grid,
-.session-edit-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
+/* .session-edit-grid is now a thin marker class on an Ant Design Form+Row/Col
+   grid (see SessionCard.tsx). The layout is fully controlled by Ant Design. */
 
 .search-grid {
   grid-template-columns: minmax(0, 1fr);
@@ -505,19 +502,6 @@ select {
   width: 100%;
 }
 
-/* Force equal height for all form controls inside session card edit grid */
-.session-edit-grid .field .ant-input,
-.session-edit-grid .field .ant-input-affix-wrapper,
-.session-edit-grid .field .ant-select-single .ant-select-selector,
-.session-edit-grid .field .ant-select-multiple .ant-select-selector,
-.session-edit-grid .field textarea.ant-input {
-  min-height: 38px;
-}
-.session-edit-grid .field input.ant-input,
-.session-edit-grid .field textarea.ant-input {
-  padding-top: 7px;
-  padding-bottom: 7px;
-}
 
 .session-toolbar-search {
   position: relative;
@@ -1394,18 +1378,6 @@ select {
   border: 1px solid rgba(27, 122, 69, 0.18);
 }
 
-.session-edit-grid {
-  gap: 10px;
-}
-
-.session-edit-grid .field {
-  min-width: 0;
-}
-
-.session-edit-grid :is(input, select, textarea) {
-  min-width: 0;
-}
-
 .session-card .button-row {
   gap: 6px;
   align-items: flex-start;
@@ -1686,9 +1658,6 @@ select {
   margin-bottom: 8px;
 }
 
-.session-edit-grid textarea {
-  min-height: 38px !important;
-}
 
 @keyframes spin {
   to {
@@ -1708,10 +1677,6 @@ select {
   .settings-tab-grid,
   .recording-grid,
   .search-grid,
-  .session-edit-grid {
-    grid-template-columns: 1fr;
-  }
-
   .tray-meta-grid {
     grid-template-columns: minmax(88px, 30%) minmax(0, 1fr);
   }

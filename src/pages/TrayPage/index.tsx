@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Flex, Select, Typography } from "antd";
+import { Alert, Button, Flex, Typography } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { StartResponse } from "../../types";
@@ -127,22 +127,33 @@ export function TrayPage() {
             <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden" }}>
               Mic device
             </span>
-            <Select
+            <select
               aria-label="Mic device"
-              size="small"
-              style={{ minWidth: 80 }}
               value={settings?.mic_device_name ?? ""}
-              options={[
-                { value: "", label: "Auto" },
-                ...audioDevices.map((dev) => ({ value: dev, label: dev })),
-              ]}
-              onChange={(value) => {
-                void saveSettingsPatch({ mic_device_name: value }).catch((err) =>
+              onChange={(e) => {
+                void saveSettingsPatch({ mic_device_name: e.target.value }).catch((err) =>
                   setStatus(`error: ${String(err)}`)
                 );
               }}
               disabled={isRecording}
-            />
+              style={{
+                minWidth: 80,
+                height: 24,
+                fontSize: 12,
+                padding: "0 6px",
+                borderRadius: 6,
+                border: "1px solid rgba(140, 151, 165, 0.28)",
+                background: "rgba(248, 250, 253, 0.96)",
+                boxSizing: "border-box",
+              }}
+            >
+              <option value="">Auto</option>
+              {audioDevices.map((dev) => (
+                <option key={dev} value={dev}>
+                  {dev}
+                </option>
+              ))}
+            </select>
           </label>
         }
       />
@@ -178,22 +189,33 @@ export function TrayPage() {
               <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden" }}>
                 System device
               </span>
-              <Select
+              <select
                 aria-label="System device"
-                size="small"
-                style={{ minWidth: 80 }}
                 value={settings?.system_device_name ?? ""}
-                options={[
-                  { value: "", label: "Auto" },
-                  ...audioDevices.map((dev) => ({ value: dev, label: dev })),
-                ]}
-                onChange={(value) => {
-                  void saveSettingsPatch({ system_device_name: value }).catch((err) =>
+                onChange={(e) => {
+                  void saveSettingsPatch({ system_device_name: e.target.value }).catch((err) =>
                     setStatus(`error: ${String(err)}`)
                   );
                 }}
                 disabled={isRecording}
-              />
+                style={{
+                  minWidth: 80,
+                  height: 24,
+                  fontSize: 12,
+                  padding: "0 6px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(140, 151, 165, 0.28)",
+                  background: "rgba(248, 250, 253, 0.96)",
+                  boxSizing: "border-box",
+                }}
+              >
+                <option value="">Auto</option>
+                {audioDevices.map((dev) => (
+                  <option key={dev} value={dev}>
+                    {dev}
+                  </option>
+                ))}
+              </select>
             </label>
           ) : null
         }

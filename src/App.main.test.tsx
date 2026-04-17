@@ -336,7 +336,7 @@ describe("App main window", () => {
     expect(screen.queryByText("Custom tag")).not.toBeInTheDocument();
     expect(document.querySelector(".session-edit-grid")).toBeInTheDocument();
     expect(document.querySelector(".session-edit-grid .ant-select")).toBeInTheDocument();
-    expect(document.querySelector(".session-edit-grid textarea.ant-input")).toBeInTheDocument();
+    expect(document.querySelector(".session-edit-grid input.ant-input")).toBeInTheDocument();
   });
 
   it("opens summary prompt dialog with system default and saves custom prompt on Ok", async () => {
@@ -924,7 +924,7 @@ describe("App main window", () => {
     const matchedCustomTagInput = screen
       .getAllByDisplayValue("project-alpha")
       .find((element) => element.closest(".session-edit-grid"));
-    expect(matchedCustomTagInput?.closest("label")).toHaveClass("match-hit");
+    expect(matchedCustomTagInput?.closest(".ant-form-item")).toHaveClass("match-hit");
   });
 
   it("searches sessions by transcript/summary text via global session search", async () => {

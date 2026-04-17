@@ -1,4 +1,4 @@
-import { Flex, Input, Select } from "antd";
+import { Flex, Input } from "antd";
 import { fixedSources } from "../../types";
 
 type RecordingControlsProps = {
@@ -9,6 +9,17 @@ type RecordingControlsProps = {
   onTopicChange: (value: string) => void;
 };
 
+const nativeSelectStyle: React.CSSProperties = {
+  height: 24,
+  fontSize: 12,
+  padding: "0 6px",
+  borderRadius: 6,
+  border: "1px solid rgba(140, 151, 165, 0.28)",
+  background: "rgba(248, 250, 253, 0.96)",
+  width: "100%",
+  boxSizing: "border-box",
+};
+
 export function RecordingControls({
   source,
   topic,
@@ -16,21 +27,24 @@ export function RecordingControls({
   onSourceChange,
   onTopicChange,
 }: RecordingControlsProps) {
-  const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
-
   return (
     <Flex gap={8}>
       <Flex vertical gap={2} style={{ flex: "0 0 auto", minWidth: 100 }}>
         <label htmlFor="tray-source" style={{ fontSize: 12 }}>Source</label>
-        <Select
+        <select
           id="tray-source"
           aria-label="Source"
-          size="small"
           value={source}
-          options={fixedSourceOptions}
-          onChange={onSourceChange}
+          onChange={(e) => onSourceChange(e.target.value)}
           disabled={isRecording}
-        />
+          style={nativeSelectStyle}
+        >
+          {fixedSources.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
       </Flex>
       <Flex vertical gap={2} style={{ flex: 1 }}>
         <label htmlFor="tray-topic" style={{ fontSize: 12 }}>Topic (optional)</label>

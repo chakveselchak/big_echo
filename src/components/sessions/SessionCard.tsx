@@ -1,5 +1,5 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Button, Input, Select } from "antd";
+import { Button, Col, ConfigProvider, Form, Input, Row, Select } from "antd";
 import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
@@ -82,6 +82,7 @@ export function SessionCard({
             {item.has_transcript_text && (
               <Button
                 htmlType="button"
+                style={{ height: 23 }}
                 className={`session-label session-label-action session-label-text${transcriptMatch ? " match-hit" : ""}`}
                 onClick={() => onOpenArtifact(item.session_id, "transcript")}
               >
@@ -91,6 +92,7 @@ export function SessionCard({
             {item.has_summary_text && (
               <Button
                 htmlType="button"
+                style={{ height: 23 }}
                 className={`session-label session-label-action session-label-summary${summaryMatch ? " match-hit" : ""}`}
                 onClick={() => onOpenArtifact(item.session_id, "summary")}
               >
@@ -149,47 +151,90 @@ export function SessionCard({
           </div>
         </div>
       </div>
-      <div className="session-edit-grid">
-        <label className={`field${sourceMatch ? " match-hit" : ""}`}>
-          Source
-          <Select
-            aria-label="Source"
-            value={detail.source}
-            options={fixedSourceOptions}
-            onChange={(value) => onDetailChange({ ...detail, source: value })}
-          />
-        </label>
-        <label className={`field${topicMatch ? " match-hit" : ""}`}>
-          Topic
-          <Input
-            aria-label="Topic"
-            value={detail.topic}
-            onChange={(e) => onDetailChange({ ...detail, topic: e.target.value })}
-          />
-        </label>
-        <label className={`field${tagsMatch ? " match-hit" : ""}`}>
-          Tags
-          <Select
-            aria-label="Tags"
-            mode="tags"
-            value={detail.tags}
-            style={{ height: 38 }}
-            options={knownTagOptions}
-            tokenSeparators={[","]}
-            onChange={(value) => onDetailChange({ ...detail, tags: value })}
-          />
-        </label>
-        <label className={`field${notesMatch ? " match-hit" : ""}`}>
-          Notes
-          <Input.TextArea
-            aria-label="Notes"
-            value={detail.notes}
-            style={{ height: 38 }}
-            autoSize={{ minRows: 1, maxRows: 2 }}
-            onChange={(e) => onDetailChange({ ...detail, notes: e.target.value })}
-          />
-        </label>
-      </div>
+      <ConfigProvider
+        theme={{
+          token: {
+            controlHeight: 30,
+            fontSize: 13,
+            borderRadius: 6,
+          },
+          components: {
+            Select: {
+              multipleItemHeight: 20,
+            },
+            Form: {
+              itemMarginBottom: 0,
+              labelColonMarginInlineEnd: 0,
+              verticalLabelPadding: "0 0 4px",
+            },
+          },
+        }}
+      >
+        <Form component="div" layout="vertical" colon={false}>
+          <Row gutter={[12, 12]} align="top" className="session-edit-grid">
+            <Col span={6}>
+              <Form.Item
+                label="Source"
+                htmlFor="session-source"
+                className={sourceMatch ? "match-hit" : undefined}
+              >
+                <Select
+                  id="session-source"
+                  aria-label="Source"
+                  value={detail.source}
+                  options={fixedSourceOptions}
+                  onChange={(value) => onDetailChange({ ...detail, source: value })}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label="Topic"
+                htmlFor="session-topic"
+                className={topicMatch ? "match-hit" : undefined}
+              >
+                <Input
+                  id="session-topic"
+                  aria-label="Topic"
+                  value={detail.topic}
+                  onChange={(e) => onDetailChange({ ...detail, topic: e.target.value })}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label="Tags"
+                htmlFor="session-tags"
+                className={tagsMatch ? "match-hit" : undefined}
+              >
+                <Select
+                  id="session-tags"
+                  aria-label="Tags"
+                  mode="tags"
+                  value={detail.tags}
+                  options={knownTagOptions}
+                  tokenSeparators={[","]}
+                  onChange={(value) => onDetailChange({ ...detail, tags: value })}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item
+                label="Notes"
+                htmlFor="session-notes"
+                className={notesMatch ? "match-hit" : undefined}
+              >
+                <Input
+                  id="session-notes"
+                  aria-label="Notes"
+                  value={detail.notes}
+                  onChange={(e) => onDetailChange({ ...detail, notes: e.target.value })}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </ConfigProvider>
       <div className="session-card-footer">
         <div className="session-card-footer-actions">
           <div className="button-row">

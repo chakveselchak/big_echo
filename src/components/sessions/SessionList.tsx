@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Menu } from "antd";
+import { ConfigProvider, Menu } from "antd";
 import type { MenuProps } from "antd";
 import type {
   DeleteTarget,
@@ -338,11 +338,27 @@ export function SessionList({
           className="session-context-menu-popup"
           style={{ position: "fixed", left: sessionContextMenu.x, top: sessionContextMenu.y, zIndex: 1050 }}
         >
-          <Menu
-            aria-label="Действия сессии"
-            items={sessionContextMenuItems}
-            onClick={({ key }) => runSessionContextMenuItem(String(key))}
-          />
+          <ConfigProvider
+            theme={{
+              components: {
+                Menu: {
+                  itemHeight: 28,
+                  itemPaddingInline: 12,
+                  itemMarginBlock: 0,
+                  itemMarginInline: 0,
+                  itemBorderRadius: 4,
+                  fontSize: 13,
+                },
+              },
+            }}
+          >
+            <Menu
+              aria-label="Действия сессии"
+              items={sessionContextMenuItems}
+              onClick={({ key }) => runSessionContextMenuItem(String(key))}
+              style={{ minWidth: 200, padding: 4, borderRadius: 6 }}
+            />
+          </ConfigProvider>
         </div>
       )}
 

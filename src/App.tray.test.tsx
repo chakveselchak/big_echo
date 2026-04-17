@@ -114,14 +114,13 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { App } from "./App";
 
 function getTraySourceSelect() {
-  const combobox = screen.getByRole("combobox", { name: "Source" });
-  const select = combobox.closest(".ant-select");
+  const select = screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement;
   expect(select).not.toBeNull();
-  return { combobox, select: select as HTMLElement };
+  return { combobox: select, select };
 }
 
 function expectTraySourceValue(value: string) {
-  expect(getTraySourceSelect().select.querySelector(".ant-select-selection-item")).toHaveTextContent(value);
+  expect(getTraySourceSelect().select.value).toBe(value);
 }
 
 describe("Tray window", () => {
@@ -469,11 +468,14 @@ describe("Tray window", () => {
       expect(invokeMock).toHaveBeenCalledWith("list_audio_input_devices");
     });
 
-    expect(screen.getByRole("combobox", { name: "Mic device" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "System device" })).toBeInTheDocument();
+    const micSelect = screen.getByRole("combobox", { name: "Mic device" }) as HTMLSelectElement;
+    const systemSelect = screen.getByRole("combobox", { name: "System device" }) as HTMLSelectElement;
+    expect(micSelect).toBeInTheDocument();
+    expect(systemSelect).toBeInTheDocument();
 
-    await selectAntdOption("Mic device", "Built-in Microphone");
-    await selectAntdOption("System device", "BlackHole 2ch");
+    const user = userEvent.setup();
+    await user.selectOptions(micSelect, "Built-in Microphone");
+    await user.selectOptions(systemSelect, "BlackHole 2ch");
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
@@ -497,7 +499,7 @@ describe("Tray window", () => {
 
     const micLabel = screen.getByText("Mic");
     const micMute = screen.getByRole("button", { name: "Mute microphone" });
-    const micSelect = getAntdSelect("Mic device").select;
+    const micSelect = screen.getByRole("combobox", { name: "Mic device" });
 
     // All mic controls should share a common ancestor row
     const micRowAncestor = micLabel.parentElement;
