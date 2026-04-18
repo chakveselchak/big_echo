@@ -1,5 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button, Col, ConfigProvider, Form, Input, Row, Select } from "antd";
+import { DeleteOutlined } from "@ant-design/icons";
 import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
@@ -103,18 +104,14 @@ export function SessionCard({
           <div className="session-card-icon-actions">
             <Button
               htmlType="button"
+              type="text"
               className="icon-button delete-session-button"
               aria-label="Удалить сессию"
               title="Удалить сессию"
+              danger
+              icon={<DeleteOutlined aria-hidden="true" />}
               onClick={() => onDelete(item.session_id, item.status === "recording")}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 7h2v8h-2v-8zm4 0h2v8h-2v-8zM7 10h2v8H7v-8z"
-                  fill="currentColor"
-                />
-              </svg>
-            </Button>
+            />
             <Button
               htmlType="button"
               className="icon-button session-folder-link"

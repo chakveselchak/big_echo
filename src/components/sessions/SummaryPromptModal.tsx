@@ -22,7 +22,7 @@ export function SummaryPromptModal({ dialog, onCancel, onConfirm, onChange }: Su
       onCancel={onCancel}
       footer={[
         <Button key="cancel" onClick={onCancel} disabled={dialog?.saving}>Отмена</Button>,
-        <Button key="ok" onClick={onConfirm} loading={dialog?.saving}>Ок</Button>,
+        <Button key="ok" type="primary" onClick={onConfirm} loading={dialog?.saving}>Ок</Button>,
       ]}
     >
       {dialog && (

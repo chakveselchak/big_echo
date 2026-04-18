@@ -256,12 +256,14 @@ fn toggle_tray_window_visibility(
         let is_focused = window.is_focused().map_err(|e| e.to_string())?;
         if should_hide_tray_popover_on_toggle_request(is_visible, is_focused) {
             window.hide().map_err(|e| e.to_string())?;
+            mark_tray_hidden_now();
         } else {
             if let Some(anchor) = anchor {
                 let _ = position_tray_popover(&window, anchor);
             }
             window.show().map_err(|e| e.to_string())?;
             window.set_focus().map_err(|e| e.to_string())?;
+            mark_tray_visible();
         }
         return Ok(());
     }
@@ -271,6 +273,7 @@ fn toggle_tray_window_visibility(
             let _ = position_tray_popover(&window, anchor);
         }
     }
+    mark_tray_visible();
     Ok(())
 }
 
@@ -278,9 +281,79 @@ fn hide_tray_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("tray") {
         if window.is_visible().map_err(|e| e.to_string())? {
             window.hide().map_err(|e| e.to_string())?;
+            mark_tray_hidden_now();
         }
     }
     Ok(())
+}
+
+// ==== Tray idle-release ===================================================
+// The tray popover is prewarmed at startup so the first click is instant.
+// A live WebView on macOS costs ~200–400 MB, which adds up if the user
+// never (or rarely) opens the tray. To keep the fast first-click without
+// bloating RAM over long sessions we:
+//   1. Track the moment the tray was last hidden.
+//   2. A background ticker runs every TRAY_IDLE_CHECK_INTERVAL; if the tray
+//      has been continuously hidden for TRAY_IDLE_CLOSE_AFTER, we `.close()`
+//      the window so the WebView process can release its memory.
+//   3. Next click goes through the normal lazy `open_tray_window_internal`
+//      path, which rebuilds the window on demand.
+// During active toggling the window stays warm (zero latency); only
+// long-idle sessions pay the rebuild cost — exactly once, after the
+// release.
+static TRAY_HIDDEN_SINCE: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
+const TRAY_IDLE_CLOSE_AFTER: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+const TRAY_IDLE_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn mark_tray_hidden_now() {
+    if let Ok(mut guard) = TRAY_HIDDEN_SINCE.lock() {
+        *guard = Some(std::time::Instant::now());
+    }
+}
+
+fn mark_tray_visible() {
+    if let Ok(mut guard) = TRAY_HIDDEN_SINCE.lock() {
+        *guard = None;
+    }
+}
+
+fn tray_has_been_hidden_longer_than(min_age: std::time::Duration) -> bool {
+    let guard = match TRAY_HIDDEN_SINCE.lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    match *guard {
+        None => false,
+        Some(t) => t.elapsed() >= min_age,
+    }
+}
+
+fn spawn_tray_idle_release_worker(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(TRAY_IDLE_CHECK_INTERVAL).await;
+            if !tray_has_been_hidden_longer_than(TRAY_IDLE_CLOSE_AFTER) {
+                continue;
+            }
+            let Some(window) = app.get_webview_window("tray") else {
+                // Window already gone; reset marker so we don't spam close().
+                mark_tray_visible();
+                continue;
+            };
+            // Double-check: the window should actually be hidden before we
+            // destroy it. If the user just reopened it we skip the release.
+            let is_visible = window.is_visible().unwrap_or(true);
+            if is_visible {
+                mark_tray_visible();
+                continue;
+            }
+            if window.close().is_ok() {
+                // Next open will rebuild via open_tray_window_internal.
+                mark_tray_visible();
+            }
+        }
+    });
 }
 
 fn register_tray_window_events(window: &tauri::WebviewWindow) {
@@ -288,7 +361,9 @@ fn register_tray_window_events(window: &tauri::WebviewWindow) {
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(focused) = event {
             if should_hide_tray_popover_on_focus_lost(*focused) {
-                let _ = window_for_event.hide();
+                if window_for_event.hide().is_ok() {
+                    mark_tray_hidden_now();
+                }
             }
         }
     });
@@ -522,6 +597,7 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
         let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
+        mark_tray_visible();
         return Ok(());
     }
 
@@ -547,6 +623,7 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
     let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    mark_tray_visible();
     Ok(())
 }
 
@@ -575,6 +652,9 @@ fn prewarm_tray_window(app: &AppHandle) -> Result<(), String> {
     let window = builder.build().map_err(|e| e.to_string())?;
     register_tray_window_events(&window);
     let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
+    // Start the idle countdown immediately after prewarm. If the user never
+    // opens the tray, its WebView gets released after TRAY_IDLE_CLOSE_AFTER.
+    mark_tray_hidden_now();
     Ok(())
 }
 
@@ -2015,6 +2095,7 @@ fn main() {
             },
         );
         prewarm_tray_window(&app.handle())?;
+        spawn_tray_idle_release_worker(app.handle().clone());
         #[cfg(target_os = "macos")]
         {
             let app_menu = build_macos_app_menu(app)?;

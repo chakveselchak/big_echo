@@ -1,6 +1,7 @@
 import { forwardRef } from "react";
 import { Button, Input } from "antd";
 import type { InputRef } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
 
 type SessionFiltersProps = {
   searchQuery: string;
@@ -21,6 +22,8 @@ export const SessionFilters = forwardRef<InputRef, SessionFiltersProps>(
           <Button
             htmlType="button"
             className="secondary-button session-import-button"
+            icon={<DownloadOutlined aria-hidden="true" />}
+            aria-label="Загрузить аудио"
             onClick={onImportAudio}
           >
             Загрузить аудио

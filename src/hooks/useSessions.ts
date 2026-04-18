@@ -389,6 +389,53 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     };
   }, []);
 
+  // Prune all per-session Record state whenever the sessions list changes.
+  // Without this, keys for deleted or filtered-out sessions stay in
+  // sessionDetails/savedSessionDetails/pipelineStateBySession/etc. forever
+  // and grow with every delete → reload cycle. At 1000 sessions each Record
+  // can easily reach ~100 KB; this effect keeps them bounded to the live set.
+  useEffect(() => {
+    const validIds = new Set(sessions.map((s) => s.session_id));
+
+    const prune = <T,>(record: Record<string, T>): Record<string, T> | null => {
+      let staleKeys: string[] | null = null;
+      for (const id of Object.keys(record)) {
+        if (!validIds.has(id)) {
+          (staleKeys ??= []).push(id);
+        }
+      }
+      if (!staleKeys) return null;
+      const next: Record<string, T> = {};
+      for (const [id, val] of Object.entries(record)) {
+        if (validIds.has(id)) next[id] = val;
+      }
+      return next;
+    };
+
+    // For each state slice: if no stale keys, return the same reference —
+    // React skips the re-render (Object.is(prev, next) === true).
+    setSessionDetails((prev) => prune(prev) ?? prev);
+    setSavedSessionDetails((prev) => prune(prev) ?? prev);
+    setSessionArtifactSearchHits((prev) => prune(prev) ?? prev);
+    setTextPendingBySession((prev) => prune(prev) ?? prev);
+    setSummaryPendingBySession((prev) => prune(prev) ?? prev);
+    setPipelineStateBySession((prev) => prune(prev) ?? prev);
+
+    // Refs don't trigger re-renders, but still hold memory. Clear any
+    // lingering autosave timers for deleted sessions.
+    for (const id of Object.keys(autosaveTimersRef.current)) {
+      if (!validIds.has(id)) {
+        clearTimeout(autosaveTimersRef.current[id]);
+        delete autosaveTimersRef.current[id];
+      }
+    }
+    for (const id of Object.keys(pendingAutosaveSignatureRef.current)) {
+      if (!validIds.has(id)) {
+        delete pendingAutosaveSignatureRef.current[id];
+      }
+    }
+  }, [sessions]);
+
   const filteredSessions = useMemo(() => {
     const query = sessionSearchQuery.trim().toLowerCase();
     return sessions.filter((item) => {
