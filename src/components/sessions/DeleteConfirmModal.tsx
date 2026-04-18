@@ -1,29 +1,52 @@
 import { useEffect, useRef } from "react";
 import { Button, Modal } from "antd";
-import type { DeleteTarget } from "../../types";
 
+/**
+ * Generic confirm-deletion modal.
+ *
+ * Reused by both "удалить сессию" and "удалить аудио" flows. The caller
+ * controls everything via props — there is no hardcoded copy.
+ *
+ * Behavior:
+ *   - Focus is moved into the Cancel button on open (non-destructive default).
+ *   - Tab is trapped between Cancel and Delete so keyboard users can't
+ *     accidentally focus back into the underlying session card.
+ *   - While `pending` is true both buttons show loading/disabled state.
+ */
 type DeleteConfirmModalProps = {
-  deleteTarget: DeleteTarget | null;
-  deletePendingSessionId: string | null;
+  open: boolean;
+  message: string;
+  pending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  title?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
 };
 
-export function DeleteConfirmModal({ deleteTarget, deletePendingSessionId, onCancel, onConfirm }: DeleteConfirmModalProps) {
+export function DeleteConfirmModal({
+  open,
+  message,
+  pending,
+  onCancel,
+  onConfirm,
+  title = "Подтверждение удаления",
+  confirmLabel = "Удалить",
+  cancelLabel = "Отмена",
+}: DeleteConfirmModalProps) {
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
-  const isOpen = Boolean(deleteTarget);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!open) return;
     const timer = setTimeout(() => {
       cancelButtonRef.current?.focus();
     }, 0);
     return () => clearTimeout(timer);
-  }, [isOpen]);
+  }, [open]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
       e.preventDefault();
@@ -35,28 +58,24 @@ export function DeleteConfirmModal({ deleteTarget, deletePendingSessionId, onCan
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [isOpen]);
+  }, [open]);
 
   return (
     <Modal
-      open={isOpen}
-      title="Подтверждение удаления"
+      open={open}
+      title={title}
       closable={false}
       onCancel={onCancel}
       footer={[
-        <Button key="cancel" ref={cancelButtonRef} autoFocus onClick={onCancel} disabled={deletePendingSessionId !== null}>
-          Отмена
+        <Button key="cancel" ref={cancelButtonRef} autoFocus onClick={onCancel} disabled={pending}>
+          {cancelLabel}
         </Button>,
-        <Button key="delete" ref={deleteButtonRef} danger onClick={onConfirm} loading={deletePendingSessionId !== null}>
-          Удалить
+        <Button key="delete" ref={deleteButtonRef} danger onClick={onConfirm} loading={pending}>
+          {confirmLabel}
         </Button>,
       ]}
     >
-      <p>
-        {deleteTarget?.force
-          ? "Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?"
-          : "Удалить сессию и все связанные файлы?"}
-      </p>
+      <p>{message}</p>
     </Modal>
   );
 }

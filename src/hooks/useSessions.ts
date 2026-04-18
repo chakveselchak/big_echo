@@ -80,6 +80,8 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const [pipelineStateBySession, setPipelineStateBySession] = useState<Record<string, PipelineUiState>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deletePendingSessionId, setDeletePendingSessionId] = useState<string | null>(null);
+  const [audioDeleteTargetSessionId, setAudioDeleteTargetSessionId] = useState<string | null>(null);
+  const [audioDeletePendingSessionId, setAudioDeletePendingSessionId] = useState<string | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<SessionArtifactPreview | null>(null);
   const autosaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
@@ -217,6 +219,35 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     }
   }
 
+  /**
+   * Immediate flush of the in-memory edit for `sessionId` to disk. Intended
+   * to be called on field blur (Source/Topic/Tags/Notes) so that persistence
+   * is triggered by the user finishing an edit rather than by mid-typing
+   * debounces. No-op if the current meta matches the last saved copy.
+   */
+  async function flushSessionDetails(sessionId: string) {
+    const current = sessionDetails[sessionId];
+    const saved = savedSessionDetails[sessionId];
+    if (!current) return;
+    // Cancel any pending debounced save regardless — we either save now or
+    // there's nothing to save.
+    const existing = autosaveTimersRef.current[sessionId];
+    if (existing) {
+      clearTimeout(existing);
+      delete autosaveTimersRef.current[sessionId];
+    }
+    delete pendingAutosaveSignatureRef.current[sessionId];
+    if (saved && sameSessionMeta(current, saved)) {
+      return;
+    }
+    try {
+      await persistSessionDetails(sessionId, current);
+      setStatus("session_details_saved");
+    } catch (err) {
+      setStatus(`error: ${String(err)}`);
+    }
+  }
+
   async function importAudioSession() {
     try {
       const imported = await tauriInvoke<StartResponse | null>("import_audio_session");
@@ -317,6 +348,28 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     }
   }
 
+  function requestDeleteAudio(sessionId: string) {
+    setAudioDeleteTargetSessionId(sessionId);
+  }
+
+  async function confirmDeleteAudio() {
+    if (!audioDeleteTargetSessionId) return;
+    const sessionId = audioDeleteTargetSessionId;
+    setAudioDeletePendingSessionId(sessionId);
+    try {
+      await tauriInvoke("delete_session_audio", { sessionId });
+      // Refresh the session list so the backend-mutated meta.json propagates
+      // to the UI (audio_file becomes empty → AudioPlayer hides itself).
+      await loadSessions();
+      setAudioDeleteTargetSessionId(null);
+      setStatus("audio_deleted");
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
+    } finally {
+      setAudioDeletePendingSessionId(null);
+    }
+  }
+
   useEffect(() => {
     const query = sessionSearchQuery.trim();
     if (!query || sessions.length === 0) {
@@ -360,6 +413,10 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       if (existing) clearTimeout(existing);
       pendingAutosaveSignatureRef.current[sessionId] = signature;
 
+      // Safety fallback only — the primary trigger for persistence is now
+      // `flushSessionDetails(sessionId)` called on field blur (see
+      // SessionCard). This long debounce just protects from data loss if the
+      // user leaves the app without blurring.
       autosaveTimersRef.current[sessionId] = setTimeout(async () => {
         try {
           await persistSessionDetails(sessionId, current);
@@ -370,7 +427,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
           delete autosaveTimersRef.current[sessionId];
           delete pendingAutosaveSignatureRef.current[sessionId];
         }
-      }, 700);
+      }, 10_000);
     }
 
     for (const sessionId of Object.keys(autosaveTimersRef.current)) {
@@ -388,6 +445,42 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       }
     };
   }, []);
+
+  // Safety: if the user closes the app / tab with unsaved edits, flush every
+  // pending change synchronously. Uses `pagehide` + `visibilitychange` which
+  // are more reliable than `beforeunload` inside the Tauri WebView.
+  useEffect(() => {
+    const flushAll = () => {
+      for (const sessionId of Object.keys(sessionDetails)) {
+        const current = sessionDetails[sessionId];
+        const saved = savedSessionDetails[sessionId];
+        if (!current) continue;
+        if (saved && sameSessionMeta(current, saved)) continue;
+        // Fire-and-forget: browser doesn't await pagehide handlers, but the
+        // underlying Tauri IPC call is queued and usually completes before
+        // the process exits.
+        void tauriInvoke<string>("update_session_details", {
+          payload: {
+            session_id: sessionId,
+            source: current.source,
+            notes: current.notes,
+            custom_summary_prompt: current.custom_summary_prompt ?? "",
+            topic: current.topic,
+            tags: current.tags,
+          },
+        }).catch(() => undefined);
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushAll();
+    };
+    window.addEventListener("pagehide", flushAll);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flushAll);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [sessionDetails, savedSessionDetails]);
 
   // Prune all per-session Record state whenever the sessions list changes.
   // Without this, keys for deleted or filtered-out sessions stay in
@@ -465,11 +558,15 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
 
   return {
     artifactPreview,
+    audioDeletePendingSessionId,
+    audioDeleteTargetSessionId,
     closeArtifactPreview: () => setArtifactPreview(null),
+    confirmDeleteAudio,
     confirmDeleteSession,
     deletePendingSessionId,
     deleteTarget,
     filteredSessions,
+    flushSessionDetails,
     getSummary,
     getText,
     importAudioSession,
@@ -478,12 +575,14 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     openSessionFolder,
     openSessionArtifact,
     pipelineStateBySession,
+    requestDeleteAudio,
     requestDeleteSession,
     saveSessionDetails,
     sessionArtifactSearchHits,
     sessionDetails,
     sessionSearchQuery,
     sessions,
+    setAudioDeleteTargetSessionId,
     setDeleteTarget,
     setSessionDetails,
     setSessionSearchQuery,

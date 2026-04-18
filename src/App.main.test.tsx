@@ -280,6 +280,10 @@ describe("App main window", () => {
     await user.clear(editableTopic);
     await user.type(editableTopic, "Edited topic");
 
+    // Persistence now happens on blur (not on every keystroke). Tab away from
+    // the field to trigger the save.
+    await user.tab();
+
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
         payload: {

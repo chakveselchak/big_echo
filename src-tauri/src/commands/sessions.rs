@@ -545,6 +545,50 @@ pub fn delete_session(
     Ok("deleted".to_string())
 }
 
+/// Delete just the audio file for a session, without removing the session
+/// itself. Used by the "Удалить аудио" button in the session card. After
+/// success the session remains in the list but its artifacts.audio_file is
+/// cleared, so the frontend will hide the audio player.
+#[tauri::command]
+pub fn delete_session_audio(
+    dirs: tauri::State<AppDirs>,
+    state: tauri::State<AppState>,
+    session_id: String,
+) -> Result<(), String> {
+    // Refuse to wipe the audio file that is being written right now.
+    let active_session_id = state
+        .active_session
+        .lock()
+        .map_err(|_| "state lock poisoned".to_string())?
+        .as_ref()
+        .map(|meta| meta.session_id.clone());
+    if active_session_id.as_deref() == Some(session_id.as_str()) {
+        return Err("Cannot delete audio of active recording session".to_string());
+    }
+
+    let session_dir = get_session_dir(&dirs.app_data_dir, &session_id)?
+        .ok_or_else(|| "Session not found".to_string())?;
+    let meta_path = get_meta_path(&dirs.app_data_dir, &session_id)?
+        .ok_or_else(|| "Session metadata not found".to_string())?;
+    let mut meta = load_meta(&meta_path)?;
+
+    let audio_file_name = meta.artifacts.audio_file.trim().to_string();
+    if !audio_file_name.is_empty() {
+        let audio_path = session_dir.join(&audio_file_name);
+        if audio_path.exists() {
+            fs::remove_file(&audio_path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Clear audio_file reference in meta.json so list_sessions surfaces the
+    // "no audio" state (backend returns empty audio_file → frontend hides
+    // the player).
+    meta.artifacts.audio_file = String::new();
+    save_meta(&meta_path, &meta)?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_sessions(dirs: tauri::State<AppDirs>) -> Result<Vec<SessionListItem>, String> {
     repo_list_sessions(&dirs.app_data_dir)

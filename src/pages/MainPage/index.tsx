@@ -25,11 +25,15 @@ export function MainPage() {
 
   const {
     artifactPreview,
+    audioDeletePendingSessionId,
+    audioDeleteTargetSessionId,
     closeArtifactPreview,
+    confirmDeleteAudio,
     confirmDeleteSession,
     deletePendingSessionId,
     deleteTarget,
     filteredSessions,
+    flushSessionDetails,
     getSummary,
     getText,
     importAudioSession,
@@ -38,12 +42,14 @@ export function MainPage() {
     openSessionFolder,
     openSessionArtifact,
     pipelineStateBySession,
+    requestDeleteAudio,
     requestDeleteSession,
     saveSessionDetails,
     sessionArtifactSearchHits,
     sessionDetails,
     sessionSearchQuery,
     sessions,
+    setAudioDeleteTargetSessionId,
     setDeleteTarget,
     setSessionDetails,
     setSessionSearchQuery,
@@ -151,21 +157,27 @@ export function MainPage() {
             pipelineStateBySession={pipelineStateBySession}
             deleteTarget={deleteTarget}
             deletePendingSessionId={deletePendingSessionId}
+            audioDeleteTargetSessionId={audioDeleteTargetSessionId}
+            audioDeletePendingSessionId={audioDeletePendingSessionId}
             artifactPreview={artifactPreview}
             knownTags={knownTags}
             settings={null}
             setDeleteTarget={setDeleteTarget}
+            setAudioDeleteTargetSessionId={setAudioDeleteTargetSessionId}
             confirmDeleteSession={async () => {
               await confirmDeleteSession();
               sessionSearchInputRef.current?.input?.focus();
             }}
+            confirmDeleteAudio={confirmDeleteAudio}
             closeArtifactPreview={closeArtifactPreview}
             openSessionFolder={openSessionFolder}
             openSessionArtifact={openSessionArtifact}
             getText={getText}
             getSummary={getSummary}
             saveSessionDetails={saveSessionDetails}
+            flushSessionDetails={flushSessionDetails}
             requestDeleteSession={requestDeleteSession}
+            requestDeleteAudio={requestDeleteAudio}
             setStatus={setStatus}
           />
         </section>

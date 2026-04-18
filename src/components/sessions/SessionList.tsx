@@ -36,18 +36,24 @@ type SessionListProps = {
   pipelineStateBySession: Record<string, PipelineUiState>;
   deleteTarget: DeleteTarget | null;
   deletePendingSessionId: string | null;
+  audioDeleteTargetSessionId: string | null;
+  audioDeletePendingSessionId: string | null;
   artifactPreview: SessionArtifactPreview | null;
   knownTags: string[];
   settings: PublicSettings | null;
   setDeleteTarget: (target: DeleteTarget | null) => void;
+  setAudioDeleteTargetSessionId: (sessionId: string | null) => void;
   confirmDeleteSession: () => Promise<void>;
+  confirmDeleteAudio: () => Promise<void>;
   closeArtifactPreview: () => void;
   openSessionFolder: (dir: string) => void;
   openSessionArtifact: (sessionId: string, kind: "transcript" | "summary") => void;
   getText: (sessionId: string) => void;
   getSummary: (sessionId: string) => void;
   saveSessionDetails: (sessionId: string, detail: SessionMetaView) => Promise<boolean>;
+  flushSessionDetails: (sessionId: string) => void;
   requestDeleteSession: (sessionId: string, isRecording: boolean) => void;
+  requestDeleteAudio: (sessionId: string) => void;
   setStatus: (status: string) => void;
 };
 
@@ -63,18 +69,24 @@ export function SessionList({
   pipelineStateBySession,
   deleteTarget,
   deletePendingSessionId,
+  audioDeleteTargetSessionId,
+  audioDeletePendingSessionId,
   artifactPreview,
   knownTags,
   settings,
   setDeleteTarget,
+  setAudioDeleteTargetSessionId,
   confirmDeleteSession,
+  confirmDeleteAudio,
   closeArtifactPreview,
   openSessionFolder,
   openSessionArtifact,
   getText,
   getSummary,
   saveSessionDetails,
+  flushSessionDetails,
   requestDeleteSession,
+  requestDeleteAudio,
   setStatus,
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
@@ -320,6 +332,8 @@ export function SessionList({
               onGetSummary={getSummary}
               onOpenSummaryPrompt={(d) => void openSummaryPromptDialog(d)}
               onDelete={requestDeleteSession}
+              onDeleteAudio={requestDeleteAudio}
+              onFieldBlur={flushSessionDetails}
               onOpenFolder={openSessionFolder}
               setStatus={setStatus}
             />
@@ -363,10 +377,24 @@ export function SessionList({
       )}
 
       <DeleteConfirmModal
-        deleteTarget={deleteTarget}
-        deletePendingSessionId={deletePendingSessionId}
+        open={Boolean(deleteTarget)}
+        pending={deletePendingSessionId !== null}
+        message={
+          deleteTarget?.force
+            ? "Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?"
+            : "Удалить сессию и все связанные файлы?"
+        }
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void confirmDeleteSession()}
+      />
+
+      <DeleteConfirmModal
+        open={Boolean(audioDeleteTargetSessionId)}
+        pending={audioDeletePendingSessionId !== null}
+        title="Удаление аудио"
+        message="Удалить аудио-файл? Сессия останется, но запись будет недоступна для прослушивания."
+        onCancel={() => setAudioDeleteTargetSessionId(null)}
+        onConfirm={() => void confirmDeleteAudio()}
       />
 
       <ArtifactModal

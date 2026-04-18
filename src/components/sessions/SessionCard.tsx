@@ -1,10 +1,10 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button, Col, ConfigProvider, Form, Input, Row, Select } from "antd";
-import { DeleteOutlined } from "@ant-design/icons";
+import { ClearOutlined, DeleteOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
-import { extractStartTimeHm } from "../../lib/appUtils";
+import { extractStartTimeHm, resolveSessionAudioPath } from "../../lib/appUtils";
 import { AudioPlayer } from "./AudioPlayer";
 
 const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
@@ -26,6 +26,8 @@ type SessionCardProps = {
   onGetSummary: (sessionId: string) => void;
   onOpenSummaryPrompt: (detail: SessionMetaView) => void;
   onDelete: (sessionId: string, isRecording: boolean) => void;
+  onDeleteAudio: (sessionId: string) => void;
+  onFieldBlur: (sessionId: string) => void;
   onOpenFolder: (sessionDir: string) => void;
   setStatus: (status: string) => void;
 };
@@ -47,9 +49,13 @@ export function SessionCard({
   onGetSummary,
   onOpenSummaryPrompt,
   onDelete,
+  onDeleteAudio,
+  onFieldBlur,
   onOpenFolder,
   setStatus,
 }: SessionCardProps) {
+  const hasAudio = resolveSessionAudioPath(item) !== null;
+  const flushOnBlur = () => onFieldBlur(item.session_id);
   const query = searchQuery.trim().toLowerCase();
   const sourceMatch = query !== "" && detail.source.toLowerCase().includes(query);
   const notesMatch = query !== "" && detail.notes.toLowerCase().includes(query);
@@ -105,6 +111,8 @@ export function SessionCard({
             <Button
               htmlType="button"
               type="text"
+              size="small"
+              shape="circle"
               className="icon-button delete-session-button"
               aria-label="Удалить сессию"
               title="Удалить сессию"
@@ -112,39 +120,30 @@ export function SessionCard({
               icon={<DeleteOutlined aria-hidden="true" />}
               onClick={() => onDelete(item.session_id, item.status === "recording")}
             />
+            {hasAudio && (
+              <Button
+                htmlType="button"
+                type="text"
+                size="small"
+                shape="circle"
+                className="icon-button delete-session-audio-button"
+                aria-label="Удалить аудио"
+                title="Удалить аудио"
+                icon={<ClearOutlined aria-hidden="true" />}
+                onClick={() => onDeleteAudio(item.session_id)}
+              />
+            )}
             <Button
               htmlType="button"
+              type="text"
+              size="small"
+              shape="circle"
               className="icon-button session-folder-link"
               aria-label="Открыть папку сессии"
               title="Открыть папку сессии"
+              icon={<FolderOpenOutlined aria-hidden="true" />}
               onClick={() => onOpenFolder(item.session_dir)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M14 5h5v5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M19 5 11 13"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M18 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </Button>
+            />
           </div>
         </div>
       </div>
@@ -181,6 +180,7 @@ export function SessionCard({
                   value={detail.source}
                   options={fixedSourceOptions}
                   onChange={(value) => onDetailChange({ ...detail, source: value })}
+                  onBlur={flushOnBlur}
                 />
               </Form.Item>
             </Col>
@@ -195,6 +195,7 @@ export function SessionCard({
                   aria-label="Topic"
                   value={detail.topic}
                   onChange={(e) => onDetailChange({ ...detail, topic: e.target.value })}
+                  onBlur={flushOnBlur}
                 />
               </Form.Item>
             </Col>
@@ -212,6 +213,7 @@ export function SessionCard({
                   options={knownTagOptions}
                   tokenSeparators={[","]}
                   onChange={(value) => onDetailChange({ ...detail, tags: value })}
+                  onBlur={flushOnBlur}
                 />
               </Form.Item>
             </Col>
@@ -226,6 +228,7 @@ export function SessionCard({
                   aria-label="Notes"
                   value={detail.notes}
                   onChange={(e) => onDetailChange({ ...detail, notes: e.target.value })}
+                  onBlur={flushOnBlur}
                 />
               </Form.Item>
             </Col>
@@ -312,7 +315,7 @@ export function SessionCard({
           </div>
         </div>
         <div className="session-card-footer-media">
-          <AudioPlayer item={item} setStatus={setStatus} />
+          {hasAudio && <AudioPlayer item={item} setStatus={setStatus} />}
           <span className="session-duration-label">{item.audio_duration_hms}</span>
         </div>
       </div>

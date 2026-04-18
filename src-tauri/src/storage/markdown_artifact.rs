@@ -80,7 +80,15 @@ pub fn refresh_markdown_frontmatter(path: &Path, meta: &SessionMeta) -> Result<(
         return Ok(());
     }
     let body = strip_frontmatter(&current).to_string();
-    write_markdown_artifact(path, meta, &body)
+    let rendered = render_markdown_artifact(meta, &body);
+    // Skip disk write entirely when the rendered output equals what's already
+    // on disk. With big transcripts/summaries this avoids megabytes of write
+    // I/O on every session-metadata autosave even if only unrelated fields
+    // changed (status event, timestamps, etc).
+    if rendered == current {
+        return Ok(());
+    }
+    fs::write(path, rendered).map_err(|e| e.to_string())
 }
 
 fn render_notes(notes: &str) -> String {
