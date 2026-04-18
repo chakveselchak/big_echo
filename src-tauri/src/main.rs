@@ -239,7 +239,8 @@ fn position_tray_popover(
 ) -> Result<(), String> {
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let x = (anchor.x.round() as i32) - (size.width as i32 / 2);
-    let y = (anchor.y.round() as i32) + 12;
+    // 5px gap between the menu bar and the top of the tray popover
+    let y = (anchor.y.round() as i32) + 5;
     window
         .set_position(Position::Physical(PhysicalPosition::new(x, y)))
         .map_err(|e| e.to_string())?;
@@ -526,7 +527,7 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
 
     let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
         .title("BigEcho Recorder")
-        .inner_size(460.0, 244.0)
+        .inner_size(430.0, 200.0)
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -556,7 +557,7 @@ fn prewarm_tray_window(app: &AppHandle) -> Result<(), String> {
 
     let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
         .title("BigEcho Recorder")
-        .inner_size(460.0, 244.0)
+        .inner_size(430.0, 200.0)
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)

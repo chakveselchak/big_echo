@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Slider } from "antd";
+import { PauseCircleOutlined, PlayCircleOutlined } from "@ant-design/icons";
 import type { SessionListItem } from "../../types";
 import { getErrorMessage, parseDurationHms, pauseAudioElement, resolveSessionAudioPath } from "../../lib/appUtils";
 import { tauriConvertFileSrc } from "../../lib/tauri";
@@ -75,18 +76,8 @@ export function AudioPlayer({ item, setStatus }: AudioPlayerProps) {
         aria-label={isPlaying ? "Пауза" : "Воспроизвести аудио"}
         onClick={() => void togglePlayback()}
         disabled={isDisabled}
-      >
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          {isPlaying ? (
-            <>
-              <line x1="6.5" y1="4.5" x2="6.5" y2="15.5" />
-              <line x1="13.5" y1="4.5" x2="13.5" y2="15.5" />
-            </>
-          ) : (
-            <path d="M6 4.5 14.5 10 6 15.5Z" />
-          )}
-        </svg>
-      </Button>
+        icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+      />
       <Slider
         min={0}
         max={100}

@@ -52,6 +52,18 @@ export function TrayPage() {
     initializeAnalytics({ window_label: getCurrentWindowLabel() });
   }, []);
 
+  // Mark html/body with tray-window-* classes so CSS can disable opaque page
+  // background — this is what lets the rounded corners of .tray-shell sit on a
+  // transparent Tauri window instead of a grey square.
+  useEffect(() => {
+    document.documentElement.classList.add("tray-window-html");
+    document.body.classList.add("tray-window-body");
+    return () => {
+      document.documentElement.classList.remove("tray-window-html");
+      document.body.classList.remove("tray-window-body");
+    };
+  }, []);
+
   // Derived permission booleans
   const isMacosSystemAudioUnsupported =
     macosSystemAudioPermissionLoadState === "ready" &&
@@ -80,7 +92,7 @@ export function TrayPage() {
     <Flex
       vertical
       gap={6}
-      style={{ height: "100vh", padding: "6px 10px", boxSizing: "border-box" }}
+      className="tray-shell"
     >
       {/* Status bar */}
       <Flex justify="space-between" align="center">
@@ -116,7 +128,6 @@ export function TrayPage() {
         label="Mic"
         animationLabel="Mic activity"
         muteLabel="microphone"
-        icon="mic"
         level={liveLevels.mic}
         muted={muteState.micMuted}
         disabled={!isRecording}
@@ -163,7 +174,6 @@ export function TrayPage() {
         label="System"
         animationLabel="System activity"
         muteLabel="system audio"
-        icon="system"
         level={liveLevels.system}
         muted={muteState.systemMuted}
         disabled={
@@ -222,7 +232,7 @@ export function TrayPage() {
       />
 
       {/* Rec / Stop */}
-      <Flex gap={8} style={{ marginTop: "auto" }}>
+      <Flex gap={8} style={{ marginTop: "auto" }} /* pushes buttons to bottom in compact tray */>
         <Button
           type="primary"
           onClick={() => void startFromTray()}
@@ -232,12 +242,13 @@ export function TrayPage() {
           <span
             style={{
               display: "inline-block",
-              width: 8,
-              height: 8,
+              width: 10,
+              height: 10,
               borderRadius: "50%",
               background: "currentColor",
               marginRight: 6,
-              opacity: isRecording ? 0.4 : 1,
+              opacity: 1,
+              backgroundColor: "rgb(224, 55, 55)",
             }}
           />
           Rec
