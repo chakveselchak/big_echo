@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { ConfigProvider, Menu, Spin } from "antd";
 import type { MenuProps } from "antd";
@@ -93,6 +93,10 @@ export function SessionList({
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
+  // Cache the default summary prompt fetched from backend so clicking the
+  // "Настроить промпт саммари" button is instant on every repeat click
+  // (the first one pays one IPC round-trip).
+  const cachedDefaultPromptRef = useRef<string | null>(null);
 
   // Stable reference across renders — a new array on every render would
   // force `Select` (with `options` prop deeply diffed) to rebuild its
@@ -129,7 +133,7 @@ export function SessionList({
     );
   }
 
-  async function openSummaryPromptDialog(detail: SessionMetaView) {
+  function openSummaryPromptDialog(detail: SessionMetaView) {
     const persistedPrompt = detail.custom_summary_prompt?.trim() ?? "";
     if (persistedPrompt) {
       setSummaryPromptDialog({
@@ -140,21 +144,38 @@ export function SessionList({
       return;
     }
 
-    let defaultPrompt = settings?.summary_prompt ?? "";
-    if (!settings) {
-      try {
-        const currentSettings = await tauriInvoke<PublicSettings>("get_settings");
-        defaultPrompt = currentSettings.summary_prompt;
-      } catch (err) {
-        setStatus(`error: ${getErrorMessage(err)}`);
-      }
+    // Prefer the prop, then the local cache — both are synchronous and let
+    // the modal appear instantly. Only if we have nothing do we fall back to
+    // an IPC fetch, and even then we open the modal IMMEDIATELY with an
+    // empty value and backfill it asynchronously when the fetch resolves.
+    const syncDefault =
+      settings?.summary_prompt ?? cachedDefaultPromptRef.current ?? null;
+    if (syncDefault !== null) {
+      setSummaryPromptDialog({
+        sessionId: detail.session_id,
+        value: syncDefault,
+        saving: false,
+      });
+      return;
     }
 
-    setSummaryPromptDialog({
-      sessionId: detail.session_id,
-      value: defaultPrompt,
-      saving: false,
-    });
+    // Open with a placeholder first; fetch in background.
+    const sessionId = detail.session_id;
+    setSummaryPromptDialog({ sessionId, value: "", saving: false });
+    void tauriInvoke<PublicSettings>("get_settings")
+      .then((currentSettings) => {
+        cachedDefaultPromptRef.current = currentSettings.summary_prompt;
+        // Only backfill if the user hasn't closed the dialog or started
+        // editing a different session's prompt in the meantime.
+        setSummaryPromptDialog((prev) => {
+          if (!prev || prev.sessionId !== sessionId) return prev;
+          if (prev.value !== "") return prev; // user already typed
+          return { ...prev, value: currentSettings.summary_prompt };
+        });
+      })
+      .catch((err) => {
+        setStatus(`error: ${getErrorMessage(err)}`);
+      });
   }
 
   async function confirmSummaryPrompt() {

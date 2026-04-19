@@ -20,6 +20,8 @@ export function SummaryPromptModal({ dialog, onCancel, onConfirm, onChange }: Su
       title="Промпт саммари"
       closable={false}
       onCancel={onCancel}
+      transitionName=""
+      maskTransitionName=""
       footer={[
         <Button key="cancel" onClick={onCancel} disabled={dialog?.saving}>Отмена</Button>,
         <Button key="ok" type="primary" onClick={onConfirm} loading={dialog?.saving}>Ок</Button>,

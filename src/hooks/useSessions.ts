@@ -94,12 +94,54 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     knownTagsRequestIdRef.current = requestId;
     const tags = await tauriInvoke<string[]>("list_known_tags");
     if (knownTagsRequestIdRef.current !== requestId) return;
-    setKnownTags(normalizeTags(tags ?? []));
+    const normalized = normalizeTags(tags ?? []);
+    // Preserve reference when content is unchanged — downstream
+    // `knownTagOptions` useMemo in SessionList depends on this array.
+    setKnownTags((prev) =>
+      prev.length === normalized.length && prev.every((t, i) => t === normalized[i])
+        ? prev
+        : normalized,
+    );
   }
 
   async function loadSessions() {
     const data = await tauriInvoke<SessionListItem[]>("list_sessions");
-    setSessions(data);
+    // Preserve item identity when fields match the previous snapshot so that
+    // SessionCard (wrapped in React.memo) can skip re-render for unchanged
+    // rows after Refresh. Shallow-compares the relevant fields.
+    setSessions((prev) => {
+      if (prev.length === data.length) {
+        let allSame = true;
+        const merged: SessionListItem[] = [];
+        for (let i = 0; i < data.length; i += 1) {
+          const fresh = data[i];
+          const existing = prev[i];
+          if (
+            existing &&
+            existing.session_id === fresh.session_id &&
+            existing.status === fresh.status &&
+            existing.primary_tag === fresh.primary_tag &&
+            existing.topic === fresh.topic &&
+            existing.display_date_ru === fresh.display_date_ru &&
+            existing.started_at_iso === fresh.started_at_iso &&
+            existing.session_dir === fresh.session_dir &&
+            existing.audio_file === fresh.audio_file &&
+            existing.audio_format === fresh.audio_format &&
+            existing.audio_duration_hms === fresh.audio_duration_hms &&
+            existing.has_transcript_text === fresh.has_transcript_text &&
+            existing.has_summary_text === fresh.has_summary_text
+          ) {
+            merged.push(existing);
+          } else {
+            merged.push(fresh);
+            allSame = false;
+          }
+        }
+        if (allSame) return prev;
+        return merged;
+      }
+      return data;
+    });
     const details = await Promise.all(
       data.map(async (item) => {
         if (item.meta) {
@@ -113,9 +155,37 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         }
       })
     );
-    const nextDetails = Object.fromEntries(details);
-    setSessionDetails(nextDetails);
-    setSavedSessionDetails(nextDetails);
+    // Preserve object identity for unchanged entries so React.memo on
+    // SessionCard can skip re-render for sessions whose metadata didn't
+    // actually change. Without this, every Refresh click produces a fresh
+    // object for every session and forces a full re-render of all 50+
+    // cards — the user-visible "тормозит" symptom on Refresh.
+    const mergeDetails = (
+      prev: Record<string, SessionMetaView>,
+    ): Record<string, SessionMetaView> => {
+      const next: Record<string, SessionMetaView> = {};
+      let changed = false;
+      const nextIds = new Set<string>();
+      for (const [id, fresh] of details) {
+        nextIds.add(id);
+        const existing = prev[id];
+        if (existing && sameSessionMeta(existing, fresh)) {
+          next[id] = existing;
+        } else {
+          next[id] = fresh;
+          changed = true;
+        }
+      }
+      // Detect additions/removals vs. prev.
+      if (!changed) {
+        const prevIds = Object.keys(prev);
+        if (prevIds.length !== nextIds.size) changed = true;
+        else if (!prevIds.every((id) => nextIds.has(id))) changed = true;
+      }
+      return changed ? next : prev;
+    };
+    setSessionDetails(mergeDetails);
+    setSavedSessionDetails(mergeDetails);
     await loadKnownTags().catch(() => undefined);
   }
 

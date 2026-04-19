@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button, Col, ConfigProvider, Form, Input, Row, Select } from "antd";
-import { ClearOutlined, DeleteOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import { ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
 import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
@@ -177,7 +177,7 @@ function SessionCardImpl({
               icon={<DeleteOutlined aria-hidden="true" />}
               onClick={() => onDelete(item.session_id, item.status === "recording")}
             />
-            {hasAudio && (
+            {hasAudio && item.has_summary_text && (
               <Button
                 htmlType="button"
                 type="text"
@@ -335,22 +335,12 @@ function SessionCardImpl({
               className="icon-button session-summary-prompt-button"
               aria-label="Настроить промпт саммари"
               title="Настроить промпт саммари"
+              icon={<MessageOutlined aria-hidden="true" />}
               onClick={() => {
                 commitDraft();
                 onOpenSummaryPrompt(draftRef.current);
               }}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6A2.5 2.5 0 0 1 16.5 15H11l-4.25 3.5A.75.75 0 0 1 5.5 18v-3.3A2.49 2.49 0 0 1 5 13.5v-7Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </Button>
+            />
             {summaryPending && (
               <span
                 className="visually-hidden"
