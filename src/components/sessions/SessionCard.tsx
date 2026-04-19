@@ -170,11 +170,10 @@ function SessionCardImpl({
               type="text"
               size="small"
               shape="circle"
-              className="icon-button delete-session-button"
+              className="delete-session-button"
               aria-label="Удалить сессию"
               title="Удалить сессию"
-              danger
-              icon={<DeleteOutlined aria-hidden="true" />}
+              icon={<DeleteOutlined aria-hidden="true" style={{color: "gray"}}/>}
               onClick={() => onDelete(item.session_id, item.status === "recording")}
             />
             {hasAudio && item.has_summary_text && (
@@ -183,10 +182,10 @@ function SessionCardImpl({
                 type="text"
                 size="small"
                 shape="circle"
-                className="icon-button delete-session-audio-button"
+                className="delete-session-audio-button"
                 aria-label="Удалить аудио"
                 title="Удалить аудио"
-                icon={<ClearOutlined aria-hidden="true" />}
+                icon={<ClearOutlined aria-hidden="true" style={{color: "gray"}}/>}
                 onClick={() => onDeleteAudio(item.session_id)}
               />
             )}
@@ -195,10 +194,10 @@ function SessionCardImpl({
               type="text"
               size="small"
               shape="circle"
-              className="icon-button session-folder-link"
+              className="session-folder-link"
               aria-label="Открыть папку сессии"
               title="Открыть папку сессии"
-              icon={<FolderOpenOutlined aria-hidden="true" />}
+              icon={<FolderOpenOutlined aria-hidden="true" style={{color: "gray"}} />}
               onClick={() => onOpenFolder(item.session_dir)}
             />
           </div>
@@ -332,7 +331,10 @@ function SessionCardImpl({
             </Button>
             <Button
               htmlType="button"
-              className="icon-button session-summary-prompt-button"
+              type="text"
+              size="small"
+              shape="circle"
+              className="session-summary-prompt-button"
               aria-label="Настроить промпт саммари"
               title="Настроить промпт саммари"
               icon={<MessageOutlined aria-hidden="true" />}

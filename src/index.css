@@ -1319,16 +1319,10 @@ select {
 }
 
 .session-summary-prompt-button {
-  color: #44687f;
   width: 36px;
   height: 36px;
   min-height: 36px;
   flex: 0 0 36px;
-}
-
-.session-summary-prompt-button:hover {
-  background: rgba(68, 104, 127, 0.08);
-  border-color: rgba(68, 104, 127, 0.16);
 }
 
 .session-context-menu {
