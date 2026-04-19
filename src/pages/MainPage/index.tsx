@@ -36,6 +36,7 @@ export function MainPage() {
     flushSessionDetails,
     getSummary,
     getText,
+    isSearching,
     importAudioSession,
     knownTags,
     loadSessions,
@@ -159,6 +160,7 @@ export function MainPage() {
             deletePendingSessionId={deletePendingSessionId}
             audioDeleteTargetSessionId={audioDeleteTargetSessionId}
             audioDeletePendingSessionId={audioDeletePendingSessionId}
+            isSearching={isSearching}
             artifactPreview={artifactPreview}
             knownTags={knownTags}
             settings={null}

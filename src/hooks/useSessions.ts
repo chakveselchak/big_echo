@@ -75,6 +75,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const [sessionArtifactSearchHits, setSessionArtifactSearchHits] = useState<Record<string, SessionArtifactSearchHit>>(
     {}
   );
+  const [isSearching, setIsSearching] = useState(false);
   const [textPendingBySession, setTextPendingBySession] = useState<Record<string, boolean>>({});
   const [summaryPendingBySession, setSummaryPendingBySession] = useState<Record<string, boolean>>({});
   const [pipelineStateBySession, setPipelineStateBySession] = useState<Record<string, PipelineUiState>>({});
@@ -223,10 +224,15 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
    * Immediate flush of the in-memory edit for `sessionId` to disk. Intended
    * to be called on field blur (Source/Topic/Tags/Notes) so that persistence
    * is triggered by the user finishing an edit rather than by mid-typing
-   * debounces. No-op if the current meta matches the last saved copy.
+   * debounces. No-op if the detail matches the last saved copy.
+   *
+   * An explicit `detail` can be passed to avoid stale-closure issues when
+   * the caller has just dispatched a setState (e.g. SessionCard committing
+   * its local draft + flushing in the same blur handler — React hasn't
+   * re-rendered yet, so `sessionDetails[sessionId]` would be outdated).
    */
-  async function flushSessionDetails(sessionId: string) {
-    const current = sessionDetails[sessionId];
+  async function flushSessionDetails(sessionId: string, detail?: SessionMetaView) {
+    const current = detail ?? sessionDetails[sessionId];
     const saved = savedSessionDetails[sessionId];
     if (!current) return;
     // Cancel any pending debounced save regardless — we either save now or
@@ -374,20 +380,27 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     const query = sessionSearchQuery.trim();
     if (!query || sessions.length === 0) {
       setSessionArtifactSearchHits({});
+      setIsSearching(false);
       return;
     }
 
     const requestId = artifactSearchRequestIdRef.current + 1;
     artifactSearchRequestIdRef.current = requestId;
+    // Mark the list as "searching" immediately so the UI can paint a
+    // loading placeholder instead of showing a potentially-stale filter
+    // result while the backend artifact search is in flight.
+    setIsSearching(true);
     const timer = setTimeout(() => {
       void tauriInvoke<Record<string, SessionArtifactSearchHit>>("search_session_artifacts", { query })
         .then((hits) => {
           if (artifactSearchRequestIdRef.current !== requestId) return;
           setSessionArtifactSearchHits(hits ?? {});
+          setIsSearching(false);
         })
         .catch(() => {
           if (artifactSearchRequestIdRef.current !== requestId) return;
           setSessionArtifactSearchHits({});
+          setIsSearching(false);
         });
     }, 180);
 
@@ -578,6 +591,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     requestDeleteAudio,
     requestDeleteSession,
     saveSessionDetails,
+    isSearching,
     sessionArtifactSearchHits,
     sessionDetails,
     sessionSearchQuery,

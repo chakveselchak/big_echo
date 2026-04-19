@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { ConfigProvider, Menu } from "antd";
+import { ConfigProvider, Menu, Spin } from "antd";
 import type { MenuProps } from "antd";
 import type {
   DeleteTarget,
@@ -38,6 +38,7 @@ type SessionListProps = {
   deletePendingSessionId: string | null;
   audioDeleteTargetSessionId: string | null;
   audioDeletePendingSessionId: string | null;
+  isSearching: boolean;
   artifactPreview: SessionArtifactPreview | null;
   knownTags: string[];
   settings: PublicSettings | null;
@@ -51,7 +52,7 @@ type SessionListProps = {
   getText: (sessionId: string) => void;
   getSummary: (sessionId: string) => void;
   saveSessionDetails: (sessionId: string, detail: SessionMetaView) => Promise<boolean>;
-  flushSessionDetails: (sessionId: string) => void;
+  flushSessionDetails: (sessionId: string, detail?: SessionMetaView) => void;
   requestDeleteSession: (sessionId: string, isRecording: boolean) => void;
   requestDeleteAudio: (sessionId: string) => void;
   setStatus: (status: string) => void;
@@ -71,6 +72,7 @@ export function SessionList({
   deletePendingSessionId,
   audioDeleteTargetSessionId,
   audioDeletePendingSessionId,
+  isSearching,
   artifactPreview,
   knownTags,
   settings,
@@ -92,7 +94,13 @@ export function SessionList({
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
 
-  const knownTagOptions = knownTags.map((tag) => ({ value: tag, label: tag }));
+  // Stable reference across renders — a new array on every render would
+  // force `Select` (with `options` prop deeply diffed) to rebuild its
+  // virtualised list on every keystroke in any card.
+  const knownTagOptions = useMemo(
+    () => knownTags.map((tag) => ({ value: tag, label: tag })),
+    [knownTags],
+  );
 
   const hasSessions = sessions.length > 0;
   const normalizedSessionSearchQuery = sessionSearchQuery.trim();
@@ -300,6 +308,24 @@ export function SessionList({
 
   return (
     <>
+      {isSearching ? (
+        <div
+          className="sessions-grid-loading"
+          role="status"
+          aria-live="polite"
+          aria-label="Searching sessions"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "60px 20px",
+            gap: 12,
+          }}
+        >
+          <Spin />
+          <span style={{ color: "var(--text-muted)" }}>Searching sessions…</span>
+        </div>
+      ) : (
       <div className="sessions-grid">
         {filteredSessions.map((item) => {
           const detail = getSessionDetail(item);
@@ -346,6 +372,7 @@ export function SessionList({
           </div>
         )}
       </div>
+      )}
 
       {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (
         <div

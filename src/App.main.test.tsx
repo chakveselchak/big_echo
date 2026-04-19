@@ -921,10 +921,12 @@ describe("App main window", () => {
       expect(screen.getByDisplayValue("project-beta")).toBeInTheDocument();
     });
 
-    await user.type(screen.getByLabelText("Search sessions"), "project-alpha");
+    await user.type(screen.getByLabelText("Search sessions"), "project-alpha{Enter}");
 
-    expect(screen.getByDisplayValue("Budget planning")).toBeInTheDocument();
-    expect(screen.queryByDisplayValue("Roadmap")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Budget planning")).toBeInTheDocument();
+      expect(screen.queryByDisplayValue("Roadmap")).not.toBeInTheDocument();
+    });
     const matchedCustomTagInput = screen
       .getAllByDisplayValue("project-alpha")
       .find((element) => element.closest(".session-edit-grid"));
@@ -1022,7 +1024,7 @@ describe("App main window", () => {
       expect(screen.getByDisplayValue("Standup")).toBeInTheDocument();
     });
 
-    await user.type(screen.getByLabelText("Search sessions"), "acme renewal risk");
+    await user.type(screen.getByLabelText("Search sessions"), "acme renewal risk{Enter}");
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("search_session_artifacts", { query: "acme renewal risk" });
@@ -1106,7 +1108,7 @@ describe("App main window", () => {
 
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
-    await user.type(screen.getByLabelText("Search sessions"), "acme renewal risk");
+    await user.type(screen.getByLabelText("Search sessions"), "acme renewal risk{Enter}");
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "текст" })).toHaveClass("match-hit");

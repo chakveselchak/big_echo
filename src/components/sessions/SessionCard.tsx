@@ -1,3 +1,4 @@
+import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button, Col, ConfigProvider, Form, Input, Row, Select } from "antd";
 import { ClearOutlined, DeleteOutlined, FolderOpenOutlined } from "@ant-design/icons";
@@ -27,12 +28,12 @@ type SessionCardProps = {
   onOpenSummaryPrompt: (detail: SessionMetaView) => void;
   onDelete: (sessionId: string, isRecording: boolean) => void;
   onDeleteAudio: (sessionId: string) => void;
-  onFieldBlur: (sessionId: string) => void;
+  onFieldBlur: (sessionId: string, detail?: SessionMetaView) => void;
   onOpenFolder: (sessionDir: string) => void;
   setStatus: (status: string) => void;
 };
 
-export function SessionCard({
+function SessionCardImpl({
   item,
   detail,
   textPending,
@@ -55,7 +56,63 @@ export function SessionCard({
   setStatus,
 }: SessionCardProps) {
   const hasAudio = resolveSessionAudioPath(item) !== null;
-  const flushOnBlur = () => onFieldBlur(item.session_id);
+
+  // Local draft state — edits update only this card, not the whole
+  // sessionDetails Record in the parent. This keeps the keystroke path
+  // O(1) re-render (only this card + Ant Design input) instead of O(N)
+  // for every session. The parent is synced on blur via commitDraft().
+  const [draftDetail, setDraftDetail] = useState<SessionMetaView>(detail);
+  const draftRef = useRef(draftDetail);
+  draftRef.current = draftDetail;
+
+  // When the parent's committed detail changes (reload from disk, external
+  // update, etc.) and it no longer matches what we have locally, refresh the
+  // draft. We check via fields to avoid refs that changed without value-level
+  // diffs (e.g. new object from Object.fromEntries in useSessions).
+  useEffect(() => {
+    const local = draftRef.current;
+    if (
+      detail.source === local.source &&
+      detail.notes === local.notes &&
+      detail.topic === local.topic &&
+      (detail.custom_summary_prompt ?? "") === (local.custom_summary_prompt ?? "") &&
+      detail.tags.length === local.tags.length &&
+      detail.tags.every((t, i) => t === local.tags[i])
+    ) {
+      return;
+    }
+    setDraftDetail(detail);
+  }, [detail]);
+
+  const commitDraft = () => {
+    const current = draftRef.current;
+    // Only push to parent if something actually changed vs the committed
+    // detail — avoids spurious setState in the parent tree on simple focus
+    // changes with no edits.
+    if (
+      detail.source === current.source &&
+      detail.notes === current.notes &&
+      detail.topic === current.topic &&
+      (detail.custom_summary_prompt ?? "") === (current.custom_summary_prompt ?? "") &&
+      detail.tags.length === current.tags.length &&
+      detail.tags.every((t, i) => t === current.tags[i])
+    ) {
+      return;
+    }
+    onDetailChange(current);
+  };
+
+  const handleBlur = () => {
+    const current = draftRef.current;
+    commitDraft();
+    // Pass the draft explicitly — otherwise the hook reads from a stale
+    // closure since commitDraft's setSessionDetails hasn't committed yet.
+    onFieldBlur(item.session_id, current);
+  };
+
+  // Reading draft* throughout the render below so the UI reflects typing
+  // immediately even though the parent doesn't know about each keystroke.
+  const working = draftDetail;
   const query = searchQuery.trim().toLowerCase();
   const sourceMatch = query !== "" && detail.source.toLowerCase().includes(query);
   const notesMatch = query !== "" && detail.notes.toLowerCase().includes(query);
@@ -177,10 +234,10 @@ export function SessionCard({
                 <Select
                   id="session-source"
                   aria-label="Source"
-                  value={detail.source}
+                  value={working.source}
                   options={fixedSourceOptions}
-                  onChange={(value) => onDetailChange({ ...detail, source: value })}
-                  onBlur={flushOnBlur}
+                  onChange={(value) => setDraftDetail((prev) => ({ ...prev, source: value }))}
+                  onBlur={handleBlur}
                 />
               </Form.Item>
             </Col>
@@ -193,9 +250,9 @@ export function SessionCard({
                 <Input
                   id="session-topic"
                   aria-label="Topic"
-                  value={detail.topic}
-                  onChange={(e) => onDetailChange({ ...detail, topic: e.target.value })}
-                  onBlur={flushOnBlur}
+                  value={working.topic}
+                  onChange={(e) => setDraftDetail((prev) => ({ ...prev, topic: e.target.value }))}
+                  onBlur={handleBlur}
                 />
               </Form.Item>
             </Col>
@@ -209,11 +266,11 @@ export function SessionCard({
                   id="session-tags"
                   aria-label="Tags"
                   mode="tags"
-                  value={detail.tags}
+                  value={working.tags}
                   options={knownTagOptions}
                   tokenSeparators={[","]}
-                  onChange={(value) => onDetailChange({ ...detail, tags: value })}
-                  onBlur={flushOnBlur}
+                  onChange={(value) => setDraftDetail((prev) => ({ ...prev, tags: value }))}
+                  onBlur={handleBlur}
                 />
               </Form.Item>
             </Col>
@@ -226,9 +283,9 @@ export function SessionCard({
                 <Input
                   id="session-notes"
                   aria-label="Notes"
-                  value={detail.notes}
-                  onChange={(e) => onDetailChange({ ...detail, notes: e.target.value })}
-                  onBlur={flushOnBlur}
+                  value={working.notes}
+                  onChange={(e) => setDraftDetail((prev) => ({ ...prev, notes: e.target.value }))}
+                  onBlur={handleBlur}
                 />
               </Form.Item>
             </Col>
@@ -278,7 +335,10 @@ export function SessionCard({
               className="icon-button session-summary-prompt-button"
               aria-label="Настроить промпт саммари"
               title="Настроить промпт саммари"
-              onClick={() => onOpenSummaryPrompt(detail)}
+              onClick={() => {
+                commitDraft();
+                onOpenSummaryPrompt(draftRef.current);
+              }}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -322,3 +382,8 @@ export function SessionCard({
     </article>
   );
 }
+
+// React.memo skips re-render when props are shallow-equal. Combined with the
+// local-draft pattern above this means typing in one card's Notes does NOT
+// re-render the other 50+ cards.
+export const SessionCard = memo(SessionCardImpl);
