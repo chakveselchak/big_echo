@@ -46,6 +46,9 @@ const { listeners, invokeMock } = vi.hoisted(() => ({
         api_call_logging_enabled: false,
       };
     }
+    if (cmd === "check_for_update") {
+      return null;
+    }
     return null;
   }),
 }));
@@ -1854,5 +1857,40 @@ describe("App main window", () => {
         artifactKind: "summary",
       });
     });
+  });
+
+  it("shows the New version tab when check_for_update reports a newer release", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "check_for_update") {
+        return {
+          current: "2.0.2",
+          latest: "2.1.0",
+          is_newer: true,
+          html_url: "https://example.com/release",
+          body: "## Notes\n- a",
+          name: "v2.1.0",
+          published_at: "2026-04-20T00:00:00Z",
+        };
+      }
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "list_sessions") return [];
+      if (cmd === "get_settings") return null;
+      return null;
+    });
+
+    render(<App />);
+
+    const newVersionTab = await screen.findByRole("tab", { name: /New version/i });
+    expect(newVersionTab).toBeInTheDocument();
+
+    await user.click(newVersionTab);
+    expect(await screen.findByText(/New version 2\.1\.0 available/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /View on GitHub/i })).toHaveAttribute(
+      "href",
+      "https://example.com/release"
+    );
   });
 });

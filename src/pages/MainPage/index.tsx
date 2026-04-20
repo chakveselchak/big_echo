@@ -8,8 +8,10 @@ import type { StartResponse } from "../../types";
 import { SessionFilters } from "../../components/sessions/SessionFilters";
 import { SessionList } from "../../components/sessions/SessionList";
 import { SettingsPage } from "../SettingsPage";
+import { useVersionCheck } from "../../hooks/useVersionCheck";
+import { NewVersionPage } from "../NewVersionPage";
 
-type MainTab = "sessions" | "settings";
+type MainTab = "sessions" | "settings" | "new-version";
 
 export function MainPage() {
   const [mainTab, setMainTab] = useState<MainTab>("sessions");
@@ -30,6 +32,8 @@ export function MainPage() {
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
   const [refreshKey, setRefreshKey] = useState(0);
+  const { updateInfo } = useVersionCheck();
+  const showNewVersionTab = updateInfo?.is_newer === true;
   const sessionSearchInputRef = useRef<InputRef | null>(null);
   const loadSessionsRef = useRef<(() => Promise<void>) | null>(null);
   const appMainRef = useRef<HTMLElement | null>(null);
@@ -146,6 +150,17 @@ export function MainPage() {
         >
           Settings
         </button>
+        {showNewVersionTab && (
+          <button
+            type="button"
+            role="tab"
+            className={`main-tab-button${mainTab === "new-version" ? " is-active" : ""}`}
+            aria-selected={mainTab === "new-version"}
+            onClick={() => handleTabSelect("new-version")}
+          >
+            New version
+          </button>
+        )}
       </div>
 
       <section
@@ -208,6 +223,14 @@ export function MainPage() {
           style={mainTab === "settings" ? undefined : { display: "none" }}
         >
           <SettingsPage />
+        </section>
+      )}
+      {showNewVersionTab && updateInfo && (
+        <section
+          className="panel"
+          style={mainTab === "new-version" ? undefined : { display: "none" }}
+        >
+          <NewVersionPage updateInfo={updateInfo} />
         </section>
       )}
     </main>
