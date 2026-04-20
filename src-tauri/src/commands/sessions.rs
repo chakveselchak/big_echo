@@ -9,7 +9,8 @@ use crate::storage::sqlite_repo::{
     add_event, delete_session as repo_delete_session, get_meta_path, get_session_dir,
     list_sessions as repo_list_sessions, upsert_session, SessionListItem,
 };
-use crate::{get_settings_from_dirs, root_recordings_dir, set_tray_indicator_from_state};
+use crate::tray_manager::set_tray_indicator_from_state;
+use crate::{get_settings_from_dirs, root_recordings_dir};
 use chrono::{Duration, Local};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -1135,12 +1136,7 @@ mod tests {
             .contains(&Local::now().format("%d.%m.%Y").to_string()));
         assert!(session_dir.join("audio.wav").exists());
         assert!(session_dir.join("meta.json").exists());
-        assert!(session_dir
-            .join("transcript_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".md")
-            .exists());
-        assert!(session_dir
-            .join("summary_".to_string() + &Local::now().format("%d.%m.%Y").to_string() + ".md")
-            .exists());
+        // transcript/summary files are NOT created until content is written
 
         let meta = load_meta(&session_dir.join("meta.json")).expect("load meta");
         assert_eq!(meta.source, "other");

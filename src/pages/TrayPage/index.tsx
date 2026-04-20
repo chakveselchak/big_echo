@@ -8,7 +8,7 @@ import { getErrorMessage } from "../../lib/appUtils";
 import { AudioRow } from "../../components/tray/AudioRow";
 import { RecordingControls } from "../../components/tray/RecordingControls";
 import { initializeAnalytics } from "../../lib/analytics";
-import { getCurrentWindowLabel } from "../../lib/tauri";
+import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 
 export function TrayPage() {
   const [status, setStatus] = useState("idle");
@@ -49,7 +49,14 @@ export function TrayPage() {
   });
 
   useEffect(() => {
-    initializeAnalytics({ window_label: getCurrentWindowLabel() });
+    const windowLabel = getCurrentWindowLabel();
+    tauriInvoke<string>("get_computer_name")
+      .then((computerName) => {
+        initializeAnalytics({ window_label: windowLabel, computer_name: computerName });
+      })
+      .catch(() => {
+        initializeAnalytics({ window_label: windowLabel });
+      });
   }, []);
 
   // Mark html/body with tray-window-* classes so CSS can disable opaque page

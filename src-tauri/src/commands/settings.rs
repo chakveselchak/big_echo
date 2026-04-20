@@ -1,7 +1,8 @@
 use crate::app_state::AppDirs;
 pub use crate::audio::macos_system_audio::MacosSystemAudioPermissionStatus;
 use crate::settings::public_settings::{save_settings, PublicSettings};
-use crate::{get_settings_from_dirs, open_settings_window_internal, open_tray_window_internal};
+use crate::window_manager::{open_settings_window_internal, open_tray_window_internal};
+use crate::get_settings_from_dirs;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -721,4 +722,11 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn open_tray_window(app: tauri::AppHandle) -> Result<(), String> {
     open_tray_window_internal(&app)
+}
+
+#[tauri::command]
+pub fn get_computer_name() -> String {
+    hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
 }

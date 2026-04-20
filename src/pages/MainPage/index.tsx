@@ -3,7 +3,7 @@ import type { InputRef } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSessions } from "../../hooks/useSessions";
 import { initializeAnalytics } from "../../lib/analytics";
-import { getCurrentWindowLabel } from "../../lib/tauri";
+import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 import type { StartResponse } from "../../types";
 import { SessionFilters } from "../../components/sessions/SessionFilters";
 import { SessionList } from "../../components/sessions/SessionList";
@@ -82,7 +82,14 @@ export function MainPage() {
   void stop;
 
   useEffect(() => {
-    initializeAnalytics({ window_label: getCurrentWindowLabel() });
+    const windowLabel = getCurrentWindowLabel();
+    tauriInvoke<string>("get_computer_name")
+      .then((computerName) => {
+        initializeAnalytics({ window_label: windowLabel, computer_name: computerName });
+      })
+      .catch(() => {
+        initializeAnalytics({ window_label: windowLabel });
+      });
   }, []);
 
   useEffect(() => {

@@ -6,10 +6,8 @@ use crate::settings::secret_store::{get_secret, set_secret};
 use crate::storage::fs_layout::{build_session_relative_dir, summary_name, transcript_name};
 use crate::storage::session_store::save_meta;
 use crate::storage::sqlite_repo::{add_event, upsert_session};
-use crate::{
-    get_settings_from_dirs, root_recordings_dir, set_tray_indicator_from_state,
-    stop_active_recording_internal,
-};
+use crate::tray_manager::set_tray_indicator_from_state;
+use crate::{get_settings_from_dirs, root_recordings_dir, stop_active_recording_internal};
 use chrono::{DateTime, Local};
 #[cfg(test)]
 use std::cell::RefCell;
