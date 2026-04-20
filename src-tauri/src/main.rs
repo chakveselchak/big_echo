@@ -33,6 +33,7 @@ use commands::settings::{
     open_macos_system_audio_settings, open_settings_window, open_tray_window, pick_recording_root,
     save_public_settings,
 };
+use commands::updates::check_for_update;
 #[cfg(test)]
 use domain::session::SessionMeta;
 use domain::session::SessionStatus;
@@ -469,7 +470,8 @@ fn main() {
             retry_pipeline,
             run_transcription,
             run_summary,
-            sync_sessions
+            sync_sessions,
+            check_for_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building bigecho app");
