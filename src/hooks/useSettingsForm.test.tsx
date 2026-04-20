@@ -50,7 +50,7 @@ const { invokeMock } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("../../lib/tauri", () => ({
+vi.mock("../lib/tauri", () => ({
   tauriInvoke: invokeMock,
 }));
 

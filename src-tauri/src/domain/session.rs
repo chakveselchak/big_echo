@@ -24,7 +24,7 @@ impl Default for SessionArtifacts {
     fn default() -> Self {
         Self {
             audio_file: "audio.opus".to_string(),
-            transcript_file: "transcript.txt".to_string(),
+            transcript_file: "transcript.md".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
         }
@@ -38,29 +38,38 @@ pub struct SessionMeta {
     pub started_at_iso: String,
     pub ended_at_iso: Option<String>,
     pub display_date_ru: String,
-    pub tags: Vec<String>,
+    // `source`, `tags` and `notes` are marked `#[serde(default)]` so that
+    // meta.json files written before commit f3872a7 (which replaced
+    // `participants`/`custom_tag` with `source`/`tags`/`notes`) can still be
+    // loaded. Legacy sessions fall back to empty values and backfill the
+    // fields on next save.
+    #[serde(default)]
+    pub source: String,
     pub primary_tag: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub notes: String,
     pub topic: String,
-    pub participants: Vec<String>,
     #[serde(default)]
     pub custom_summary_prompt: String,
     pub status: SessionStatus,
     pub artifacts: SessionArtifacts,
+    #[serde(default)]
     pub errors: Vec<String>,
 }
 
 impl SessionMeta {
     pub fn new(
         session_id: String,
+        source: String,
         tags: Vec<String>,
         topic: String,
-        participants: Vec<String>,
+        notes: String,
     ) -> Self {
         let now = Local::now();
-        let primary_tag = tags
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "general".to_string());
+        let source = source.trim();
+        let source = if source.is_empty() { "general" } else { source }.to_string();
 
         Self {
             session_id,
@@ -68,10 +77,11 @@ impl SessionMeta {
             started_at_iso: now.to_rfc3339(),
             ended_at_iso: None,
             display_date_ru: format_ru_date(now),
+            primary_tag: source.clone(),
+            source,
             tags,
-            primary_tag,
+            notes,
             topic,
-            participants,
             custom_summary_prompt: String::new(),
             status: SessionStatus::Recording,
             artifacts: SessionArtifacts::default(),
@@ -82,4 +92,28 @@ impl SessionMeta {
 
 pub fn format_ru_date(dt: DateTime<Local>) -> String {
     dt.format("%d.%m.%Y").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_meta_new_stores_source_tags_and_notes_independently() {
+        let meta = SessionMeta::new(
+            "s-meta".to_string(),
+            "zoom".to_string(),
+            vec!["project/acme".to_string(), "call/sales".to_string()],
+            "Renewal sync".to_string(),
+            "Check contract renewal".to_string(),
+        );
+
+        assert_eq!(meta.source, "zoom");
+        assert_eq!(
+            meta.tags,
+            vec!["project/acme".to_string(), "call/sales".to_string()]
+        );
+        assert_eq!(meta.notes, "Check contract renewal");
+        assert_eq!(meta.primary_tag, "zoom");
+    }
 }

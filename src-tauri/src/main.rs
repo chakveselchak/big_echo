@@ -3,15 +3,18 @@ mod audio;
 mod command_core;
 mod commands;
 mod domain;
+mod hotkey_manager;
 mod pipeline;
 mod services;
 mod settings;
 mod storage;
 mod text_editors;
+mod tray_manager;
+mod window_manager;
 
-use app_state::{AppDirs, AppState};
 #[cfg(test)]
 use app_state::StartRecordingResponse;
+use app_state::{AppDirs, AppState};
 use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
 use commands::recording::{
@@ -19,14 +22,16 @@ use commands::recording::{
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
 };
 use commands::sessions::{
-    delete_session, get_live_input_levels, get_session_meta, get_ui_sync_state,
-    import_audio_session, list_sessions, open_session_artifact, open_session_folder,
-    read_session_artifact, search_session_artifacts, set_ui_sync_state, update_session_details,
+    delete_session, delete_session_audio, get_live_input_levels, get_session_meta,
+    get_ui_sync_state, import_audio_session, list_known_tags, list_sessions,
+    open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
+    set_ui_sync_state, sync_sessions, update_session_details,
 };
 use commands::settings::{
-    detect_system_source_device, get_macos_system_audio_permission_status, get_settings,
-    list_audio_input_devices, list_text_editor_apps, open_macos_system_audio_settings,
-    open_settings_window, open_tray_window, pick_recording_root, save_public_settings,
+    detect_system_source_device, get_computer_name, get_macos_system_audio_permission_status,
+    get_settings, list_audio_input_devices, list_text_editor_apps,
+    open_macos_system_audio_settings, open_settings_window, open_tray_window, pick_recording_root,
+    save_public_settings,
 };
 #[cfg(test)]
 use domain::session::SessionMeta;
@@ -36,37 +41,18 @@ use services::pipeline_runner::{run_pipeline_core, spawn_retry_worker, PipelineM
 use settings::public_settings::save_settings;
 use settings::public_settings::{load_settings, PublicSettings};
 use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use storage::fs_layout::build_session_relative_dir;
 use storage::session_store::save_meta;
 use storage::sqlite_repo::{add_event, upsert_session};
-use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{
-    AppHandle, Emitter, Listener, Manager, PhysicalPosition, Position, RunEvent, Theme,
-    WebviewUrl, WebviewWindowBuilder,
-};
-use tauri_plugin_global_shortcut::{Builder as GlobalShortcutBuilder, ShortcutState};
+use tauri::{AppHandle, Emitter, Listener, Manager, RunEvent};
 
-const LIVE_LEVELS_IDLE_POLL_MS: u64 = 260;
 #[cfg(test)]
 const MAX_PIPELINE_RETRY_ATTEMPTS: i64 = 4;
-const TRAY_ICON_ID: &str = "bigecho-tray";
-const REC_HOTKEY: &str = "CmdOrCtrl+Shift+R";
-const STOP_HOTKEY: &str = "CmdOrCtrl+Shift+S";
-const APP_ICON_LIGHT_BYTES: &[u8] = include_bytes!("../icons/app-icon-light.png");
-const APP_ICON_DARK_BYTES: &[u8] = include_bytes!("../icons/app-icon-dark.png");
-const TRAY_IDLE_LIGHT_BYTES: &[u8] = include_bytes!("../icons/tray-idle-light.png");
-const TRAY_IDLE_DARK_BYTES: &[u8] = include_bytes!("../icons/tray-idle-dark.png");
-const TRAY_REC_DARK_BYTES: &[u8] = include_bytes!("../icons/tray-rec-dark.png");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TrayIconVariant {
-    IdleLight,
-    IdleDark,
-    RecDark,
-}
+// ── App-data helpers ─────────────────────────────────────────────────────────
 
 fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -90,6 +76,8 @@ pub(crate) fn get_settings_from_dirs(dirs: &AppDirs) -> Result<PublicSettings, S
     load_settings(&dirs.app_data_dir)
 }
 
+// ── Pipeline helpers ─────────────────────────────────────────────────────────
+
 fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
     let transcription_ready = if settings.transcription_provider == "salute_speech" {
         true
@@ -100,6 +88,8 @@ fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
         && transcription_ready
         && !settings.summary_url.trim().is_empty()
 }
+
+// ── Capture artifact recovery ────────────────────────────────────────────────
 
 fn move_artifact_to_recovery(src: &Path, dst: &Path) -> Result<(), String> {
     if !src.exists() {
@@ -142,439 +132,7 @@ fn preserve_capture_artifacts_for_recovery(
     Ok(preserved)
 }
 
-fn should_intercept_close_to_tray(window_label: &str) -> bool {
-    window_label == "main"
-}
-
-fn should_start_hidden_on_launch(value: Option<&str>, default_hidden: bool) -> bool {
-    match value {
-        None => default_hidden,
-        Some(raw) => {
-            let normalized = raw.trim().to_ascii_lowercase();
-            !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
-        }
-    }
-}
-
-fn should_start_hidden_on_launch_from_env() -> bool {
-    let env_value = std::env::var("BIGECHO_START_HIDDEN").ok();
-    let default_hidden = !cfg!(debug_assertions);
-    should_start_hidden_on_launch(env_value.as_deref(), default_hidden)
-}
-
-fn register_close_to_tray_for_main(app: &AppHandle) {
-    if let Some(main_window) = app.get_webview_window("main") {
-        let label = main_window.label().to_string();
-        let window_for_event = main_window.clone();
-        main_window.on_window_event(move |event| {
-            if let tauri::WindowEvent::ThemeChanged(theme) = event {
-                let app = window_for_event.app_handle();
-                let _ = apply_app_icons_for_theme(&app, theme.clone());
-                let state = app.state::<AppState>();
-                let _ = set_tray_indicator(&app, is_recording_active(state.inner()));
-            }
-            if let tauri::WindowEvent::Focused(focused) = event {
-                if should_hide_tray_when_main_window_focuses(*focused) {
-                    let app = window_for_event.app_handle();
-                    let _ = hide_tray_window(&app);
-                }
-            }
-            if !should_intercept_close_to_tray(&label) {
-                return;
-            }
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window_for_event.hide();
-            }
-        });
-    }
-}
-
-fn toggle_main_window_visibility(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().map_err(|e| e.to_string())? {
-            window.hide().map_err(|e| e.to_string())?;
-        } else {
-            focus_main_window(app)?;
-        }
-    }
-    Ok(())
-}
-
-fn should_show_context_menu_on_left_click(platform: &str) -> bool {
-    platform == "windows"
-}
-
-fn should_toggle_tray_popover_on_left_click(platform: &str) -> bool {
-    platform == "macos"
-}
-
-fn should_hide_tray_popover_on_focus_lost(focused: bool) -> bool {
-    !focused
-}
-
-fn should_hide_tray_popover_on_toggle_request(visible: bool, focused: bool) -> bool {
-    visible && focused
-}
-
-fn should_hide_tray_when_main_window_focuses(focused: bool) -> bool {
-    focused
-}
-
-fn should_reveal_main_window_on_app_reopen(
-    has_visible_windows: bool,
-    main_window_visible: bool,
-) -> bool {
-    !has_visible_windows && !main_window_visible
-}
-
-fn should_probe_idle_levels(recording_active: bool, tray_visible: bool) -> bool {
-    !recording_active && tray_visible
-}
-
-fn position_tray_popover(
-    window: &tauri::WebviewWindow,
-    anchor: PhysicalPosition<f64>,
-) -> Result<(), String> {
-    let size = window.outer_size().map_err(|e| e.to_string())?;
-    let x = (anchor.x.round() as i32) - (size.width as i32 / 2);
-    let y = (anchor.y.round() as i32) + 12;
-    window
-        .set_position(Position::Physical(PhysicalPosition::new(x, y)))
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn toggle_tray_window_visibility(
-    app: &AppHandle,
-    anchor: Option<PhysicalPosition<f64>>,
-) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("tray") {
-        let is_visible = window.is_visible().map_err(|e| e.to_string())?;
-        let is_focused = window.is_focused().map_err(|e| e.to_string())?;
-        if should_hide_tray_popover_on_toggle_request(is_visible, is_focused) {
-            window.hide().map_err(|e| e.to_string())?;
-        } else {
-            if let Some(anchor) = anchor {
-                let _ = position_tray_popover(&window, anchor);
-            }
-            window.show().map_err(|e| e.to_string())?;
-            window.set_focus().map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-    open_tray_window_internal(app)?;
-    if let Some(window) = app.get_webview_window("tray") {
-        if let Some(anchor) = anchor {
-            let _ = position_tray_popover(&window, anchor);
-        }
-    }
-    Ok(())
-}
-
-fn hide_tray_window(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("tray") {
-        if window.is_visible().map_err(|e| e.to_string())? {
-            window.hide().map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn register_tray_window_events(window: &tauri::WebviewWindow) {
-    let window_for_event = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::Focused(focused) = event {
-            if should_hide_tray_popover_on_focus_lost(*focused) {
-                let _ = window_for_event.hide();
-            }
-        }
-    });
-}
-
-fn choose_tray_icon_variant(theme: Theme, is_recording: bool) -> TrayIconVariant {
-    if is_recording {
-        return TrayIconVariant::RecDark;
-    }
-    match theme {
-        Theme::Dark => TrayIconVariant::IdleDark,
-        _ => TrayIconVariant::IdleLight,
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn build_macos_app_menu(app: &tauri::App) -> Result<Menu<tauri::Wry>, String> {
-    let pkg_info = app.package_info();
-    let config = app.config();
-    let about_metadata = AboutMetadata {
-        name: Some(pkg_info.name.clone()),
-        version: Some(pkg_info.version.to_string()),
-        copyright: config.bundle.copyright.clone(),
-        authors: config.bundle.publisher.clone().map(|p| vec![p]),
-        ..Default::default()
-    };
-
-    let app_submenu = Submenu::with_items(
-        app,
-        pkg_info.name.clone(),
-        true,
-        &[
-            &PredefinedMenuItem::about(app, None::<&str>, Some(about_metadata))
-                .map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &MenuItem::with_id(
-                app,
-                "app_settings",
-                "Settings",
-                true,
-                Some("CmdOrCtrl+," as &str),
-            )
-            .map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::services(app, None::<&str>).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::hide(app, None::<&str>).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::hide_others(app, None::<&str>).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::quit(app, None::<&str>).map_err(|e| e.to_string())?,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let window_menu = Submenu::with_id_and_items(
-        app,
-        tauri::menu::WINDOW_SUBMENU_ID,
-        "Window",
-        true,
-        &[
-            &PredefinedMenuItem::minimize(app, None::<&str>).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::maximize(app, None::<&str>).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::close_window(app, None::<&str>).map_err(|e| e.to_string())?,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let help_menu =
-        Submenu::with_id_and_items(app, tauri::menu::HELP_SUBMENU_ID, "Help", true, &[])
-            .map_err(|e| e.to_string())?;
-
-    Menu::with_items(
-        app,
-        &[
-            &app_submenu,
-            &Submenu::with_items(
-                app,
-                "File",
-                true,
-                &[&PredefinedMenuItem::close_window(app, None::<&str>)
-                    .map_err(|e| e.to_string())?],
-            )
-            .map_err(|e| e.to_string())?,
-            &Submenu::with_items(
-                app,
-                "Edit",
-                true,
-                &[
-                    &PredefinedMenuItem::undo(app, None::<&str>).map_err(|e| e.to_string())?,
-                    &PredefinedMenuItem::redo(app, None::<&str>).map_err(|e| e.to_string())?,
-                    &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-                    &PredefinedMenuItem::cut(app, None::<&str>).map_err(|e| e.to_string())?,
-                    &PredefinedMenuItem::copy(app, None::<&str>).map_err(|e| e.to_string())?,
-                    &PredefinedMenuItem::paste(app, None::<&str>).map_err(|e| e.to_string())?,
-                    &PredefinedMenuItem::select_all(app, None::<&str>)
-                        .map_err(|e| e.to_string())?,
-                ],
-            )
-            .map_err(|e| e.to_string())?,
-            &Submenu::with_items(
-                app,
-                "View",
-                true,
-                &[
-                    &PredefinedMenuItem::fullscreen(app, None::<&str>)
-                        .map_err(|e| e.to_string())?,
-                ],
-            )
-            .map_err(|e| e.to_string())?,
-            &window_menu,
-            &help_menu,
-        ],
-    )
-    .map_err(|e| e.to_string())
-}
-
-fn tray_icon_bytes(variant: TrayIconVariant) -> &'static [u8] {
-    match variant {
-        TrayIconVariant::IdleLight => TRAY_IDLE_LIGHT_BYTES,
-        TrayIconVariant::IdleDark => TRAY_IDLE_DARK_BYTES,
-        TrayIconVariant::RecDark => TRAY_REC_DARK_BYTES,
-    }
-}
-
-fn app_icon_bytes(theme: Theme) -> &'static [u8] {
-    match theme {
-        Theme::Dark => APP_ICON_DARK_BYTES,
-        _ => APP_ICON_LIGHT_BYTES,
-    }
-}
-
-fn load_png_icon(bytes: &'static [u8]) -> Result<tauri::image::Image<'static>, String> {
-    tauri::image::Image::from_bytes(bytes)
-        .map(|image| image.to_owned())
-        .map_err(|e| format!("failed to decode icon: {e}"))
-}
-
-fn resolve_system_theme(app: &AppHandle) -> Theme {
-    for label in ["main", "tray", "settings"] {
-        if let Some(window) = app.get_webview_window(label) {
-            if let Ok(theme) = window.theme() {
-                return theme;
-            }
-        }
-    }
-    Theme::Light
-}
-
-fn apply_app_icons_for_theme(app: &AppHandle, theme: Theme) -> Result<(), String> {
-    let icon = load_png_icon(app_icon_bytes(theme))?;
-    for label in ["main", "tray", "settings"] {
-        if let Some(window) = app.get_webview_window(label) {
-            window.set_icon(icon.clone()).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn is_recording_active(state: &AppState) -> bool {
-    state
-        .active_session
-        .lock()
-        .map(|session| session.is_some())
-        .unwrap_or(false)
-}
-
-fn set_tray_indicator(app: &AppHandle, is_recording: bool) -> Result<(), String> {
-    if let Some(tray) = app.tray_by_id(TRAY_ICON_ID) {
-        let tooltip = if is_recording {
-            "BigEcho REC"
-        } else {
-            "BigEcho IDLE"
-        };
-        tray.set_tooltip(Some(tooltip)).map_err(|e| e.to_string())?;
-        let theme = resolve_system_theme(app);
-        let icon = load_png_icon(tray_icon_bytes(choose_tray_icon_variant(
-            theme,
-            is_recording,
-        )))?;
-        tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
-        #[cfg(target_os = "macos")]
-        tray.set_icon_as_template(false)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-pub(crate) fn set_tray_indicator_from_state(state: &AppState, is_recording: bool) {
-    let app_handle = state
-        .tray_app
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned());
-    if let Some(app) = app_handle {
-        let _ = set_tray_indicator(&app, is_recording);
-    }
-}
-
-fn focus_main_window(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        hide_tray_window(app)?;
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-pub(crate) fn open_settings_window_internal(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let window = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
-        .title("BigEcho Settings")
-        .inner_size(720.0, 620.0)
-        .resizable(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
-    window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("tray") {
-        let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
-        .title("BigEcho Recorder")
-        .inner_size(460.0, 244.0)
-        .resizable(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .visible(false);
-
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .decorations(false)
-            .shadow(false)
-            .transparent(true)
-            .visible_on_all_workspaces(true);
-    }
-
-    let window = builder.build().map_err(|e| e.to_string())?;
-    register_tray_window_events(&window);
-    let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
-    window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn prewarm_tray_window(app: &AppHandle) -> Result<(), String> {
-    if app.get_webview_window("tray").is_some() {
-        return Ok(());
-    }
-
-    let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
-        .title("BigEcho Recorder")
-        .inner_size(460.0, 244.0)
-        .resizable(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .visible(false);
-
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .decorations(false)
-            .shadow(false)
-            .transparent(true)
-            .visible_on_all_workspaces(true);
-    }
-
-    let window = builder.build().map_err(|e| e.to_string())?;
-    register_tray_window_events(&window);
-    let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
-    Ok(())
-}
+// ── Core stop implementation ─────────────────────────────────────────────────
 
 pub(crate) fn stop_active_recording_internal(
     dirs: &AppDirs,
@@ -645,9 +203,9 @@ pub(crate) fn stop_active_recording_internal(
     state.recording_control.reset();
 
     if let Some(app) = app {
-        let _ = set_tray_indicator(app, false);
+        let _ = tray_manager::set_tray_indicator(app, false);
     } else {
-        set_tray_indicator_from_state(state, false);
+        tray_manager::set_tray_indicator_from_state(state, false);
     }
 
     if let Some(err) = finalize_error {
@@ -692,6 +250,8 @@ pub(crate) fn stop_active_recording_internal(
     Ok("recorded".to_string())
 }
 
+// ── Test-only helpers ────────────────────────────────────────────────────────
+
 #[cfg(test)]
 fn schedule_retry_for_session(
     data_dir: &std::path::Path,
@@ -710,73 +270,232 @@ async fn process_retry_jobs_once(
     services::pipeline_runner::process_retry_jobs_once(dirs, now_epoch, limit).await
 }
 
-fn spawn_live_levels_worker(app: AppHandle, dirs: AppDirs) {
-    tauri::async_runtime::spawn(async move {
-        loop {
-            let recording_active = {
-                let state = app.state::<AppState>();
-                is_recording_active(state.inner())
-            };
-            let tray_visible = app
-                .get_webview_window("tray")
+// ── Entry point ──────────────────────────────────────────────────────────────
+
+fn main() {
+    let builder = tauri::Builder::default();
+    let builder = builder.setup(|app| {
+        let data_dir = app_data_dir(&app.handle())?;
+        app.manage(AppDirs {
+            app_data_dir: data_dir.clone(),
+        });
+        window_manager::register_close_to_tray_for_main(&app.handle());
+        let _ = tray_manager::apply_app_icons_for_theme(
+            &app.handle(),
+            tray_manager::resolve_system_theme(&app.handle()),
+        );
+        if let Ok(mut tray_app) = app.state::<AppState>().tray_app.lock() {
+            *tray_app = Some(app.handle().clone());
+        }
+        if window_manager::should_start_hidden_on_launch_from_env() {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+            }
+        }
+        spawn_retry_worker(AppDirs {
+            app_data_dir: data_dir.clone(),
+        });
+        window_manager::spawn_live_levels_worker(
+            app.handle().clone(),
+            AppDirs {
+                app_data_dir: data_dir.clone(),
+            },
+        );
+        window_manager::prewarm_tray_window(&app.handle())?;
+        tray_manager::spawn_tray_idle_release_worker(app.handle().clone());
+        #[cfg(target_os = "macos")]
+        {
+            let app_menu = tray_manager::build_macos_app_menu(app)?;
+            app.set_menu(app_menu).map_err(|e| e.to_string())?;
+            app.on_menu_event(|app, event| {
+                if event.id().as_ref() == "app_settings" {
+                    let _ = window_manager::open_settings_window_internal(app);
+                }
+            });
+        }
+
+        let open_item = MenuItem::with_id(app, "open", "Open BigEcho", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+        let recorder_item = MenuItem::with_id(app, "recorder", "Recorder", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+        let toggle_item =
+            MenuItem::with_id(app, "toggle", "Show/Hide BigEcho", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+        let start_item =
+            MenuItem::with_id(app, "start", "Start Recording", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+        let stop_item = MenuItem::with_id(app, "stop", "Stop Recording", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+        let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+        let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+
+        let menu = Menu::with_items(
+            app,
+            &[
+                &open_item,
+                &recorder_item,
+                &toggle_item,
+                &start_item,
+                &stop_item,
+                &settings_item,
+                &quit_item,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let initial_tray_icon = tray_manager::load_png_icon(tray_manager::tray_icon_bytes(
+            tray_manager::choose_tray_icon_variant(
+                tray_manager::resolve_system_theme(&app.handle()),
+                false,
+            ),
+        ))?;
+        let left_click_context_menu =
+            tray_manager::should_show_context_menu_on_left_click(std::env::consts::OS);
+
+        TrayIconBuilder::with_id(tray_manager::TRAY_ICON_ID)
+            .icon(initial_tray_icon)
+            .menu(&menu)
+            .tooltip("BigEcho IDLE")
+            .show_menu_on_left_click(left_click_context_menu)
+            .on_menu_event(|tray, event| {
+                let app = tray.app_handle();
+                match event.id().as_ref() {
+                    "open" => {
+                        let _ = window_manager::focus_main_window(app);
+                    }
+                    "toggle" => {
+                        let _ = window_manager::toggle_main_window_visibility(app);
+                    }
+                    "recorder" => {
+                        let _ = window_manager::open_tray_window_internal(app);
+                    }
+                    "start" => {
+                        let _ = window_manager::focus_main_window(app);
+                        let _ = app.emit("tray:start", ());
+                    }
+                    "stop" => {
+                        let _ = app.emit("tray:stop", ());
+                        let state = app.state::<AppState>();
+                        let dirs = app.state::<AppDirs>();
+                        let _ = stop_active_recording_internal(
+                            dirs.inner(),
+                            state.inner(),
+                            None,
+                            Some(app),
+                        );
+                    }
+                    "settings" => {
+                        let _ = window_manager::open_settings_window_internal(app);
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                }
+            })
+            .on_tray_icon_event(|tray, event| {
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    position,
+                    ..
+                } = event
+                {
+                    if tray_manager::should_toggle_tray_popover_on_left_click(
+                        std::env::consts::OS,
+                    ) {
+                        let _ = window_manager::toggle_tray_window_visibility(
+                            tray.app_handle(),
+                            Some(position),
+                        );
+                    }
+                }
+            })
+            .build(app)
+            .map_err(|e| e.to_string())?;
+        let _ = tray_manager::set_tray_indicator(&app.handle(), false);
+
+        let app_handle = app.handle().clone();
+        let _status_listener = app.listen("recording:status", move |event: tauri::Event| {
+            let recording = tray_manager::parse_recording_flag(event.payload());
+            let _ = tray_manager::set_tray_indicator(&app_handle, recording);
+        });
+        let app_handle = app.handle().clone();
+        let _ui_recording_listener = app.listen("ui:recording", move |event: tauri::Event| {
+            let recording = tray_manager::parse_recording_flag(event.payload());
+            let _ = tray_manager::set_tray_indicator(&app_handle, recording);
+        });
+        Ok(())
+    });
+
+    let app = builder
+        .plugin(hotkey_manager::build_global_shortcut_plugin())
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            get_settings,
+            save_public_settings,
+            pick_recording_root,
+            get_macos_system_audio_permission_status,
+            open_macos_system_audio_settings,
+            list_text_editor_apps,
+            get_computer_name,
+            list_audio_input_devices,
+            detect_system_source_device,
+            open_settings_window,
+            open_tray_window,
+            open_session_folder,
+            open_session_artifact,
+            read_session_artifact,
+            delete_session,
+            delete_session_audio,
+            list_sessions,
+            list_known_tags,
+            search_session_artifacts,
+            import_audio_session,
+            get_ui_sync_state,
+            set_ui_sync_state,
+            get_live_input_levels,
+            get_session_meta,
+            update_session_details,
+            set_api_secret,
+            get_api_secret,
+            start_recording,
+            stop_recording,
+            stop_active_recording,
+            set_recording_input_muted,
+            run_pipeline,
+            retry_pipeline,
+            run_transcription,
+            run_summary,
+            sync_sessions
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building bigecho app");
+
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = event
+        {
+            let main_window_visible = app_handle
+                .get_webview_window("main")
                 .and_then(|window| window.is_visible().ok())
                 .unwrap_or(false);
-
-            if should_probe_idle_levels(recording_active, tray_visible) {
-                let settings = get_settings_from_dirs(&dirs).ok();
-                let (mic_name, system_name) = if let Some(settings) = settings {
-                    let mic = settings.mic_device_name.trim().to_string();
-                    let system = settings.system_device_name.trim().to_string();
-                    (
-                        if mic.is_empty() { None } else { Some(mic) },
-                        if system.is_empty() {
-                            None
-                        } else {
-                            Some(system)
-                        },
-                    )
-                } else {
-                    (None, None)
-                };
-                let probe_result = tauri::async_runtime::spawn_blocking(move || {
-                    audio::capture::probe_levels(mic_name.as_deref(), system_name.as_deref())
-                })
-                .await
-                .ok()
-                .and_then(Result::ok);
-
-                let state = app.state::<AppState>();
-                if let Some(levels) = probe_result {
-                    state.live_levels.set_mic(levels.mic);
-                    state.live_levels.set_system(levels.system);
-                } else {
-                    state.live_levels.reset();
-                }
-            } else if !recording_active {
-                let state = app.state::<AppState>();
-                state.live_levels.reset();
+            if window_manager::should_reveal_main_window_on_app_reopen(
+                has_visible_windows,
+                main_window_visible,
+            ) {
+                let _ = window_manager::focus_main_window(app_handle);
             }
-            tokio::time::sleep(std::time::Duration::from_millis(LIVE_LEVELS_IDLE_POLL_MS)).await;
         }
     });
 }
 
-fn parse_recording_flag(payload: &str) -> bool {
-    fn from_value(value: &serde_json::Value) -> Option<bool> {
-        value.get("recording").and_then(|f| f.as_bool())
-    }
-
-    let parsed = serde_json::from_str::<serde_json::Value>(payload).ok();
-    match parsed {
-        Some(serde_json::Value::Object(_)) => parsed.as_ref().and_then(from_value).unwrap_or(false),
-        Some(serde_json::Value::String(inner)) => serde_json::from_str::<serde_json::Value>(&inner)
-            .ok()
-            .as_ref()
-            .and_then(from_value)
-            .unwrap_or(false),
-        _ => false,
-    }
-}
+// ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod ipc_runtime_tests {
@@ -795,107 +514,6 @@ mod ipc_runtime_tests {
     use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
     use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
     use tauri::webview::InvokeRequest;
-
-    #[test]
-    fn close_to_tray_intercepts_only_main_window() {
-        assert!(should_intercept_close_to_tray("main"));
-        assert!(!should_intercept_close_to_tray("settings"));
-    }
-
-    #[test]
-    fn start_hidden_env_policy_respects_debug_default() {
-        assert!(!should_start_hidden_on_launch(None, false));
-        assert!(should_start_hidden_on_launch(None, true));
-        assert!(should_start_hidden_on_launch(Some("1"), false));
-        assert!(should_start_hidden_on_launch(Some("true"), false));
-        assert!(!should_start_hidden_on_launch(Some("0"), true));
-        assert!(!should_start_hidden_on_launch(Some("false"), true));
-    }
-
-    #[test]
-    fn tray_variant_depends_on_theme_and_recording_status() {
-        assert_eq!(
-            choose_tray_icon_variant(Theme::Light, false),
-            TrayIconVariant::IdleLight
-        );
-        assert_eq!(
-            choose_tray_icon_variant(Theme::Dark, false),
-            TrayIconVariant::IdleDark
-        );
-        assert_eq!(
-            choose_tray_icon_variant(Theme::Light, true),
-            TrayIconVariant::RecDark
-        );
-        assert_eq!(
-            choose_tray_icon_variant(Theme::Dark, true),
-            TrayIconVariant::RecDark
-        );
-    }
-
-    #[test]
-    fn tray_popover_autoclose_policy_hides_on_focus_loss_for_all_platforms() {
-        assert!(should_hide_tray_popover_on_focus_lost(false));
-        assert!(!should_hide_tray_popover_on_focus_lost(true));
-    }
-
-    #[test]
-    fn parse_recording_flag_supports_object_and_nested_json_string() {
-        assert!(parse_recording_flag(r#"{"recording":true}"#));
-        assert!(parse_recording_flag(r#""{\"recording\":true}""#));
-        assert!(!parse_recording_flag(r#"{"recording":false}"#));
-    }
-
-    #[test]
-    fn audio_duration_is_formatted_as_hh_mm_ss() {
-        let mut meta = SessionMeta::new(
-            "s-duration".to_string(),
-            vec!["slack".to_string()],
-            "".to_string(),
-            vec![],
-        );
-        meta.started_at_iso = "2026-03-11T10:00:00+03:00".to_string();
-        meta.ended_at_iso = Some("2026-03-11T11:02:03+03:00".to_string());
-        assert_eq!(
-            crate::storage::sqlite_repo::audio_duration_hms(&meta),
-            "01:02:03"
-        );
-    }
-
-    #[test]
-    fn tray_left_click_policy_is_platform_specific() {
-        assert!(should_show_context_menu_on_left_click("windows"));
-        assert!(!should_show_context_menu_on_left_click("macos"));
-        assert!(should_toggle_tray_popover_on_left_click("macos"));
-        assert!(!should_toggle_tray_popover_on_left_click("windows"));
-        assert!(!should_toggle_tray_popover_on_left_click("linux"));
-    }
-
-    #[test]
-    fn tray_toggle_hides_only_when_popover_is_visible_and_focused() {
-        assert!(should_hide_tray_popover_on_toggle_request(true, true));
-        assert!(!should_hide_tray_popover_on_toggle_request(true, false));
-        assert!(!should_hide_tray_popover_on_toggle_request(false, false));
-    }
-
-    #[test]
-    fn main_window_focus_hides_tray() {
-        assert!(should_hide_tray_when_main_window_focuses(true));
-        assert!(!should_hide_tray_when_main_window_focuses(false));
-    }
-
-    #[test]
-    fn app_reopen_reveals_main_only_when_no_window_is_visible() {
-        assert!(should_reveal_main_window_on_app_reopen(false, false));
-        assert!(!should_reveal_main_window_on_app_reopen(true, false));
-        assert!(!should_reveal_main_window_on_app_reopen(false, true));
-    }
-
-    #[test]
-    fn idle_levels_probe_requires_visible_tray_window() {
-        assert!(should_probe_idle_levels(false, true));
-        assert!(!should_probe_idle_levels(false, false));
-        assert!(!should_probe_idle_levels(true, true));
-    }
 
     #[test]
     fn auto_pipeline_after_stop_requires_toggle_and_urls() {
@@ -944,6 +562,23 @@ mod ipc_runtime_tests {
         assert!(!mic_src.exists());
         assert!(!sys_src.exists());
         assert_eq!(preserved.len(), 2);
+    }
+
+    #[test]
+    fn audio_duration_is_formatted_as_hh_mm_ss() {
+        let mut meta = SessionMeta::new(
+            "s-duration".to_string(),
+            "slack".to_string(),
+            vec!["slack".to_string()],
+            "".to_string(),
+            String::new(),
+        );
+        meta.started_at_iso = "2026-03-11T10:00:00+03:00".to_string();
+        meta.ended_at_iso = Some("2026-03-11T11:02:03+03:00".to_string());
+        assert_eq!(
+            crate::storage::sqlite_repo::audio_duration_hms(&meta),
+            "01:02:03"
+        );
     }
 
     fn invoke_request(cmd: &str, body: serde_json::Value) -> InvokeRequest {
@@ -996,6 +631,7 @@ mod ipc_runtime_tests {
                 get_macos_system_audio_permission_status,
                 open_macos_system_audio_settings,
                 list_text_editor_apps,
+                get_computer_name,
                 list_sessions,
                 search_session_artifacts,
                 import_audio_session,
@@ -1004,6 +640,8 @@ mod ipc_runtime_tests {
                 open_session_artifact,
                 read_session_artifact,
                 delete_session,
+                delete_session_audio,
+                list_known_tags,
                 get_session_meta,
                 update_session_details,
                 start_recording,
@@ -1013,7 +651,8 @@ mod ipc_runtime_tests {
                 run_pipeline,
                 retry_pipeline,
                 run_transcription,
-                run_summary
+                run_summary,
+                sync_sessions
             ])
             .build(ctx)
             .expect("failed to build test app");
@@ -1040,6 +679,32 @@ mod ipc_runtime_tests {
         format!("http://{addr}")
     }
 
+    fn spawn_mock_pipeline_capture_server() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let addr = listener.local_addr().expect("local addr");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured_requests = Arc::clone(&requests);
+        thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let request = read_http_request(&mut stream);
+                let body = if request.starts_with("POST /transcribe ") {
+                    r#"{"text":"mock transcript"}"#
+                } else if request.starts_with("POST /summary ") {
+                    r#"{"choices":[{"message":{"content":"mock summary"}}]}"#
+                } else {
+                    r#"{"error":"not found"}"#
+                };
+                captured_requests
+                    .lock()
+                    .expect("lock requests")
+                    .push(request);
+                write_http_json_response(&mut stream, body);
+            }
+        });
+        (format!("http://{addr}"), requests)
+    }
+
     fn spawn_summary_capture_server() -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind summary server");
         let addr = listener.local_addr().expect("local addr");
@@ -1048,7 +713,10 @@ mod ipc_runtime_tests {
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
             let request = read_http_request(&mut stream);
-            captured_requests.lock().expect("lock requests").push(request);
+            captured_requests
+                .lock()
+                .expect("lock requests")
+                .push(request);
             write_http_json_response(
                 &mut stream,
                 r#"{"choices":[{"message":{"content":"mock summary"}}]}"#,
@@ -1125,6 +793,25 @@ mod ipc_runtime_tests {
         stream.flush().expect("flush response");
     }
 
+    fn request_json_payload(request: &str) -> serde_json::Value {
+        let request_body = request
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        serde_json::from_str(request_body).expect("valid json payload")
+    }
+
+    fn expected_pipeline_markdown_artifact(body: &str) -> String {
+        format!(
+            "---\nsource: \"zoom\"\ntags:\n  - \"zoom\"\nnotes: \"Notes\"\ntopic: \"Weekly sync\"\n---\n\n{body}"
+        )
+    }
+
+    fn assert_summary_request_user_content(request: &str, expected: &str) {
+        let payload = request_json_payload(request);
+        assert_eq!(payload["messages"][1]["content"].as_str(), Some(expected));
+    }
+
     fn seed_pipeline_ready_session(
         app_data_dir: &std::path::Path,
         session_id: &str,
@@ -1163,9 +850,10 @@ mod ipc_runtime_tests {
         let meta_path = session_dir.join("meta.json");
         let mut meta = SessionMeta::new(
             session_id.to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Weekly sync".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.artifacts.audio_file =
             crate::audio::file_writer::audio_file_name(&settings.audio_format);
@@ -1215,9 +903,10 @@ mod ipc_runtime_tests {
         let meta_path = session_dir.join("meta.json");
         let mut meta = SessionMeta::new(
             session_id.to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Weekly sync".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.artifacts.audio_file = "audio.opus".to_string();
         meta.artifacts.transcript_file = "transcript.txt".to_string();
@@ -1227,7 +916,7 @@ mod ipc_runtime_tests {
     }
 
     #[test]
-    fn invoke_start_allows_empty_topic_and_participants() {
+    fn invoke_start_allows_empty_topic() {
         let (app, _) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
@@ -1237,7 +926,7 @@ mod ipc_runtime_tests {
             invoke_request(
                 "start_recording",
                 json!({
-                    "payload": {"tags":["zoom"], "topic":"", "participants":[]}
+                    "payload": {"source":"", "tags":["zoom"], "topic":"", "notes":""}
                 }),
             ),
         );
@@ -1256,6 +945,17 @@ mod ipc_runtime_tests {
 
         let base_url = spawn_mock_pipeline_server();
         seed_pipeline_ready_session(&app_data_dir, "session-details", &base_url);
+        let session_dir = app_data_dir.join("sessions").join("session-details");
+        std::fs::write(
+            session_dir.join("transcript.txt"),
+            expected_pipeline_markdown_artifact("Original transcript"),
+        )
+        .expect("write transcript");
+        std::fs::write(
+            session_dir.join("summary.md"),
+            expected_pipeline_markdown_artifact("Original summary"),
+        )
+        .expect("write summary");
 
         let update_response = get_ipc_response(
             &webview,
@@ -1264,11 +964,11 @@ mod ipc_runtime_tests {
                 json!({
                     "payload": {
                         "session_id":"session-details",
-                        "source":"telegram",
-                        "custom_tag":"client-a",
-                        "customSummaryPrompt":"Сделай саммари только по решениям",
-                        "topic":"",
-                        "participants":["Alice", "Bob"]
+                        "source":" telegram ",
+                        "notes":" Follow up on renewal ",
+                        "customSummaryPrompt":" Сделай саммари только по решениям ",
+                        "topic":" ",
+                        "tags":[" renewal ", "client-a", "renewal", " "]
                     }
                 }),
             ),
@@ -1283,17 +983,26 @@ mod ipc_runtime_tests {
         let get_out = extract_ok_json(get_response.expect("get should succeed"));
         let details = get_out.as_object().expect("session details object");
         assert_eq!(details["source"], "telegram");
-        assert_eq!(details["custom_tag"], "client-a");
+        assert_eq!(details["notes"], "Follow up on renewal");
         assert_eq!(
             details["custom_summary_prompt"],
             "Сделай саммари только по решениям"
         );
         assert_eq!(details["topic"], "");
         assert_eq!(
-            serde_json::from_value::<Vec<String>>(details["participants"].clone())
-                .expect("participants"),
-            vec!["Alice".to_string(), "Bob".to_string()]
+            serde_json::from_value::<Vec<String>>(details["tags"].clone()).expect("tags"),
+            vec!["client-a".to_string(), "renewal".to_string()]
         );
+        let transcript =
+            std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
+        assert!(transcript.contains("source: \"telegram\"\n"));
+        assert!(transcript.contains("  - \"client-a\"\n  - \"renewal\"\n"));
+        assert!(transcript.contains("notes: \"Follow up on renewal\"\n"));
+        assert!(transcript.ends_with("Original transcript"));
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        assert!(summary.contains("source: \"telegram\"\n"));
+        assert!(summary.ends_with("Original summary"));
     }
 
     #[test]
@@ -1330,7 +1039,7 @@ mod ipc_runtime_tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("webview should be created");
-        let base_url = spawn_mock_pipeline_server();
+        let (base_url, requests) = spawn_mock_pipeline_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-success", &base_url);
         let mut settings = load_settings(&app_data_dir).expect("load settings");
         settings.api_call_logging_enabled = true;
@@ -1349,9 +1058,19 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-success");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
-        assert_eq!(transcript, "mock transcript");
-        assert_eq!(summary, "mock summary");
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        assert_eq!(
+            transcript,
+            expected_pipeline_markdown_artifact("mock transcript")
+        );
+        assert_eq!(summary, expected_pipeline_markdown_artifact("mock summary"));
+        let captured = requests.lock().expect("lock requests");
+        let summary_request = captured
+            .iter()
+            .find(|request| request.starts_with("POST /summary "))
+            .expect("summary request should be captured");
+        assert_summary_request_user_content(summary_request, "mock transcript");
         let api_log =
             std::fs::read_to_string(session_dir.join("api_calls.txt")).expect("read api_calls.txt");
         assert!(api_log.contains("api_transcription_request"));
@@ -1414,9 +1133,13 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-retry-success");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
-        assert_eq!(transcript, "mock transcript");
-        assert_eq!(summary, "mock summary");
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        assert_eq!(
+            transcript,
+            expected_pipeline_markdown_artifact("mock transcript")
+        );
+        assert_eq!(summary, expected_pipeline_markdown_artifact("mock summary"));
 
         let listed = list_sessions(&app_data_dir).expect("list sessions");
         assert_eq!(listed[0].status, "done");
@@ -1449,7 +1172,10 @@ mod ipc_runtime_tests {
         let session_dir = app_data_dir.join("sessions").join("session-get-text");
         let transcript =
             std::fs::read_to_string(session_dir.join("transcript.txt")).expect("read transcript");
-        assert_eq!(transcript, "mock transcript");
+        assert_eq!(
+            transcript,
+            expected_pipeline_markdown_artifact("mock transcript")
+        );
         assert!(!session_dir.join("summary.md").exists());
 
         let listed = list_sessions(&app_data_dir).expect("list sessions");
@@ -1462,11 +1188,14 @@ mod ipc_runtime_tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("webview should be created");
-        let base_url = spawn_mock_pipeline_server();
+        let (base_url, requests) = spawn_summary_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-summary-only", &base_url);
         let session_dir = app_data_dir.join("sessions").join("session-summary-only");
-        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
-            .expect("write transcript");
+        std::fs::write(
+            session_dir.join("transcript.txt"),
+            expected_pipeline_markdown_artifact("existing transcript"),
+        )
+        .expect("write transcript");
 
         let response = get_ipc_response(
             &webview,
@@ -1478,8 +1207,11 @@ mod ipc_runtime_tests {
             "done".to_string()
         );
 
-        let summary = std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
-        assert_eq!(summary, "mock summary");
+        let summary =
+            std::fs::read_to_string(session_dir.join("summary.md")).expect("read summary");
+        assert_eq!(summary, expected_pipeline_markdown_artifact("mock summary"));
+        let captured = requests.lock().expect("lock requests");
+        assert_summary_request_user_content(&captured[0], "existing transcript");
     }
 
     #[test]
@@ -1531,7 +1263,9 @@ mod ipc_runtime_tests {
             .expect("webview should be created");
         let (base_url, requests) = spawn_summary_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-summary-persisted", &base_url);
-        let session_dir = app_data_dir.join("sessions").join("session-summary-persisted");
+        let session_dir = app_data_dir
+            .join("sessions")
+            .join("session-summary-persisted");
         std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
             .expect("write transcript");
 
@@ -1542,7 +1276,10 @@ mod ipc_runtime_tests {
 
         let response = get_ipc_response(
             &webview,
-            invoke_request("run_summary", json!({ "sessionId":"session-summary-persisted" })),
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId":"session-summary-persisted" }),
+            ),
         )
         .expect("run_summary should succeed");
         assert_eq!(
@@ -1571,13 +1308,18 @@ mod ipc_runtime_tests {
             .expect("webview should be created");
         let (base_url, requests) = spawn_summary_capture_server();
         seed_pipeline_ready_session(&app_data_dir, "session-summary-default", &base_url);
-        let session_dir = app_data_dir.join("sessions").join("session-summary-default");
+        let session_dir = app_data_dir
+            .join("sessions")
+            .join("session-summary-default");
         std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
             .expect("write transcript");
 
         let response = get_ipc_response(
             &webview,
-            invoke_request("run_summary", json!({ "sessionId":"session-summary-default" })),
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId":"session-summary-default" }),
+            ),
         )
         .expect("run_summary should succeed");
         assert_eq!(
@@ -1674,9 +1416,10 @@ mod ipc_runtime_tests {
             let mut active = state.active_session.lock().expect("active session lock");
             *active = Some(SessionMeta::new(
                 "session-delete-active".to_string(),
+                "zoom".to_string(),
                 vec!["zoom".to_string()],
                 "Broken active".to_string(),
-                vec![],
+                String::new(),
             ));
         }
 
@@ -1878,233 +1621,4 @@ mod ipc_runtime_tests {
             .count();
         assert_eq!(scheduled_count, 1);
     }
-}
-
-fn main() {
-    let builder = tauri::Builder::default();
-    let builder = builder.setup(|app| {
-        let data_dir = app_data_dir(&app.handle())?;
-        app.manage(AppDirs {
-            app_data_dir: data_dir.clone(),
-        });
-        register_close_to_tray_for_main(&app.handle());
-        let _ = apply_app_icons_for_theme(&app.handle(), resolve_system_theme(&app.handle()));
-        if let Ok(mut tray_app) = app.state::<AppState>().tray_app.lock() {
-            *tray_app = Some(app.handle().clone());
-        }
-        if should_start_hidden_on_launch_from_env() {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.hide();
-            }
-        }
-        spawn_retry_worker(AppDirs {
-            app_data_dir: data_dir.clone(),
-        });
-        spawn_live_levels_worker(
-            app.handle().clone(),
-            AppDirs {
-                app_data_dir: data_dir.clone(),
-            },
-        );
-        prewarm_tray_window(&app.handle())?;
-        #[cfg(target_os = "macos")]
-        {
-            let app_menu = build_macos_app_menu(app)?;
-            app.set_menu(app_menu).map_err(|e| e.to_string())?;
-            app.on_menu_event(|app, event| {
-                if event.id().as_ref() == "app_settings" {
-                    let _ = open_settings_window_internal(app);
-                }
-            });
-        }
-
-        let open_item = MenuItem::with_id(app, "open", "Open BigEcho", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let recorder_item = MenuItem::with_id(app, "recorder", "Recorder", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let toggle_item = MenuItem::with_id(app, "toggle", "Show/Hide BigEcho", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let start_item = MenuItem::with_id(app, "start", "Start Recording", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let stop_item = MenuItem::with_id(app, "stop", "Stop Recording", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-
-        let menu = Menu::with_items(
-            app,
-            &[
-                &open_item,
-                &recorder_item,
-                &toggle_item,
-                &start_item,
-                &stop_item,
-                &settings_item,
-                &quit_item,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-
-        let initial_tray_icon = load_png_icon(tray_icon_bytes(choose_tray_icon_variant(
-            resolve_system_theme(&app.handle()),
-            false,
-        )))?;
-        let left_click_context_menu = should_show_context_menu_on_left_click(std::env::consts::OS);
-
-        TrayIconBuilder::with_id(TRAY_ICON_ID)
-            .icon(initial_tray_icon)
-            .menu(&menu)
-            .tooltip("BigEcho IDLE")
-            .show_menu_on_left_click(left_click_context_menu)
-            .on_menu_event(|tray, event| {
-                let app = tray.app_handle();
-                match event.id().as_ref() {
-                    "open" => {
-                        let _ = focus_main_window(app);
-                    }
-                    "toggle" => {
-                        let _ = toggle_main_window_visibility(app);
-                    }
-                    "recorder" => {
-                        let _ = open_tray_window_internal(app);
-                    }
-                    "start" => {
-                        let _ = focus_main_window(app);
-                        let _ = app.emit("tray:start", ());
-                    }
-                    "stop" => {
-                        let _ = app.emit("tray:stop", ());
-                        let state = app.state::<AppState>();
-                        let dirs = app.state::<AppDirs>();
-                        let _ = stop_active_recording_internal(
-                            dirs.inner(),
-                            state.inner(),
-                            None,
-                            Some(app),
-                        );
-                    }
-                    "settings" => {
-                        let _ = open_settings_window_internal(app);
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                }
-            })
-            .on_tray_icon_event(|tray, event| {
-                if let TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    position,
-                    ..
-                } = event
-                {
-                    if should_toggle_tray_popover_on_left_click(std::env::consts::OS) {
-                        let _ = toggle_tray_window_visibility(tray.app_handle(), Some(position));
-                    }
-                }
-            })
-            .build(app)
-            .map_err(|e| e.to_string())?;
-        let _ = set_tray_indicator(&app.handle(), false);
-
-        let app_handle = app.handle().clone();
-        let _status_listener = app.listen("recording:status", move |event: tauri::Event| {
-            let recording = parse_recording_flag(event.payload());
-            let _ = set_tray_indicator(&app_handle, recording);
-        });
-        let app_handle = app.handle().clone();
-        let _ui_recording_listener = app.listen("ui:recording", move |event: tauri::Event| {
-            let recording = parse_recording_flag(event.payload());
-            let _ = set_tray_indicator(&app_handle, recording);
-        });
-        Ok(())
-    });
-
-    let app = builder
-        .plugin(
-            GlobalShortcutBuilder::new()
-                .with_shortcuts([REC_HOTKEY, STOP_HOTKEY])
-                .expect("failed to register global shortcuts")
-                .with_handler(|app, shortcut, event| {
-                    if event.state() != ShortcutState::Pressed {
-                        return;
-                    }
-                    let shortcut_text = shortcut.to_string();
-                    if shortcut_text == REC_HOTKEY {
-                        let _ = app.emit("tray:start", ());
-                    } else if shortcut_text == STOP_HOTKEY {
-                        let _ = app.emit("tray:stop", ());
-                        let state = app.state::<AppState>();
-                        let dirs = app.state::<AppDirs>();
-                        let _ = stop_active_recording_internal(
-                            dirs.inner(),
-                            state.inner(),
-                            None,
-                            Some(app),
-                        );
-                    }
-                })
-                .build(),
-        )
-        .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![
-            get_settings,
-            save_public_settings,
-            pick_recording_root,
-            get_macos_system_audio_permission_status,
-            open_macos_system_audio_settings,
-            list_text_editor_apps,
-            list_audio_input_devices,
-            detect_system_source_device,
-            open_settings_window,
-            open_tray_window,
-            open_session_folder,
-            open_session_artifact,
-            read_session_artifact,
-            delete_session,
-            list_sessions,
-            search_session_artifacts,
-            import_audio_session,
-            get_ui_sync_state,
-            set_ui_sync_state,
-            get_live_input_levels,
-            get_session_meta,
-            update_session_details,
-            set_api_secret,
-            get_api_secret,
-            start_recording,
-            stop_recording,
-            stop_active_recording,
-            set_recording_input_muted,
-            run_pipeline,
-            retry_pipeline,
-            run_transcription,
-            run_summary
-        ])
-        .build(tauri::generate_context!())
-        .expect("error while building bigecho app");
-
-    app.run(|app_handle, event| {
-        #[cfg(target_os = "macos")]
-        if let RunEvent::Reopen {
-            has_visible_windows,
-            ..
-        } = event
-        {
-            let main_window_visible = app_handle
-                .get_webview_window("main")
-                .and_then(|window| window.is_visible().ok())
-                .unwrap_or(false);
-            if should_reveal_main_window_on_app_reopen(
-                has_visible_windows,
-                main_window_visible,
-            ) {
-                let _ = focus_main_window(app_handle);
-            }
-        }
-    });
 }

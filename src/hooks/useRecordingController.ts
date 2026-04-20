@@ -5,11 +5,11 @@ import {
   RecordingMuteState,
   StartResponse,
   UiSyncStateView,
-} from "../../appTypes";
-import { captureAnalyticsEvent } from "../../lib/analytics";
-import { clamp01, parseEventPayload, splitParticipants } from "../../lib/appUtils";
-import { tauriEmit, tauriInvoke, tauriListen } from "../../lib/tauri";
-import { defaultRecordingMuteState, nextRecordingMuteState } from "./trayAudio";
+} from "../types";
+import { captureAnalyticsEvent } from "../lib/analytics";
+import { clamp01, parseEventPayload, splitTags } from "../lib/appUtils";
+import { tauriEmit, tauriInvoke, tauriListen } from "../lib/tauri";
+import { defaultRecordingMuteState, nextRecordingMuteState } from "../lib/trayAudio";
 
 const UI_SYNC_DEBOUNCE_MS = 150;
 const TRAY_LEVELS_IDLE_POLL_MS = 280;
@@ -23,12 +23,10 @@ type UseRecordingControllerOptions = {
   isTrayWindow: boolean;
   topic: string;
   setTopic: Setter<string>;
-  participants: string;
-  setParticipants: Setter<string>;
+  tagsInput: string;
   source: string;
   setSource: Setter<string>;
-  customTag: string;
-  setCustomTag: Setter<string>;
+  notesInput: string;
   session: StartResponse | null;
   setSession: Setter<StartResponse | null>;
   lastSessionId: string | null;
@@ -51,10 +49,10 @@ export function useRecordingController({
   isTrayWindow,
   topic,
   setTopic,
-  participants,
+  tagsInput,
   source,
   setSource,
-  customTag,
+  notesInput,
   session,
   setSession,
   lastSessionId,
@@ -117,25 +115,24 @@ export function useRecordingController({
 
   async function startRecording(payload: {
     source: string;
-    customTag?: string;
+    notes?: string;
     topic?: string;
-    participants?: string[];
+    tags?: string[];
     surface?: string;
   }) {
     void captureAnalyticsEvent("rec_clicked", {
       source: payload.source,
       surface: payload.surface ?? (isTrayWindow ? "tray" : "main"),
-      custom_tag_present: Boolean(payload.customTag?.trim()),
+      notes_present: Boolean(payload.notes?.trim()),
       topic_present: Boolean(payload.topic?.trim()),
-      participants_count: payload.participants?.length ?? 0,
+      tags_count: payload.tags?.length ?? 0,
     });
-    const tags = [payload.source];
-    if (payload.customTag && payload.customTag.trim()) tags.push(payload.customTag.trim());
     const response = await tauriInvoke<StartResponse>("start_recording", {
       payload: {
-        tags,
+        source: payload.source,
+        tags: payload.tags ?? [],
+        notes: payload.notes ?? "",
         topic: payload.topic ?? "",
-        participants: payload.participants ?? [],
       },
     });
     setRecordingSession(response.session_id);
@@ -146,9 +143,9 @@ export function useRecordingController({
   async function start() {
     await startRecording({
       source,
-      customTag,
+      notes: notesInput,
       topic,
-      participants: splitParticipants(participants),
+      tags: splitTags(tagsInput),
       surface: "main",
     });
   }
@@ -158,7 +155,8 @@ export function useRecordingController({
       await startRecording({
         source,
         topic,
-        participants: [],
+        tags: [],
+        notes: "",
         surface: "tray",
       });
     } catch (err) {
@@ -291,7 +289,8 @@ export function useRecordingController({
           await startRecording({
             source: sourceRef.current,
             topic: topicRef.current,
-            participants: [],
+            tags: [],
+            notes: "",
             surface: "tray_event",
           });
         } catch (err) {
@@ -403,9 +402,9 @@ export function useRecordingController({
           payload: {
             session_id: session.session_id,
             source,
-            custom_tag: "",
+            notes: "",
             topic: topic.trim(),
-            participants: [],
+            tags: [],
           },
         });
         trayTopicSavedSignatureRef.current = signature;

@@ -6,9 +6,9 @@ import {
   SettingsTab,
   TextEditorAppOption,
   TextEditorAppsResponse,
-} from "../../appTypes";
-import { validateSettings } from "../../lib/validation";
-import { tauriInvoke } from "../../lib/tauri";
+} from "../types";
+import { validateSettings } from "../lib/validation";
+import { tauriInvoke } from "../lib/tauri";
 
 type UseSettingsFormOptions = {
   enabled?: boolean;

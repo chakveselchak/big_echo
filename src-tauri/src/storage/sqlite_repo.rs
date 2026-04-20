@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 pub struct SessionListMeta {
     pub session_id: String,
     pub source: String,
-    pub custom_tag: String,
+    pub notes: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,7 +257,18 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
     for row in rows {
         let mut item = row.map_err(|e| e.to_string())?;
         if let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? {
-            if let Ok(meta) = load_meta(&meta_path) {
+            match load_meta(&meta_path) {
+                Err(err) => {
+                    eprintln!(
+                        "list_sessions: failed to load meta for session {} at {}: {}",
+                        item.session_id,
+                        meta_path.display(),
+                        err
+                    );
+                    out.push(item);
+                    continue;
+                }
+                Ok(meta) => {
                 let session_dir = PathBuf::from(&item.session_dir);
                 let transcript_ok =
                     file_has_non_empty_text(&session_dir.join(&meta.artifacts.transcript_file));
@@ -273,20 +284,14 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     );
                 item.has_summary_text = summary_ok
                     && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
-                let custom_tag = meta
-                    .tags
-                    .iter()
-                    .skip(1)
-                    .find(|value| !value.trim().is_empty())
-                    .cloned()
-                    .unwrap_or_default();
                 item.meta = Some(SessionListMeta {
                     session_id: meta.session_id.clone(),
-                    source: meta.primary_tag.clone(),
-                    custom_tag,
+                    source: meta.source.clone(),
+                    notes: meta.notes.clone(),
                     topic: meta.topic.clone(),
-                    participants: meta.participants.clone(),
+                    tags: meta.tags.clone(),
                 });
+                }
             }
         }
         out.push(item);
@@ -320,6 +325,23 @@ pub fn get_session_dir(app_data_dir: &Path, session_id: &str) -> Result<Option<P
         return Ok(Some(PathBuf::from(p)));
     }
     Ok(None)
+}
+
+/// Returns all (session_id, session_dir) pairs from the DB — used by sync to
+/// detect sessions whose directories have been removed from the filesystem.
+pub fn list_session_id_dirs(app_data_dir: &Path) -> Result<Vec<(String, String)>, String> {
+    let conn = open(app_data_dir)?;
+    let mut stmt = conn
+        .prepare("SELECT session_id, session_dir FROM sessions")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
 }
 
 pub fn delete_session(app_data_dir: &Path, session_id: &str) -> Result<bool, String> {
@@ -462,9 +484,10 @@ mod tests {
 
         let mut meta = SessionMeta::new(
             "s-derived".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             "Weekly sync".to_string(),
-            vec!["Alice".to_string()],
+            "Notes".to_string(),
         );
         meta.started_at_iso = started.to_rfc3339();
         meta.ended_at_iso = Some(ended.to_rfc3339());

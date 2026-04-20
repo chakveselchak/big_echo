@@ -1,6 +1,6 @@
 [package]
 name = "bigecho"
-version = "1.4.7"
+version = "2.0.1"
 edition = "2021"
 
 [build-dependencies]
@@ -26,6 +26,7 @@ tauri-plugin-global-shortcut = "2"
 base64 = "0.22"
 sha2 = "0.10"
 swift-rs = "1.0.7"
+hostname = "0.4"
 
 [features]
 default = []

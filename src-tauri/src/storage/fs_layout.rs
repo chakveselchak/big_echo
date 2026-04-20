@@ -8,7 +8,7 @@ pub fn build_session_relative_dir(_primary_tag: &str, started_at: DateTime<Local
 }
 
 pub fn transcript_name(started_at: DateTime<Local>) -> String {
-    format!("transcript_{}.txt", started_at.format("%d.%m.%Y"))
+    format!("transcript_{}.md", started_at.format("%d.%m.%Y"))
 }
 
 pub fn summary_name(started_at: DateTime<Local>) -> String {
@@ -41,7 +41,7 @@ mod tests {
             .unwrap()
             .with_timezone(&Local);
 
-        assert_eq!(transcript_name(dt), "transcript_10.03.2026.txt");
+        assert_eq!(transcript_name(dt), "transcript_10.03.2026.md");
         assert_eq!(summary_name(dt), "summary_10.03.2026.md");
     }
 }

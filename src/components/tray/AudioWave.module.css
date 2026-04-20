@@ -1,0 +1,4 @@
+.container { display: block; width: 100%; height: 100%; }
+.baseline { stroke: currentColor; opacity: 0.2; fill: none; stroke-width: 1px; }
+.glow { stroke: #2275d4; opacity: 0.25; fill: none; stroke-width: 1px; filter: blur(2px); }
+.path { stroke: #2275d4; fill: none; stroke-width: 1px; }

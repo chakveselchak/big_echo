@@ -1,5 +1,5 @@
-import { RecordingInputChannel, RecordingMuteState } from "../../appTypes";
-import { clamp01 } from "../../lib/appUtils";
+import { RecordingInputChannel, RecordingMuteState } from "../types";
+import { clamp01 } from "./appUtils";
 
 export type TrayAudioWaveMode = "flat" | "gentle" | "strong";
 

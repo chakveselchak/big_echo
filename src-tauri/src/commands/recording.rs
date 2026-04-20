@@ -6,10 +6,8 @@ use crate::settings::secret_store::{get_secret, set_secret};
 use crate::storage::fs_layout::{build_session_relative_dir, summary_name, transcript_name};
 use crate::storage::session_store::save_meta;
 use crate::storage::sqlite_repo::{add_event, upsert_session};
-use crate::{
-    get_settings_from_dirs, root_recordings_dir, set_tray_indicator_from_state,
-    stop_active_recording_internal,
-};
+use crate::tray_manager::set_tray_indicator_from_state;
+use crate::{get_settings_from_dirs, root_recordings_dir, stop_active_recording_internal};
 use chrono::{DateTime, Local};
 #[cfg(test)]
 use std::cell::RefCell;
@@ -106,7 +104,7 @@ fn start_recording_impl(
     state: &AppState,
     payload: StartRecordingRequest,
 ) -> Result<StartRecordingResponse, String> {
-    validate_start_request(&payload.topic, &payload.participants)?;
+    validate_start_request(&payload.topic)?;
 
     let mut guard = state
         .active_session
@@ -126,17 +124,19 @@ fn start_recording_impl(
     }
 
     let session_id = Uuid::new_v4().to_string();
-    let source_from_payload = payload
-        .tags
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "zoom".to_string());
+    let source_from_payload = payload.source.trim();
+    let source_from_payload = if source_from_payload.is_empty() {
+        "zoom".to_string()
+    } else {
+        source_from_payload.to_string()
+    };
     let topic_from_payload = payload.topic.clone();
     let meta = SessionMeta::new(
         session_id.clone(),
+        source_from_payload.clone(),
         payload.tags,
         payload.topic,
-        payload.participants,
+        payload.notes,
     );
 
     let settings = get_settings_from_dirs(dirs)?;
@@ -181,16 +181,19 @@ fn start_recording_impl(
         save_meta(&abs_dir.join("meta.json"), &meta)?;
         let data_dir = dirs.app_data_dir.clone();
         upsert_session(&data_dir, &meta, &abs_dir, &abs_dir.join("meta.json"))?;
+        if let Ok(mut known) = state.known_tags.lock() {
+            for tag in &meta.tags {
+                if let Some(normalized) = crate::storage::tag_index::normalize_tag(tag) {
+                    known.insert(normalized);
+                }
+            }
+        }
         add_event(
             &data_dir,
             &meta.session_id,
             "recording_started",
             "Session created",
         )?;
-        std::fs::write(abs_dir.join(&meta.artifacts.transcript_file), "")
-            .map_err(|e| e.to_string())?;
-        std::fs::write(abs_dir.join(&meta.artifacts.summary_file), "")
-            .map_err(|e| e.to_string())?;
         Ok(())
     })();
     if let Err(err) = persist_result {
@@ -396,9 +399,10 @@ mod tests {
         let state = AppState::default();
         *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
             "active-session".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             String::new(),
-            vec![],
+            String::new(),
         ));
 
         let error =
@@ -416,9 +420,10 @@ mod tests {
         let state = AppState::default();
         *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
             "active-session".to_string(),
+            "zoom".to_string(),
             vec!["zoom".to_string()],
             String::new(),
-            vec![],
+            String::new(),
         ));
         *state.active_capture.lock().expect("capture lock") = Some(
             crate::audio::capture::ContinuousCapture::test_stub(state.recording_control.clone()),
@@ -427,9 +432,8 @@ mod tests {
             "native system mute failed".to_string(),
         )));
 
-        let error =
-            apply_recording_input_mute_for_state(&state, "active-session", "system", true)
-                .unwrap_err();
+        let error = apply_recording_input_mute_for_state(&state, "active-session", "system", true)
+            .unwrap_err();
 
         crate::audio::capture::set_test_set_channel_muted_result(None);
         assert_eq!(error, "native system mute failed");
@@ -448,9 +452,10 @@ mod tests {
         };
         let state = AppState::default();
         let payload = StartRecordingRequest {
+            source: "zoom".to_string(),
             tags: vec!["zoom".to_string()],
             topic: String::new(),
-            participants: vec![],
+            notes: String::new(),
         };
         let denied = crate::commands::settings::MacosSystemAudioPermissionStatus {
             kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Denied,
@@ -483,9 +488,10 @@ mod tests {
         };
         let state = AppState::default();
         let payload = StartRecordingRequest {
+            source: "zoom".to_string(),
             tags: vec!["zoom".to_string()],
             topic: String::new(),
-            participants: vec![],
+            notes: String::new(),
         };
         let granted = crate::commands::settings::MacosSystemAudioPermissionStatus {
             kind: crate::audio::macos_system_audio::MacosSystemAudioPermissionKind::Granted,

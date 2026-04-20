@@ -114,6 +114,7 @@ function buildPersonProperties(): Record<string, AnalyticsPropertyValue> {
     locale: context.locale ?? null,
     platform: context.platform ?? null,
     timezone: context.timezone ?? null,
+    computer_name: context.computer_name ?? null,
   };
 }
 

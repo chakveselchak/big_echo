@@ -24,21 +24,24 @@ const { captureAnalyticsEventMock, invokeMock } = vi.hoisted(() => ({
       return {
         session_id: "s1",
         source: "zoom",
-        custom_tag: "client-a",
+        notes: "client-a",
         custom_summary_prompt: "Сделай саммари по решениям",
         topic: "Weekly sync",
-        participants: ["Alice"],
+        tags: ["Alice"],
       };
+    }
+    if (cmd === "list_known_tags") {
+      return [];
     }
     return args ?? null;
   }),
 }));
 
-vi.mock("../../lib/tauri", () => ({
+vi.mock("../lib/tauri", () => ({
   tauriInvoke: invokeMock,
 }));
 
-vi.mock("../../lib/analytics", () => ({
+vi.mock("../lib/analytics", () => ({
   captureAnalyticsEvent: captureAnalyticsEventMock,
 }));
 
@@ -65,7 +68,7 @@ describe("useSessions", () => {
       expect(invokeMock).toHaveBeenCalledWith("list_sessions");
       expect(invokeMock).toHaveBeenCalledWith("get_session_meta", { sessionId: "s1" });
       expect(result.current.sessions).toHaveLength(1);
-      expect(result.current.sessionDetails.s1?.custom_tag).toBe("client-a");
+      expect(result.current.sessionDetails.s1?.notes).toBe("client-a");
       expect(result.current.sessionDetails.s1?.custom_summary_prompt).toBe("Сделай саммари по решениям");
     });
   });
@@ -87,11 +90,11 @@ describe("useSessions", () => {
             has_summary_text: false,
             meta: {
               session_id: "s-inline",
-              source: "meet",
-              custom_tag: "inline-tag",
+              source: "slack",
+              notes: "Inline note",
               custom_summary_prompt: "Inline summary prompt",
-              topic: "Inline meta",
-              participants: ["Alice", "Bob"],
+              topic: "Inline topic",
+              tags: ["project/acme", "call/sales"],
             },
           },
         ];
@@ -113,12 +116,78 @@ describe("useSessions", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.sessionDetails["s-inline"]?.custom_tag).toBe("inline-tag");
+      expect(result.current.sessionDetails["s-inline"]?.notes).toBe("Inline note");
       expect(result.current.sessionDetails["s-inline"]?.custom_summary_prompt).toBe("Inline summary prompt");
-      expect(result.current.sessionDetails["s-inline"]?.participants).toEqual(["Alice", "Bob"]);
+      expect(result.current.sessionDetails["s-inline"]?.tags).toEqual(["project/acme", "call/sales"]);
     });
 
     expect(invokeMock).not.toHaveBeenCalledWith("get_session_meta", { sessionId: "s-inline" });
+  });
+
+  it("loads known tags for autocomplete", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") return [];
+      if (cmd === "list_known_tags") return ["call/sales", "project/acme"];
+      return null;
+    });
+
+    const { result } = renderHook(() =>
+      useSessions({ setStatus: vi.fn(), lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    await waitFor(() => {
+      expect(result.current.knownTags).toEqual(["call/sales", "project/acme"]);
+    });
+  });
+
+  it("ignores stale known tag responses when refreshes resolve out of order", async () => {
+    const knownTagResolvers: Array<(tags: string[]) => void> = [];
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") return [];
+      if (cmd === "list_known_tags") {
+        return new Promise<string[]>((resolve) => {
+          knownTagResolvers.push(resolve);
+        });
+      }
+      return null;
+    });
+
+    const { result } = renderHook(() =>
+      useSessions({ setStatus: vi.fn(), lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    let firstLoad!: Promise<void>;
+    await act(async () => {
+      firstLoad = result.current.loadSessions();
+    });
+
+    let secondLoad!: Promise<void>;
+    await act(async () => {
+      secondLoad = result.current.loadSessions();
+    });
+
+    expect(knownTagResolvers).toHaveLength(2);
+
+    await act(async () => {
+      knownTagResolvers[1](["new"]);
+      await secondLoad;
+    });
+
+    await waitFor(() => {
+      expect(result.current.knownTags).toEqual(["new"]);
+    });
+
+    await act(async () => {
+      knownTagResolvers[0](["old"]);
+      await firstLoad;
+    });
+
+    expect(result.current.knownTags).toEqual(["new"]);
   });
 
   it("imports an audio file as a native session and reloads the list", async () => {
@@ -144,9 +213,9 @@ describe("useSessions", () => {
             meta: {
               session_id: "s-imported",
               source: "other",
-              custom_tag: "",
+              notes: "",
               topic: "Dictaphone note",
-              participants: [],
+              tags: [],
             },
           },
         ];
@@ -207,10 +276,10 @@ describe("useSessions", () => {
         return {
           session_id: "s1",
           source: "zoom",
-          custom_tag: "client-a",
+          notes: "client-a",
           custom_summary_prompt: "Сделай саммари по решениям",
           topic: "Weekly sync",
-          participants: ["Alice"],
+          tags: ["Alice"],
         };
       }
       return args ?? null;

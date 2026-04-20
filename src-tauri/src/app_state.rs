@@ -1,6 +1,7 @@
 use crate::audio;
 use crate::domain::session::SessionMeta;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::AppHandle;
@@ -12,6 +13,8 @@ pub struct AppState {
     pub live_levels: audio::capture::SharedLevels,
     pub recording_control: audio::capture::SharedRecordingControl,
     pub tray_app: Mutex<Option<AppHandle>>,
+    pub known_tags: Mutex<BTreeSet<String>>,
+    pub known_tags_hydrated: Mutex<bool>,
 }
 
 impl Default for AppState {
@@ -23,6 +26,8 @@ impl Default for AppState {
             live_levels: audio::capture::SharedLevels::new(),
             recording_control: audio::capture::SharedRecordingControl::new(),
             tray_app: Mutex::new(None),
+            known_tags: Mutex::new(BTreeSet::new()),
+            known_tags_hydrated: Mutex::new(false),
         }
     }
 }
@@ -64,9 +69,10 @@ pub struct LiveInputLevelsView {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StartRecordingRequest {
-    pub tags: Vec<String>,
+    pub source: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
+    pub notes: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,19 +86,19 @@ pub struct StartRecordingResponse {
 pub struct UpdateSessionDetailsRequest {
     pub session_id: String,
     pub source: String,
-    pub custom_tag: String,
+    pub notes: String,
     #[serde(default, alias = "customSummaryPrompt")]
     pub custom_summary_prompt: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SessionMetaView {
     pub session_id: String,
     pub source: String,
-    pub custom_tag: String,
+    pub notes: String,
     pub custom_summary_prompt: String,
     pub topic: String,
-    pub participants: Vec<String>,
+    pub tags: Vec<String>,
 }

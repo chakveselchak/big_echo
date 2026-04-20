@@ -1,8 +1,41 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
+
+function getAntdSelect(label: string) {
+  const combobox = screen.getByRole("combobox", { name: label });
+  const select = combobox.closest(".ant-select");
+  expect(select).not.toBeNull();
+  return { combobox, select: select as HTMLElement };
+}
+
+async function selectAntdOption(label: string, optionName: string) {
+  const { combobox, select } = getAntdSelect(label);
+  const selector = (select.querySelector(".ant-select-selector") as HTMLElement | null) ?? select;
+  fireEvent.mouseDown(selector);
+  await waitFor(() => {
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+  });
+  const option = await waitFor(() => {
+    const activeDropdown = Array.from(document.body.querySelectorAll<HTMLElement>(".ant-select-dropdown")).find(
+      (dropdown) => !dropdown.classList.contains("ant-select-dropdown-hidden")
+    );
+    expect(activeDropdown).toBeDefined();
+    const activeOption = Array.from(
+      activeDropdown?.querySelectorAll<HTMLElement>(".ant-select-item-option") ?? []
+    ).find((element) => element.textContent?.includes(optionName));
+    expect(activeOption).toBeDefined();
+    return activeOption as HTMLElement;
+  });
+  fireEvent.click(option);
+  fireEvent.keyDown(combobox, { key: "Escape", code: "Escape" });
+  fireEvent.blur(combobox);
+  await waitFor(() => {
+    expect(select.querySelector(".ant-select-selection-item")).toHaveTextContent(optionName);
+  });
+}
 
 async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promise<unknown> {
   if (cmd === "get_ui_sync_state") {
@@ -51,7 +84,7 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
 }
 
 const { listeners, invokeMock } = vi.hoisted(() => ({
-  listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
+  listeners: new Map<string, Array<(payload?: unknown) => void | Promise<void>>>(),
   invokeMock: vi.fn<InvokeMock>(defaultInvokeImplementation),
 }));
 
@@ -62,8 +95,15 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(async () => undefined),
   listen: vi.fn(async (event: string, handler: (payload?: unknown) => void | Promise<void>) => {
-    listeners.set(event, handler);
-    return () => listeners.delete(event);
+    if (!listeners.has(event)) listeners.set(event, []);
+    listeners.get(event)!.push(handler);
+    return () => {
+      const arr = listeners.get(event);
+      if (arr) {
+        const idx = arr.indexOf(handler);
+        if (idx !== -1) arr.splice(idx, 1);
+      }
+    };
   }),
 }));
 
@@ -73,12 +113,23 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 
+function getTraySourceSelect() {
+  const select = screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement;
+  expect(select).not.toBeNull();
+  return { combobox: select, select };
+}
+
+function expectTraySourceValue(value: string) {
+  expect(getTraySourceSelect().select.value).toBe(value);
+}
+
 describe("Tray window", () => {
   afterEach(() => {
     listeners.clear();
     invokeMock.mockClear();
     invokeMock.mockReset();
     invokeMock.mockImplementation(defaultInvokeImplementation);
+    vi.useRealTimers();
   });
 
   it("applies shared ui sync updates", async () => {
@@ -91,13 +142,12 @@ describe("Tray window", () => {
     });
 
     await act(async () => {
-      await listeners.get("ui:sync")?.({
-        payload: JSON.stringify({ source: "facetime", topic: "1:1" }),
-      });
+      const handlers = listeners.get("ui:sync") ?? [];
+      await Promise.all(handlers.map((h) => h({ payload: JSON.stringify({ source: "facetime", topic: "1:1" }) })));
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Source")).toHaveValue("facetime");
+      expectTraySourceValue("facetime");
       expect(screen.getByLabelText("Topic (optional)")).toHaveValue("1:1");
     });
   });
@@ -120,12 +170,10 @@ describe("Tray window", () => {
     render(<App />);
 
     expect(screen.queryByText("Recorder")).not.toBeInTheDocument();
-    const sourceField = screen.getByLabelText("Source");
+    const sourceField = getTraySourceSelect().combobox;
     const topicField = screen.getByLabelText("Topic (optional)");
     expect(sourceField).toBeInTheDocument();
     expect(topicField).toBeInTheDocument();
-    expect(sourceField.closest("label")).toHaveClass("tray-source-field");
-    expect(topicField.closest("label")).toHaveClass("tray-topic-field");
     expect(screen.getByRole("button", { name: "Rec" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
 
@@ -135,9 +183,10 @@ describe("Tray window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("start_recording", {
         payload: {
-          tags: ["slack"],
+          source: "slack",
+          tags: [],
+          notes: "",
           topic: "Daily sync",
-          participants: [],
         },
       });
     });
@@ -156,19 +205,15 @@ describe("Tray window", () => {
       ({ container } = render(<App />));
     });
 
-    const sourceField = screen.getByLabelText("Source");
+    const sourceField = getTraySourceSelect().combobox;
     const topicField = screen.getByLabelText("Topic (optional)");
-    const trayMetaGrid = container!.querySelector(".tray-meta-grid");
-    const trayButtonRow = container!.querySelector(".tray-shell .button-row");
 
     await waitFor(() => {
-      expect(trayMetaGrid).not.toBeNull();
-      expect(sourceField.closest(".tray-meta-grid")).toBe(trayMetaGrid);
-      expect(topicField.closest(".tray-meta-grid")).toBe(trayMetaGrid);
+      expect(sourceField).toBeInTheDocument();
+      expect(topicField).toBeInTheDocument();
 
-      expect(trayButtonRow).not.toBeNull();
-      expect(screen.getByRole("button", { name: "Rec" }).closest(".button-row")).toBe(trayButtonRow);
-      expect(screen.getByRole("button", { name: "Stop" }).closest(".button-row")).toBe(trayButtonRow);
+      expect(screen.getByRole("button", { name: "Rec" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
       expect(screen.getByText("Grant Screen & System Audio Recording permission in System Settings.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
       expect(screen.queryByLabelText("System activity")).not.toBeInTheDocument();
@@ -184,26 +229,30 @@ describe("Tray window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("start_recording", {
         payload: {
-          tags: ["slack"],
+          source: "slack",
+          tags: [],
+          notes: "",
           topic: "",
-          participants: [],
         },
       });
     });
 
     await user.type(screen.getByLabelText("Topic (optional)"), "Daily sync");
 
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
-        payload: {
-          session_id: "tray-session",
-          source: "slack",
-          custom_tag: "",
-          topic: "Daily sync",
-          participants: [],
-        },
-      });
-    });
+    await waitFor(
+      () => {
+        expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
+          payload: {
+            session_id: "tray-session",
+            source: "slack",
+            notes: "",
+            topic: "Daily sync",
+            tags: [],
+          },
+        });
+      },
+      { timeout: 3000 }
+    );
   });
 
   it("shows a neutral loading status without legacy system controls while macOS permission loads", async () => {
@@ -295,7 +344,7 @@ describe("Tray window", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Open System Settings" })).toHaveClass("tray-settings-link");
+      expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "Open System Settings" }));
@@ -362,8 +411,8 @@ describe("Tray window", () => {
 
     expect(screen.queryByText("System audio is captured natively by macOS.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("System device")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Mic device")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "System device" })).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Mic device" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open System Settings" })).not.toBeInTheDocument();
   });
 
@@ -382,11 +431,11 @@ describe("Tray window", () => {
     expect(screen.queryByLabelText("System level")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mute microphone" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Mute system audio" })).toBeDisabled();
-    expect(screen.getByLabelText("Mic activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+    expect(screen.getByLabelText("Mic activity").querySelector("[data-wave-mode]")).toHaveAttribute(
       "data-wave-mode",
       "gentle"
     );
-    expect(screen.getByLabelText("System activity").querySelector(".tray-audio-lottie")).toHaveAttribute(
+    expect(screen.getByLabelText("System activity").querySelector("[data-wave-mode]")).toHaveAttribute(
       "data-wave-mode",
       "strong"
     );
@@ -403,16 +452,15 @@ describe("Tray window", () => {
     render(<App />);
 
     const micVisual = await screen.findByLabelText("Mic activity");
-    const micLottie = micVisual.querySelector(".tray-audio-lottie");
-    const micPath = micVisual.querySelector(".tray-audio-wave-path");
+    const micWaveContainer = micVisual.querySelector("[data-wave-mode]");
+    const micPath = micVisual.querySelector("[data-testid='wave-path']");
 
-    expect(micLottie).not.toBeNull();
-    expect(micLottie).toHaveAttribute("data-wave-mode", "flat");
+    expect(micWaveContainer).not.toBeNull();
+    expect(micWaveContainer).toHaveAttribute("data-wave-mode", "flat");
     expect(micPath).toHaveAttribute("d", "M 0.00 14.00 L 120.00 14.00");
   });
 
   it("shows audio device selectors near live levels and saves selected devices", async () => {
-    const user = userEvent.setup();
     render(<App />);
 
     await waitFor(() => {
@@ -420,11 +468,12 @@ describe("Tray window", () => {
       expect(invokeMock).toHaveBeenCalledWith("list_audio_input_devices");
     });
 
-    const micSelect = screen.getByLabelText("Mic device");
-    const systemSelect = screen.getByLabelText("System device");
+    const micSelect = screen.getByRole("combobox", { name: "Mic device" }) as HTMLSelectElement;
+    const systemSelect = screen.getByRole("combobox", { name: "System device" }) as HTMLSelectElement;
     expect(micSelect).toBeInTheDocument();
     expect(systemSelect).toBeInTheDocument();
 
+    const user = userEvent.setup();
     await user.selectOptions(micSelect, "Built-in Microphone");
     await user.selectOptions(systemSelect, "BlackHole 2ch");
 
@@ -448,18 +497,16 @@ describe("Tray window", () => {
       expect(screen.getByLabelText("Mic activity")).toBeInTheDocument();
     });
 
-    const micRow = screen.getByText("Mic").closest(".tray-audio-row");
-    const micMain = screen.getByLabelText("Mic activity").closest(".tray-audio-main");
+    const micLabel = screen.getByText("Mic");
     const micMute = screen.getByRole("button", { name: "Mute microphone" });
-    const micSelect = screen.getByLabelText("Mic device");
+    const micSelect = screen.getByRole("combobox", { name: "Mic device" });
 
-    expect(micRow).toHaveClass("has-inline-trailing");
-    expect(micMain).not.toBeNull();
-    expect(micMute.closest(".tray-audio-main")).toBe(micMain);
-    expect(micSelect.closest(".tray-audio-main")).toBe(micMain);
-    expect(micSelect.closest(".tray-audio-trailing")).toHaveClass("is-inline");
-    expect(micMain?.children[1]).toHaveClass("tray-audio-trailing", "is-inline");
-    expect(micMain?.children[2]).toHaveClass("tray-audio-mute");
+    // All mic controls should share a common ancestor row
+    const micRowAncestor = micLabel.parentElement;
+    expect(micRowAncestor).not.toBeNull();
+    expect(micRowAncestor!.contains(micMute)).toBe(true);
+    expect(micRowAncestor!.contains(micSelect)).toBe(true);
+    expect(micRowAncestor!.contains(screen.getByLabelText("Mic activity"))).toBe(true);
   });
 
   it("toggles tray mute buttons during recording and resets them after stop", async () => {
