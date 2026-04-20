@@ -56,3 +56,84 @@ pub(crate) fn build_update_info(current: &str, release: GithubRelease) -> Update
         published_at: release.published_at.unwrap_or_default(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_tag_strips_lowercase_v_prefix() {
+        assert_eq!(normalize_tag("v2.0.2"), "2.0.2");
+    }
+
+    #[test]
+    fn normalize_tag_strips_uppercase_v_prefix() {
+        assert_eq!(normalize_tag("V2.0.2"), "2.0.2");
+    }
+
+    #[test]
+    fn normalize_tag_leaves_bare_version_untouched() {
+        assert_eq!(normalize_tag("2.0.2"), "2.0.2");
+    }
+
+    #[test]
+    fn is_newer_true_when_latest_greater() {
+        assert!(is_newer_version("2.0.2", "2.1.0"));
+    }
+
+    #[test]
+    fn is_newer_false_when_equal() {
+        assert!(!is_newer_version("2.0.2", "2.0.2"));
+    }
+
+    #[test]
+    fn is_newer_false_when_latest_lower() {
+        assert!(!is_newer_version("2.1.0", "2.0.2"));
+    }
+
+    #[test]
+    fn is_newer_handles_v_prefix_on_either_side() {
+        assert!(is_newer_version("v2.0.2", "v2.1.0"));
+    }
+
+    #[test]
+    fn is_newer_false_when_unparseable() {
+        assert!(!is_newer_version("not-semver", "also-not"));
+        assert!(!is_newer_version("2.0.2", "garbage"));
+        assert!(!is_newer_version("garbage", "2.0.2"));
+    }
+
+    #[test]
+    fn build_update_info_fills_defaults_for_missing_fields() {
+        let release = GithubRelease {
+            tag_name: "2.1.0".to_string(),
+            name: None,
+            html_url: "https://example.com/r".to_string(),
+            body: None,
+            published_at: None,
+        };
+        let info = build_update_info("2.0.2", release);
+        assert_eq!(info.current, "2.0.2");
+        assert_eq!(info.latest, "2.1.0");
+        assert!(info.is_newer);
+        assert_eq!(info.body, "");
+        assert_eq!(info.name, "2.1.0");
+        assert_eq!(info.published_at, "");
+        assert_eq!(info.html_url, "https://example.com/r");
+    }
+
+    #[test]
+    fn build_update_info_reports_not_newer_when_versions_equal() {
+        let release = GithubRelease {
+            tag_name: "v2.0.2".to_string(),
+            name: Some("Release 2.0.2".to_string()),
+            html_url: "https://example.com".to_string(),
+            body: Some("notes".to_string()),
+            published_at: Some("2026-01-01T00:00:00Z".to_string()),
+        };
+        let info = build_update_info("2.0.2", release);
+        assert!(!info.is_newer);
+        assert_eq!(info.body, "notes");
+        assert_eq!(info.name, "Release 2.0.2");
+    }
+}
