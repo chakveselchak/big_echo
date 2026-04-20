@@ -215,8 +215,6 @@ fn import_audio_session_from_path(
 
     let meta_path = session_dir.join(&meta.artifacts.meta_file);
     save_meta(&meta_path, &meta)?;
-    fs::write(session_dir.join(&meta.artifacts.transcript_file), "").map_err(|e| e.to_string())?;
-    fs::write(session_dir.join(&meta.artifacts.summary_file), "").map_err(|e| e.to_string())?;
     upsert_session(&dirs.app_data_dir, &meta, &session_dir, &meta_path)?;
     add_event(
         &dirs.app_data_dir,
@@ -759,6 +757,91 @@ fn update_session_details_impl(
         "Source/topic/tags/notes/summary prompt updated",
     )?;
     Ok("updated".to_string())
+}
+
+/// Walks `root` up to `max_depth` levels deep, collecting paths of every
+/// file named `meta.json`. Non-readable directories are silently skipped.
+fn collect_meta_files(root: &Path, max_depth: usize) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+    fn walk(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<PathBuf>) {
+        if depth > max_depth {
+            return;
+        }
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.file_name().map_or(false, |n| n == "meta.json") {
+                out.push(path);
+            } else if path.is_dir() {
+                walk(&path, depth + 1, max_depth, out);
+            }
+        }
+    }
+    walk(root, 0, max_depth, &mut results);
+    results
+}
+
+#[derive(serde::Serialize)]
+pub struct SyncSessionsResult {
+    pub added: usize,
+    pub removed: usize,
+}
+
+/// Synchronise the session database with what is on disk in the recording
+/// root. Sessions in the DB whose directory no longer exists are removed.
+/// Session directories found on disk that are missing from the DB are added.
+#[tauri::command]
+pub fn sync_sessions(
+    dirs: tauri::State<AppDirs>,
+    state: tauri::State<AppState>,
+) -> Result<SyncSessionsResult, String> {
+    use crate::storage::sqlite_repo::{
+        delete_session as repo_delete_session, list_session_id_dirs,
+    };
+
+    let settings = get_settings_from_dirs(&dirs)?;
+    let recordings_root = root_recordings_dir(&dirs.app_data_dir, &settings)?;
+
+    // All (session_id, session_dir) pairs currently in the DB.
+    let db_sessions = list_session_id_dirs(&dirs.app_data_dir)?;
+    let db_session_ids: std::collections::HashSet<String> =
+        db_sessions.iter().map(|(id, _)| id.clone()).collect();
+
+    // Remove sessions from DB whose directory no longer exists on disk.
+    let mut removed = 0usize;
+    for (session_id, session_dir) in &db_sessions {
+        if !PathBuf::from(session_dir).exists() {
+            repo_delete_session(&dirs.app_data_dir, session_id)?;
+            removed += 1;
+        }
+    }
+
+    // Walk the recordings root and register sessions not yet in the DB.
+    let mut added = 0usize;
+    if recordings_root.exists() {
+        // Structure: root / DD.MM.YYYY / meeting_HH-MM-SS / meta.json
+        // Use depth 4 to tolerate slightly non-standard layouts.
+        let meta_files = collect_meta_files(&recordings_root, 4);
+        for meta_path in meta_files {
+            if let Ok(meta) = load_meta(&meta_path) {
+                if !db_session_ids.contains(&meta.session_id) {
+                    let session_dir = meta_path
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| meta_path.clone());
+                    upsert_session(&dirs.app_data_dir, &meta, &session_dir, &meta_path)?;
+                    added += 1;
+                }
+            }
+        }
+    }
+
+    rebuild_known_tags(dirs.inner(), state.inner())?;
+
+    Ok(SyncSessionsResult { added, removed })
 }
 
 #[cfg(test)]

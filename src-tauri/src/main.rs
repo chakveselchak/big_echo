@@ -22,7 +22,7 @@ use commands::sessions::{
     delete_session, delete_session_audio, get_live_input_levels, get_session_meta,
     get_ui_sync_state, import_audio_session, list_known_tags, list_sessions,
     open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
-    set_ui_sync_state, update_session_details,
+    set_ui_sync_state, sync_sessions, update_session_details,
 };
 use commands::settings::{
     detect_system_source_device, get_macos_system_audio_permission_status, get_settings,
@@ -1098,7 +1098,8 @@ mod ipc_runtime_tests {
                 run_pipeline,
                 retry_pipeline,
                 run_transcription,
-                run_summary
+                run_summary,
+                sync_sessions
             ])
             .build(ctx)
             .expect("failed to build test app");
@@ -2275,7 +2276,8 @@ fn main() {
             run_pipeline,
             retry_pipeline,
             run_transcription,
-            run_summary
+            run_summary,
+            sync_sessions
         ])
         .build(tauri::generate_context!())
         .expect("error while building bigecho app");

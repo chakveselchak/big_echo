@@ -196,10 +196,6 @@ fn start_recording_impl(
             "recording_started",
             "Session created",
         )?;
-        std::fs::write(abs_dir.join(&meta.artifacts.transcript_file), "")
-            .map_err(|e| e.to_string())?;
-        std::fs::write(abs_dir.join(&meta.artifacts.summary_file), "")
-            .map_err(|e| e.to_string())?;
         Ok(())
     })();
     if let Err(err) = persist_result {

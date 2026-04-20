@@ -1,4 +1,5 @@
-import { Button, Checkbox, Flex, Form, Input, Select } from "antd";
+import { Button, Checkbox, Flex, Form, Input, Select, Tooltip } from "antd";
+import { FileSyncOutlined } from "@ant-design/icons";
 import type { PublicSettings, TextEditorAppOption } from "../../types";
 import { localIconForEditor } from "../../lib/appUtils";
 
@@ -7,6 +8,8 @@ type GeneralSettingsProps = {
   setSettings: (s: PublicSettings) => void;
   isDirty: (field: keyof PublicSettings) => boolean;
   pickRecordingRoot: () => void;
+  syncSessions: () => Promise<void>;
+  isSyncingSessions: boolean;
   textEditorApps: TextEditorAppOption[];
 };
 
@@ -15,6 +18,8 @@ export function GeneralSettings({
   setSettings,
   isDirty,
   pickRecordingRoot,
+  syncSessions,
+  isSyncingSessions,
   textEditorApps,
 }: GeneralSettingsProps) {
   const openerUiFallback: TextEditorAppOption[] = [
@@ -79,6 +84,15 @@ export function GeneralSettings({
               />
             </svg>
           </Button>
+          <Tooltip title="Sync sessions with folder">
+            <Button
+              htmlType="button"
+              aria-label="Sync sessions with recording root folder"
+              icon={<FileSyncOutlined aria-hidden="true" />}
+              loading={isSyncingSessions}
+              onClick={() => void syncSessions()}
+            />
+          </Tooltip>
         </Flex>
       </Form.Item>
 

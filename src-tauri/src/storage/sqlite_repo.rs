@@ -327,6 +327,23 @@ pub fn get_session_dir(app_data_dir: &Path, session_id: &str) -> Result<Option<P
     Ok(None)
 }
 
+/// Returns all (session_id, session_dir) pairs from the DB — used by sync to
+/// detect sessions whose directories have been removed from the filesystem.
+pub fn list_session_id_dirs(app_data_dir: &Path) -> Result<Vec<(String, String)>, String> {
+    let conn = open(app_data_dir)?;
+    let mut stmt = conn
+        .prepare("SELECT session_id, session_dir FROM sessions")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
 pub fn delete_session(app_data_dir: &Path, session_id: &str) -> Result<bool, String> {
     let conn = open(app_data_dir)?;
     conn.execute(

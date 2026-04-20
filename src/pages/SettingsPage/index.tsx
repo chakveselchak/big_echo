@@ -2,12 +2,32 @@ import { useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { PublicSettings, SettingsTab } from "../../types";
+import { tauriInvoke } from "../../lib/tauri";
+import { getErrorMessage } from "../../lib/appUtils";
 import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
 
+type SyncSessionsResult = {
+  added: number;
+  removed: number;
+};
+
 export function SettingsPage() {
   const [status, setStatus] = useState("idle");
+  const [isSyncingSessions, setIsSyncingSessions] = useState(false);
+
+  async function syncSessions() {
+    setIsSyncingSessions(true);
+    try {
+      const result = await tauriInvoke<SyncSessionsResult>("sync_sessions");
+      setStatus(`sync_done: added ${result.added}, removed ${result.removed}`);
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
+    } finally {
+      setIsSyncingSessions(false);
+    }
+  }
 
   const {
     audioDevices,
@@ -102,6 +122,8 @@ export function SettingsPage() {
           setSettings={(s) => setSettings(s)}
           isDirty={isDirty}
           pickRecordingRoot={() => void pickRecordingRoot()}
+          syncSessions={syncSessions}
+          isSyncingSessions={isSyncingSessions}
           textEditorApps={textEditorApps}
         />
       ),
@@ -174,6 +196,10 @@ export function SettingsPage() {
 
       {status !== "idle" && status.startsWith("error:") && (
         <Alert type="error" message={status.replace(/^error:\s*/, "")} style={{ marginBottom: 12 }} />
+      )}
+
+      {status.startsWith("sync_done:") && (
+        <Alert type="success" message={`Sync complete — ${status.replace(/^sync_done:\s*/, "")}`} style={{ marginBottom: 12 }} />
       )}
 
       <Flex gap={8}>

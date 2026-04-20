@@ -1496,8 +1496,8 @@ select {
 }
 
 .session-audio-slider .ant-slider-handle::after {
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
   background: var(--accent);
   box-shadow: none;
