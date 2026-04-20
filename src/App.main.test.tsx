@@ -1,12 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
 
-const { listeners, invokeMock } = vi.hoisted(() => ({
-  listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
-  invokeMock: vi.fn<InvokeMock>(async (cmd: string, _args?: unknown) => {
+const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
+  const defaultImpl: InvokeMock = async (cmd: string, _args?: unknown) => {
     if (cmd === "get_ui_sync_state") {
       return { source: "slack", topic: "", is_recording: false, active_session_id: null };
     }
@@ -50,8 +49,14 @@ const { listeners, invokeMock } = vi.hoisted(() => ({
       return null;
     }
     return null;
-  }),
-}));
+  };
+
+  return {
+    listeners: new Map<string, (payload?: unknown) => void | Promise<void>>(),
+    invokeMock: vi.fn<InvokeMock>(defaultImpl),
+    defaultInvokeImpl: defaultImpl,
+  };
+});
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (filePath: string) => `asset://${filePath}`,
@@ -89,6 +94,10 @@ async function clickAntdMenuItem(
 }
 
 describe("App main window", () => {
+  afterEach(() => {
+    invokeMock.mockImplementation(defaultInvokeImpl);
+  });
+
   it("defers settings loading until the Settings tab opens", async () => {
     const user = userEvent.setup();
     render(<App />);

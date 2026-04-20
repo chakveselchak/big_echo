@@ -1,4 +1,4 @@
-import { Button, Space, Typography } from "antd";
+import { Button, Typography } from "antd";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UpdateInfo } from "../../types";
@@ -42,18 +42,15 @@ export function NewVersionPage({ updateInfo }: Props) {
         </ReactMarkdown>
       </div>
 
-      <Space style={{ marginTop: 16 }}>
-        <Button type="primary">
-          <a
-            href={updateInfo.html_url}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "inherit" }}
-          >
-            View on GitHub
-          </a>
-        </Button>
-      </Space>
+      <Button
+        type="primary"
+        href={updateInfo.html_url}
+        target="_blank"
+        rel="noreferrer"
+        style={{ marginTop: 16 }}
+      >
+        View on GitHub
+      </Button>
     </div>
   );
 }
