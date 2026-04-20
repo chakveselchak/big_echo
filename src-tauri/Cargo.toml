@@ -27,6 +27,7 @@ base64 = "0.22"
 sha2 = "0.10"
 swift-rs = "1.0.7"
 hostname = "0.4"
+semver = "1"
 
 [features]
 default = []
