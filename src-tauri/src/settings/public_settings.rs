@@ -4,6 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use url::Url;
 
+pub const NEXARA_DEFAULT_TRANSCRIPTION_URL: &str =
+    "https://api.nexara.ru/api/v1/audio/transcriptions";
+
 const SALUTE_SPEECH_ALLOWED_SCOPES: &[&str] = &[
     "SALUTE_SPEECH_PERS",
     "SALUTE_SPEECH_CORP",
@@ -44,7 +47,7 @@ impl Default for PublicSettings {
             recording_root: "./recordings".to_string(),
             artifact_open_app: String::new(),
             transcription_provider: "nexara".to_string(),
-            transcription_url: String::new(),
+            transcription_url: NEXARA_DEFAULT_TRANSCRIPTION_URL.to_string(),
             transcription_task: "transcribe".to_string(),
             transcription_diarization_setting: "general".to_string(),
             salute_speech_scope: "SALUTE_SPEECH_CORP".to_string(),

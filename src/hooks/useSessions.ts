@@ -76,6 +76,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     {}
   );
   const [isSearching, setIsSearching] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [textPendingBySession, setTextPendingBySession] = useState<Record<string, boolean>>({});
   const [summaryPendingBySession, setSummaryPendingBySession] = useState<Record<string, boolean>>({});
   const [pipelineStateBySession, setPipelineStateBySession] = useState<Record<string, PipelineUiState>>({});
@@ -105,6 +106,14 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   }
 
   async function loadSessions() {
+    try {
+      await loadSessionsInner();
+    } finally {
+      setIsInitialLoading(false);
+    }
+  }
+
+  async function loadSessionsInner() {
     const data = await tauriInvoke<SessionListItem[]>("list_sessions");
     // Preserve item identity when fields match the previous snapshot so that
     // SessionCard (wrapped in React.memo) can skip re-render for unchanged
@@ -662,6 +671,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     requestDeleteSession,
     saveSessionDetails,
     isSearching,
+    isInitialLoading,
     sessionArtifactSearchHits,
     sessionDetails,
     sessionSearchQuery,

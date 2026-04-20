@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { InputRef } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSessions } from "../../hooks/useSessions";
@@ -13,6 +13,17 @@ type MainTab = "sessions" | "settings";
 
 export function MainPage() {
   const [mainTab, setMainTab] = useState<MainTab>("sessions");
+  // Once Settings has been opened, keep its subtree mounted and toggle with
+  // `display: none`. First click stays lazy so the "defer get_settings until
+  // Settings opens" contract is preserved; subsequent switches are a display
+  // swap and cost nothing. SettingsPage itself renders a LoadingPlaceholder
+  // until `useSettingsForm` finishes loading, so the user sees the loader
+  // immediately on first click.
+  const [settingsMounted, setSettingsMounted] = useState(false);
+  const handleTabSelect = useCallback((tab: MainTab) => {
+    if (tab === "settings") setSettingsMounted(true);
+    setMainTab(tab);
+  }, []);
   const [topic, setTopic] = useState("");
   const [source, setSource] = useState("slack");
   const [session, setSession] = useState<StartResponse | null>(null);
@@ -38,6 +49,7 @@ export function MainPage() {
     getText,
     isSearching,
     importAudioSession,
+    isInitialLoading,
     knownTags,
     loadSessions,
     openSessionFolder,
@@ -121,7 +133,7 @@ export function MainPage() {
           role="tab"
           className={`main-tab-button${mainTab === "sessions" ? " is-active" : ""}`}
           aria-selected={mainTab === "sessions"}
-          onClick={() => setMainTab("sessions")}
+          onClick={() => handleTabSelect("sessions")}
         >
           Sessions
         </button>
@@ -130,65 +142,72 @@ export function MainPage() {
           role="tab"
           className={`main-tab-button${mainTab === "settings" ? " is-active" : ""}`}
           aria-selected={mainTab === "settings"}
-          onClick={() => setMainTab("settings")}
+          onClick={() => handleTabSelect("settings")}
         >
           Settings
         </button>
       </div>
 
-      {mainTab === "settings" ? (
-        <section className="panel">
+      <section
+        className="panel"
+        style={mainTab === "sessions" ? undefined : { display: "none" }}
+      >
+        <SessionFilters
+          ref={sessionSearchInputRef}
+          searchQuery={sessionSearchQuery}
+          onSearchChange={setSessionSearchQuery}
+          onImportAudio={() => void importAudioSession()}
+          onRefresh={() => {
+            setRefreshKey((k) => k + 1);
+            void loadSessions();
+          }}
+          refreshKey={refreshKey}
+        />
+        <SessionList
+          sessions={sessions}
+          filteredSessions={filteredSessions}
+          sessionDetails={sessionDetails}
+          setSessionDetails={setSessionDetails}
+          sessionSearchQuery={sessionSearchQuery}
+          sessionArtifactSearchHits={sessionArtifactSearchHits}
+          textPendingBySession={textPendingBySession}
+          summaryPendingBySession={summaryPendingBySession}
+          pipelineStateBySession={pipelineStateBySession}
+          deleteTarget={deleteTarget}
+          deletePendingSessionId={deletePendingSessionId}
+          audioDeleteTargetSessionId={audioDeleteTargetSessionId}
+          audioDeletePendingSessionId={audioDeletePendingSessionId}
+          isSearching={isSearching}
+          isInitialLoading={isInitialLoading}
+          artifactPreview={artifactPreview}
+          knownTags={knownTags}
+          settings={null}
+          setDeleteTarget={setDeleteTarget}
+          setAudioDeleteTargetSessionId={setAudioDeleteTargetSessionId}
+          confirmDeleteSession={async () => {
+            await confirmDeleteSession();
+            sessionSearchInputRef.current?.input?.focus();
+          }}
+          confirmDeleteAudio={confirmDeleteAudio}
+          closeArtifactPreview={closeArtifactPreview}
+          openSessionFolder={openSessionFolder}
+          openSessionArtifact={openSessionArtifact}
+          getText={getText}
+          getSummary={getSummary}
+          saveSessionDetails={saveSessionDetails}
+          flushSessionDetails={flushSessionDetails}
+          requestDeleteSession={requestDeleteSession}
+          requestDeleteAudio={requestDeleteAudio}
+          setStatus={setStatus}
+        />
+      </section>
+
+      {settingsMounted && (
+        <section
+          className="panel"
+          style={mainTab === "settings" ? undefined : { display: "none" }}
+        >
           <SettingsPage />
-        </section>
-      ) : (
-        <section className="panel">
-          <SessionFilters
-            ref={sessionSearchInputRef}
-            searchQuery={sessionSearchQuery}
-            onSearchChange={setSessionSearchQuery}
-            onImportAudio={() => void importAudioSession()}
-            onRefresh={() => {
-              setRefreshKey((k) => k + 1);
-              void loadSessions();
-            }}
-            refreshKey={refreshKey}
-          />
-          <SessionList
-            sessions={sessions}
-            filteredSessions={filteredSessions}
-            sessionDetails={sessionDetails}
-            setSessionDetails={setSessionDetails}
-            sessionSearchQuery={sessionSearchQuery}
-            sessionArtifactSearchHits={sessionArtifactSearchHits}
-            textPendingBySession={textPendingBySession}
-            summaryPendingBySession={summaryPendingBySession}
-            pipelineStateBySession={pipelineStateBySession}
-            deleteTarget={deleteTarget}
-            deletePendingSessionId={deletePendingSessionId}
-            audioDeleteTargetSessionId={audioDeleteTargetSessionId}
-            audioDeletePendingSessionId={audioDeletePendingSessionId}
-            isSearching={isSearching}
-            artifactPreview={artifactPreview}
-            knownTags={knownTags}
-            settings={null}
-            setDeleteTarget={setDeleteTarget}
-            setAudioDeleteTargetSessionId={setAudioDeleteTargetSessionId}
-            confirmDeleteSession={async () => {
-              await confirmDeleteSession();
-              sessionSearchInputRef.current?.input?.focus();
-            }}
-            confirmDeleteAudio={confirmDeleteAudio}
-            closeArtifactPreview={closeArtifactPreview}
-            openSessionFolder={openSessionFolder}
-            openSessionArtifact={openSessionArtifact}
-            getText={getText}
-            getSummary={getSummary}
-            saveSessionDetails={saveSessionDetails}
-            flushSessionDetails={flushSessionDetails}
-            requestDeleteSession={requestDeleteSession}
-            requestDeleteAudio={requestDeleteAudio}
-            setStatus={setStatus}
-          />
         </section>
       )}
     </main>

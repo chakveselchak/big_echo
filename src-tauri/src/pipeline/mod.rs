@@ -291,9 +291,14 @@ async fn transcribe_audio_with_nexara(
     audio_path: &Path,
     logger: &ExternalApiLogger,
 ) -> Result<String, String> {
-    if settings.transcription_url.trim().is_empty() {
-        return Err("Transcription URL is not configured".to_string());
-    }
+    let transcription_url = {
+        let trimmed = settings.transcription_url.trim();
+        if trimmed.is_empty() {
+            crate::settings::public_settings::NEXARA_DEFAULT_TRANSCRIPTION_URL.to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
 
     let data = std::fs::read(audio_path).map_err(|e| e.to_string())?;
     let file_name = audio_path
@@ -349,14 +354,14 @@ async fn transcribe_audio_with_nexara(
         "nexara",
         "transcription",
         "POST",
-        &settings.transcription_url,
+        &transcription_url,
         &headers,
         &request_body,
     );
 
     let client = reqwest::Client::new();
     let res = client
-        .post(&settings.transcription_url)
+        .post(&transcription_url)
         .headers(headers)
         .multipart(form)
         .send()
@@ -367,7 +372,7 @@ async fn transcribe_audio_with_nexara(
                 "nexara",
                 "transcription",
                 "POST",
-                &settings.transcription_url,
+                &transcription_url,
                 &message,
             );
             message

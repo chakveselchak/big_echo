@@ -7,6 +7,7 @@ import { getErrorMessage } from "../../lib/appUtils";
 import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
+import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
 
 type SyncSessionsResult = {
   added: number;
@@ -59,7 +60,15 @@ export function SettingsPage() {
     textEditorApps,
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
 
-  if (!settings) return null;
+  if (!settings) {
+    return (
+      <LoadingPlaceholder
+        className="settings-loading"
+        label="Loading settings…"
+        ariaLabel="Loading settings"
+      />
+    );
+  }
 
   const isDirty = (field: keyof PublicSettings) =>
     Boolean(savedSettingsSnapshot && settings[field] !== savedSettingsSnapshot[field]);

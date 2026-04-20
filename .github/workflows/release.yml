@@ -86,6 +86,31 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
+      - name: Inject README.md into DMG and re-upload
+        if: startsWith(matrix.runner, 'macos-')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          DMG=$(ls "$DMG_DIR"/*.dmg | head -1)
+          echo "Patching DMG: $DMG"
+
+          RW_DMG="${DMG%.dmg}-rw.dmg"
+          hdiutil convert "$DMG" -format UDRW -o "$RW_DMG"
+
+          MOUNT_DIR=$(mktemp -d)
+          hdiutil attach "$RW_DMG" -mountpoint "$MOUNT_DIR" -nobrowse
+          cp dmg-assets/README.md "$MOUNT_DIR/README.md"
+          hdiutil detach "$MOUNT_DIR"
+
+          rm "$DMG"
+          hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG"
+          rm "$RW_DMG"
+
+          gh release upload "$TAG" "$DMG" --clobber
+
   publish-release:
     runs-on: ubuntu-latest
     needs: [create-release, build]

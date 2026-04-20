@@ -522,6 +522,8 @@ mod ipc_runtime_tests {
 
         let no_urls = PublicSettings {
             auto_run_pipeline_on_stop: true,
+            transcription_url: String::new(),
+            summary_url: String::new(),
             ..Default::default()
         };
         assert!(!should_auto_run_pipeline_after_stop(&no_urls));

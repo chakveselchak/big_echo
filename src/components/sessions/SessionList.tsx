@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { ConfigProvider, Menu, Spin } from "antd";
+import { ConfigProvider, Menu } from "antd";
 import type { MenuProps } from "antd";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import type {
   DeleteTarget,
   PipelineUiState,
@@ -39,6 +40,7 @@ type SessionListProps = {
   audioDeleteTargetSessionId: string | null;
   audioDeletePendingSessionId: string | null;
   isSearching: boolean;
+  isInitialLoading: boolean;
   artifactPreview: SessionArtifactPreview | null;
   knownTags: string[];
   settings: PublicSettings | null;
@@ -73,6 +75,7 @@ export function SessionList({
   audioDeleteTargetSessionId,
   audioDeletePendingSessionId,
   isSearching,
+  isInitialLoading,
   artifactPreview,
   knownTags,
   settings,
@@ -329,23 +332,18 @@ export function SessionList({
 
   return (
     <>
-      {isSearching ? (
-        <div
+      {isInitialLoading ? (
+        <LoadingPlaceholder
           className="sessions-grid-loading"
-          role="status"
-          aria-live="polite"
-          aria-label="Searching sessions"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "60px 20px",
-            gap: 12,
-          }}
-        >
-          <Spin />
-          <span style={{ color: "var(--text-muted)" }}>Searching sessions…</span>
-        </div>
+          label="Loading sessions…"
+          ariaLabel="Loading sessions"
+        />
+      ) : isSearching ? (
+        <LoadingPlaceholder
+          className="sessions-grid-loading"
+          label="Searching sessions…"
+          ariaLabel="Searching sessions"
+        />
       ) : (
       <div className="sessions-grid">
         {filteredSessions.map((item) => {
