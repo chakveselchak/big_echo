@@ -57,6 +57,35 @@ pub(crate) fn build_update_info(current: &str, release: GithubRelease) -> Update
     }
 }
 
+async fn fetch_latest_release() -> Result<GithubRelease, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(CHROME_USER_AGENT)
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+
+    let resp = client
+        .get(GITHUB_LATEST_RELEASE_URL)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("GitHub request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub returned status {}", resp.status()));
+    }
+
+    resp.json::<GithubRelease>()
+        .await
+        .map_err(|e| format!("failed to parse GitHub response: {e}"))
+}
+
+#[tauri::command]
+pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let current = app.package_info().version.to_string();
+    let release = fetch_latest_release().await?;
+    Ok(build_update_info(&current, release))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
