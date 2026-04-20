@@ -109,3 +109,13 @@ export const saluteSpeechScopeOptions = [
   "SBER_SPEECH",
 ];
 export const saluteSpeechRecognitionModelOptions = ["general", "callcenter"];
+
+export type UpdateInfo = {
+  current: string;
+  latest: string;
+  is_newer: boolean;
+  html_url: string;
+  body: string;
+  name: string;
+  published_at: string;
+};
