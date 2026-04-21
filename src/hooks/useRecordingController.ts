@@ -173,17 +173,48 @@ export function useRecordingController({
   async function stop() {
     if (!session) return;
     const sessionId = session.session_id;
+
+    // Flush tray-side debounced topic autosave synchronously.
+    if (isTrayWindow) {
+      if (trayTopicAutosaveTimerRef.current) {
+        clearTimeout(trayTopicAutosaveTimerRef.current);
+        trayTopicAutosaveTimerRef.current = null;
+      }
+      const trimmedTopic = topic.trim();
+      const signature = `${sessionId}::${source}::${trimmedTopic}`;
+      if (signature !== trayTopicSavedSignatureRef.current) {
+        try {
+          await tauriInvoke<string>("update_session_details", {
+            payload: {
+              session_id: sessionId,
+              source,
+              notes: "",
+              topic: trimmedTopic,
+              tags: [],
+            },
+          });
+          trayTopicSavedSignatureRef.current = signature;
+        } catch {
+          // Swallow — recorder must stop even if metadata flush fails.
+        }
+      }
+    }
+
     if (flushPendingSessionDetails) {
       try {
         await flushPendingSessionDetails(sessionId);
       } catch {
-        // Swallow — the recorder must stop even if metadata flush fails.
+        // Swallow — recorder must stop even if flush fails.
       }
     }
+
     await tauriInvoke<string>("stop_recording", { sessionId });
     resetMuteState();
     setStatus("recorded");
     setSession(null);
+    if (isTrayWindow) {
+      setTopic("");
+    }
     await loadSessions();
   }
 

@@ -996,4 +996,215 @@ describe("useRecordingController", () => {
     expect(flushPendingSessionDetails).toHaveBeenCalledWith("active-session");
     expect(invokeMock).toHaveBeenCalledWith("stop_recording", { sessionId: "active-session" });
   });
+
+  it("flushes a pending tray topic autosave before stopping", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+    const callOrder: string[] = [];
+    invokeMock.mockImplementation(async (cmd: string, _args?: unknown) => {
+      if (cmd === "update_session_details") {
+        callOrder.push("update_session_details");
+        return "updated";
+      }
+      if (cmd === "stop_recording") {
+        callOrder.push("stop_recording");
+        return "recorded";
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [tagsInput] = useState("");
+      const [source, setSource] = useState("slack");
+      const [notesInput] = useState("");
+      const [session, setSession] = useState<StartResponse | null>({
+        session_id: "active-session",
+        session_dir: "/tmp/active",
+        status: "recording",
+      });
+      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
+      const [status, setStatus] = useState("recording");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          tagsInput,
+          source,
+          setSource,
+          notesInput,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        topic,
+        setTopic,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    vi.useFakeTimers();
+
+    // Simulate the user typing a topic during recording. The autosave
+    // effect schedules a 450ms debounce; we stop *before* it fires.
+    act(() => {
+      result.current.setTopic("Daily sync");
+    });
+    // Advance time just a little — not enough to trip the 450ms debounce.
+    await act(async () => {
+      vi.advanceTimersByTime(50);
+    });
+
+    await act(async () => {
+      await result.current.controller.stop();
+    });
+
+    // update_session_details must have been called as part of stop()
+    // and must precede stop_recording.
+    expect(callOrder[0]).toBe("update_session_details");
+    expect(callOrder).toContain("stop_recording");
+    expect(callOrder.indexOf("update_session_details")).toBeLessThan(
+      callOrder.indexOf("stop_recording")
+    );
+
+    const flushCall = invokeMock.mock.calls.find(
+      ([cmd]) => cmd === "update_session_details"
+    );
+    expect(flushCall?.[1]).toEqual({
+      payload: {
+        session_id: "active-session",
+        source: "slack",
+        notes: "",
+        topic: "Daily sync",
+        tags: [],
+      },
+    });
+  });
+
+  it("clears the tray topic after a successful tray stop", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("Daily sync");
+      const [tagsInput] = useState("");
+      const [source, setSource] = useState("slack");
+      const [notesInput] = useState("");
+      const [session, setSession] = useState<StartResponse | null>({
+        session_id: "active-session",
+        session_dir: "/tmp/active",
+        status: "recording",
+      });
+      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
+      const [status, setStatus] = useState("recording");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          tagsInput,
+          source,
+          setSource,
+          notesInput,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        topic,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await act(async () => {
+      await result.current.controller.stop();
+    });
+
+    await waitFor(() => {
+      expect(result.current.topic).toBe("");
+    });
+  });
+
+  it("keeps tray topic intact if stop_recording rejects", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+    const stopError = new Error("audio encoder crashed");
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "stop_recording") {
+        throw stopError;
+      }
+      if (cmd === "get_ui_sync_state") {
+        return {
+          source: "slack",
+          topic: "Daily sync",
+          is_recording: true,
+          active_session_id: "active-session",
+          mute_state: { micMuted: false, systemMuted: false },
+        };
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("Daily sync");
+      const [tagsInput] = useState("");
+      const [source, setSource] = useState("slack");
+      const [notesInput] = useState("");
+      const [session, setSession] = useState<StartResponse | null>({
+        session_id: "active-session",
+        session_dir: "/tmp/active",
+        status: "recording",
+      });
+      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
+      const [status, setStatus] = useState("recording");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          tagsInput,
+          source,
+          setSource,
+          notesInput,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        topic,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    let caught: unknown;
+    await act(async () => {
+      caught = await result.current.controller.stop().catch((err) => err);
+    });
+
+    expect(caught).toBe(stopError);
+    expect(result.current.topic).toBe("Daily sync");
+  });
 });
