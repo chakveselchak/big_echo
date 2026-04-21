@@ -31,6 +31,12 @@ jobs:
             })
             return data.id
 
+      - name: Attach README.md as release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" dmg-assets/README.md --clobber
+
   build:
     needs: create-release
     strategy:
@@ -88,6 +94,7 @@ jobs:
 
       - name: Repack DMG with README.md and re-upload
         if: startsWith(matrix.runner, 'macos-')
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
