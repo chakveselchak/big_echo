@@ -34,6 +34,7 @@ type UseRecordingControllerOptions = {
   status: string;
   setStatus: Setter<string>;
   loadSessions: () => Promise<void>;
+  flushPendingSessionDetails?: (sessionId: string) => Promise<void>;
 };
 
 function formatRecordingError(err: unknown): string {
@@ -60,6 +61,7 @@ export function useRecordingController({
   status,
   setStatus,
   loadSessions,
+  flushPendingSessionDetails,
 }: UseRecordingControllerOptions) {
   const [liveLevels, setLiveLevels] = useState<LiveInputLevels>({ mic: 0, system: 0 });
   const [muteState, setMuteState] = useState<RecordingMuteState>(defaultRecordingMuteState);
@@ -73,6 +75,10 @@ export function useRecordingController({
   const trayTopicSavedSignatureRef = useRef<string>("");
   const uiSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastUiSyncPayloadRef = useRef<{ source: string; topic: string } | null>(null);
+  const flushPendingSessionDetailsRef = useRef(flushPendingSessionDetails);
+  useEffect(() => {
+    flushPendingSessionDetailsRef.current = flushPendingSessionDetails;
+  }, [flushPendingSessionDetails]);
 
   useEffect(() => {
     topicRef.current = topic;
@@ -166,7 +172,15 @@ export function useRecordingController({
 
   async function stop() {
     if (!session) return;
-    await tauriInvoke<string>("stop_recording", { sessionId: session.session_id });
+    const sessionId = session.session_id;
+    if (flushPendingSessionDetails) {
+      try {
+        await flushPendingSessionDetails(sessionId);
+      } catch {
+        // Swallow — the recorder must stop even if metadata flush fails.
+      }
+    }
+    await tauriInvoke<string>("stop_recording", { sessionId });
     resetMuteState();
     setStatus("recorded");
     setSession(null);
@@ -303,7 +317,16 @@ export function useRecordingController({
       tauriListen("tray:stop", async () => {
         try {
           if (!sessionRef.current) return;
-          await tauriInvoke<string>("stop_recording", { sessionId: sessionRef.current.session_id });
+          const sessionId = sessionRef.current.session_id;
+          const flush = flushPendingSessionDetailsRef.current;
+          if (flush) {
+            try {
+              await flush(sessionId);
+            } catch {
+              // Swallow — recorder must stop even if flush fails.
+            }
+          }
+          await tauriInvoke<string>("stop_recording", { sessionId });
           resetMuteState();
           setStatus("recorded");
           setSession(null);
