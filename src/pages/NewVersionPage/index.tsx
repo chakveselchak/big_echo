@@ -1,6 +1,7 @@
 import { Button, Typography } from "antd";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { tauriInvoke } from "../../lib/tauri";
 import type { UpdateInfo } from "../../types";
 
 type Props = {
@@ -12,6 +13,13 @@ function formatPublishedAt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleDateString();
+}
+
+function openExternal(url: string): void {
+  if (!url) return;
+  void tauriInvoke<void>("open_external_url", { url }).catch((err) => {
+    console.warn("open_external_url failed", err);
+  });
 }
 
 export function NewVersionPage({ updateInfo }: Props) {
@@ -32,7 +40,16 @@ export function NewVersionPage({ updateInfo }: Props) {
           remarkPlugins={[remarkGfm]}
           components={{
             a: ({ href, children, ...rest }) => (
-              <a href={href} target="_blank" rel="noreferrer" {...rest}>
+              <a
+                {...rest}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (href) openExternal(href);
+                }}
+              >
                 {children}
               </a>
             ),
@@ -47,6 +64,10 @@ export function NewVersionPage({ updateInfo }: Props) {
         href={updateInfo.html_url}
         target="_blank"
         rel="noreferrer"
+        onClick={(event) => {
+          event.preventDefault();
+          openExternal(updateInfo.html_url);
+        }}
         style={{ marginTop: 16 }}
       >
         View on GitHub

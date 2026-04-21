@@ -86,6 +86,36 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, Strin
     Ok(build_update_info(&current, release))
 }
 
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("URL must use http or https scheme".to_string());
+    }
+
+    let status = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+            .arg(&url)
+            .status()
+            .map_err(|e| e.to_string())?
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .status()
+            .map_err(|e| e.to_string())?
+    } else {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .status()
+            .map_err(|e| e.to_string())?
+    };
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("failed to open URL: exit status {status}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

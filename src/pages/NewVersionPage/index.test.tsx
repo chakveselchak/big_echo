@@ -1,6 +1,26 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { UpdateInfo } from "../../types";
+
+const invokeMock = vi.hoisted(() =>
+  vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(async () => undefined)
+);
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (p: string) => `asset://${p}`,
+  invoke: invokeMock,
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: vi.fn(async () => undefined),
+  listen: vi.fn(async () => () => undefined),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ label: "main" }),
+}));
+
 import { NewVersionPage } from "./index";
 
 const info: UpdateInfo = {
@@ -14,6 +34,11 @@ const info: UpdateInfo = {
 };
 
 describe("NewVersionPage", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
   it("renders headline with latest and current versions", () => {
     render(<NewVersionPage updateInfo={info} />);
     expect(screen.getByText(/New version 2\.1\.0 available/i)).toBeInTheDocument();
@@ -27,11 +52,12 @@ describe("NewVersionPage", () => {
     expect(screen.getByText(/Feature B/)).toBeInTheDocument();
   });
 
-  it("renders an external link to the release page", () => {
+  it("opens the GitHub release via open_external_url when clicked", async () => {
+    const user = userEvent.setup();
     render(<NewVersionPage updateInfo={info} />);
-    const link = screen.getByRole("link", { name: /View on GitHub/i });
-    expect(link).toHaveAttribute("href", info.html_url);
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+    const button = screen.getByRole("link", { name: /View on GitHub/i });
+    expect(button).toHaveAttribute("href", info.html_url);
+    await user.click(button);
+    expect(invokeMock).toHaveBeenCalledWith("open_external_url", { url: info.html_url });
   });
 });
