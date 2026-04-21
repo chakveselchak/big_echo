@@ -7,7 +7,7 @@ const CHROME_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 #[derive(Debug, Deserialize)]
-struct GithubRelease {
+pub(crate) struct GithubRelease {
     tag_name: String,
     name: Option<String>,
     html_url: String,
