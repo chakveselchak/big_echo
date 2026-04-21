@@ -1267,4 +1267,110 @@ describe("useRecordingController", () => {
     expect(flushPendingSessionDetails).toHaveBeenCalledWith("active-session");
     expect(callOrder).toEqual(["flush", "stop_recording"]);
   });
+
+  it("does not schedule a tray topic autosave while a stop is in flight", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+    let resolveStopRecording: () => void = () => undefined;
+    const stopRecordingPromise = new Promise<string>((resolve) => {
+      resolveStopRecording = () => resolve("recorded");
+    });
+    let updateCallCount = 0;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "update_session_details") {
+        updateCallCount += 1;
+        return "updated";
+      }
+      if (cmd === "stop_recording") {
+        return stopRecordingPromise;
+      }
+      if (cmd === "get_ui_sync_state") {
+        return {
+          source: "slack",
+          topic: "initial",
+          is_recording: false,
+          active_session_id: null,
+          mute_state: { micMuted: false, systemMuted: false },
+        };
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("initial");
+      const [tagsInput] = useState("");
+      const [source, setSource] = useState("slack");
+      const [notesInput] = useState("");
+      const [session, setSession] = useState<StartResponse | null>({
+        session_id: "active-session",
+        session_dir: "/tmp/active",
+        status: "recording",
+      });
+      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
+      const [status, setStatus] = useState("recording");
+
+      return {
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          tagsInput,
+          source,
+          setSource,
+          notesInput,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        topic,
+        setTopic,
+      };
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    // Install fake timers AFTER hydration so waitFor isn't blocked.
+    vi.useFakeTimers();
+
+    let stopPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      stopPromise = result.current.controller.stop();
+    });
+
+    // Let microtasks drain so the in-stop flush completes and stop() is
+    // now parked on `await stop_recording`.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const callsAfterFlush = updateCallCount;
+    expect(callsAfterFlush).toBeGreaterThanOrEqual(1);
+
+    // User types a new topic while stop_recording is in flight. Without
+    // the race guard, the tray autosave effect schedules a 450ms debounce
+    // that fires before session/status change, triggering a second
+    // update_session_details for an effectively stopping session.
+    act(() => {
+      result.current.setTopic("typed during stop");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+
+    expect(updateCallCount).toBe(callsAfterFlush);
+
+    // Release stop_recording and drain.
+    resolveStopRecording();
+    await act(async () => {
+      await stopPromise;
+    });
+  });
 });

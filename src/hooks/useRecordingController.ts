@@ -79,6 +79,7 @@ export function useRecordingController({
   useEffect(() => {
     flushPendingSessionDetailsRef.current = flushPendingSessionDetails;
   }, [flushPendingSessionDetails]);
+  const stoppingRef = useRef(false);
 
   useEffect(() => {
     topicRef.current = topic;
@@ -173,6 +174,10 @@ export function useRecordingController({
   async function stop() {
     if (!session) return;
     const sessionId = session.session_id;
+    // Block the tray autosave effect from scheduling a late debounce while
+    // we're in the flush → stop_recording sequence. Reset on reject so
+    // retries behave normally.
+    stoppingRef.current = true;
 
     // Flush tray-side debounced topic autosave synchronously.
     if (isTrayWindow) {
@@ -208,13 +213,19 @@ export function useRecordingController({
       }
     }
 
-    await tauriInvoke<string>("stop_recording", { sessionId });
+    try {
+      await tauriInvoke<string>("stop_recording", { sessionId });
+    } catch (err) {
+      stoppingRef.current = false;
+      throw err;
+    }
     resetMuteState();
     setStatus("recorded");
     setSession(null);
     if (isTrayWindow) {
       setTopic("");
     }
+    stoppingRef.current = false;
     await loadSessions();
   }
 
@@ -446,6 +457,7 @@ export function useRecordingController({
 
   useEffect(() => {
     if (!isTrayWindow || status !== "recording" || !session?.session_id) return;
+    if (stoppingRef.current) return;
     const signature = `${session.session_id}::${source}::${topic}`;
     if (signature === trayTopicSavedSignatureRef.current) return;
     if (trayTopicAutosaveTimerRef.current) clearTimeout(trayTopicAutosaveTimerRef.current);
