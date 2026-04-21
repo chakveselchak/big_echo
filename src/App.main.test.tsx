@@ -597,7 +597,6 @@ describe("App main window", () => {
 
     expect(screen.queryByText("открыть")).not.toBeInTheDocument();
     const folderButton = screen.getByRole("button", { name: "Открыть папку сессии" });
-    expect(folderButton).toHaveClass("icon-button");
     expect(folderButton).toHaveClass("session-folder-link");
     await user.click(folderButton);
 

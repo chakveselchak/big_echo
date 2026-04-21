@@ -181,7 +181,7 @@ export function SessionList({
       });
   }
 
-  async function confirmSummaryPrompt() {
+  async function confirmSummaryPrompt(value: string) {
     if (!summaryPromptDialog) return;
     const current = sessionDetails[summaryPromptDialog.sessionId];
     if (!current) {
@@ -191,7 +191,7 @@ export function SessionList({
 
     const nextDetail: SessionMetaView = {
       ...current,
-      custom_summary_prompt: summaryPromptDialog.value,
+      custom_summary_prompt: value,
     };
     setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: true } : prev));
     const saved = await saveSessionDetails(summaryPromptDialog.sessionId, nextDetail);
@@ -451,10 +451,7 @@ export function SessionList({
       <SummaryPromptModal
         dialog={summaryPromptDialog}
         onCancel={() => setSummaryPromptDialog(null)}
-        onConfirm={() => void confirmSummaryPrompt()}
-        onChange={(value) =>
-          setSummaryPromptDialog((prev) => (prev ? { ...prev, value } : prev))
-        }
+        onConfirm={(value) => void confirmSummaryPrompt(value)}
       />
     </>
   );

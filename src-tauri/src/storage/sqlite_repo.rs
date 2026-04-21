@@ -10,6 +10,7 @@ pub struct SessionListMeta {
     pub session_id: String,
     pub source: String,
     pub notes: String,
+    pub custom_summary_prompt: String,
     pub topic: String,
     pub tags: Vec<String>,
 }
@@ -288,6 +289,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     session_id: meta.session_id.clone(),
                     source: meta.source.clone(),
                     notes: meta.notes.clone(),
+                    custom_summary_prompt: meta.custom_summary_prompt.clone(),
                     topic: meta.topic.clone(),
                     tags: meta.tags.clone(),
                 });

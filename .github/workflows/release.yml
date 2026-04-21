@@ -86,7 +86,7 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
-      - name: Inject README.md into DMG and re-upload
+      - name: Repack DMG with README.md and re-upload
         if: startsWith(matrix.runner, 'macos-')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -94,20 +94,41 @@ jobs:
         run: |
           set -euo pipefail
           DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
-          DMG=$(ls "$DMG_DIR"/*.dmg | head -1)
-          echo "Patching DMG: $DMG"
+          DMG=$(ls "$DMG_DIR"/*.dmg | head -n 1)
+          echo "Repacking $DMG"
 
-          RW_DMG="${DMG%.dmg}-rw.dmg"
-          hdiutil convert "$DMG" -format UDRW -o "$RW_DMG"
+          # Mount the tauri-produced DMG read-only so we can read out its .app.
+          # Let hdiutil auto-mount under /Volumes/<volname> so we can reuse the
+          # original volume name for the rebuilt DMG.
+          ATTACH_OUT=$(hdiutil attach "$DMG" -nobrowse -readonly -noverify)
+          SRC_MOUNT=$(echo "$ATTACH_OUT" | awk '{ for (i=1; i<=NF; i++) if ($i ~ "^/Volumes/") m=$i } END { print m }')
+          if [ -z "$SRC_MOUNT" ]; then
+            echo "Failed to detect DMG mount point" >&2
+            echo "$ATTACH_OUT" >&2
+            exit 1
+          fi
+          VOLNAME=$(basename "$SRC_MOUNT")
+          echo "Mounted at $SRC_MOUNT (volume: $VOLNAME)"
 
-          MOUNT_DIR=$(mktemp -d)
-          hdiutil attach "$RW_DMG" -mountpoint "$MOUNT_DIR" -nobrowse
-          cp dmg-assets/README.md "$MOUNT_DIR/README.md"
-          hdiutil detach "$MOUNT_DIR"
+          # Copy the .app via ditto to preserve symlinks, xattrs and code
+          # signatures, then unmount before rebuilding.
+          STAGE=$(mktemp -d)
+          for APP in "$SRC_MOUNT"/*.app; do
+            ditto "$APP" "$STAGE/$(basename "$APP")"
+          done
+          hdiutil detach "$SRC_MOUNT" -quiet || hdiutil detach "$SRC_MOUNT" -force
 
-          rm "$DMG"
-          hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG"
-          rm "$RW_DMG"
+          # Add README alongside the .app and an Applications symlink so the
+          # DMG still offers the standard drag-to-install target.
+          cp dmg-assets/README.md "$STAGE/README.md"
+          ln -s /Applications "$STAGE/Applications"
+
+          # Replace the original DMG. Rebuilding (instead of mounting rw +
+          # copying in) sidesteps the tight filesystem tauri ships, which had
+          # no free space left to `cp` the README into.
+          rm -f "$DMG"
+          hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE" \
+            -format UDZO -imagekey zlib-level=9 -ov "$DMG"
 
           gh release upload "$TAG" "$DMG" --clobber
 
