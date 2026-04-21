@@ -1207,4 +1207,64 @@ describe("useRecordingController", () => {
     expect(caught).toBe(stopError);
     expect(result.current.topic).toBe("Daily sync");
   });
+
+  it("flushes pending session details when tray:stop fires in the main window", async () => {
+    const loadSessions = vi.fn(async () => undefined);
+    const callOrder: string[] = [];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "stop_recording") {
+        callOrder.push("stop_recording");
+        return "recorded";
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+    const flushPendingSessionDetails = vi.fn(async () => {
+      callOrder.push("flush");
+    });
+
+    const { result: _result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [tagsInput] = useState("");
+      const [source, setSource] = useState("slack");
+      const [notesInput] = useState("");
+      const [session, setSession] = useState<StartResponse | null>({
+        session_id: "active-session",
+        session_dir: "/tmp/active",
+        status: "recording",
+      });
+      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
+      const [status, setStatus] = useState("recording");
+
+      return useRecordingController({
+        enableTrayCommandListeners: true,
+        isSettingsWindow: false,
+        isTrayWindow: false,
+        topic,
+        setTopic,
+        tagsInput,
+        source,
+        setSource,
+        notesInput,
+        session,
+        setSession,
+        lastSessionId,
+        setLastSessionId,
+        status,
+        setStatus,
+        loadSessions,
+        flushPendingSessionDetails,
+      });
+    });
+
+    await waitFor(() => {
+      expect(listeners.has("tray:stop")).toBe(true);
+    });
+
+    await act(async () => {
+      await listeners.get("tray:stop")?.();
+    });
+
+    expect(flushPendingSessionDetails).toHaveBeenCalledWith("active-session");
+    expect(callOrder).toEqual(["flush", "stop_recording"]);
+  });
 });
