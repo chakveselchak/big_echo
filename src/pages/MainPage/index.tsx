@@ -91,6 +91,7 @@ export function MainPage() {
     status,
     setStatus,
     loadSessions,
+    flushPendingSessionDetails: flushSessionDetails,
   });
 
   // suppress unused warning
