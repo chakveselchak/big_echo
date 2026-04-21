@@ -158,7 +158,7 @@ export function MainPage() {
             aria-selected={mainTab === "new-version"}
             onClick={() => handleTabSelect("new-version")}
           >
-            New version
+            🔥 New version
           </button>
         )}
       </div>

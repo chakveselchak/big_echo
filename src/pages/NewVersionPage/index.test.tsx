@@ -55,7 +55,7 @@ describe("NewVersionPage", () => {
   it("opens the GitHub release via open_external_url when clicked", async () => {
     const user = userEvent.setup();
     render(<NewVersionPage updateInfo={info} />);
-    const button = screen.getByRole("link", { name: /View on GitHub/i });
+    const button = screen.getByRole("link", { name: /Download new version/i });
     expect(button).toHaveAttribute("href", info.html_url);
     await user.click(button);
     expect(invokeMock).toHaveBeenCalledWith("open_external_url", { url: info.html_url });

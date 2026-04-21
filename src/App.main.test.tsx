@@ -1897,7 +1897,7 @@ describe("App main window", () => {
 
     await user.click(newVersionTab);
     expect(await screen.findByText(/New version 2\.1\.0 available/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /View on GitHub/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Download new version/i })).toHaveAttribute(
       "href",
       "https://example.com/release"
     );

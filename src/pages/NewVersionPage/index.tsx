@@ -70,7 +70,7 @@ export function NewVersionPage({ updateInfo }: Props) {
         }}
         style={{ marginTop: 16 }}
       >
-        View on GitHub
+        Download new version
       </Button>
     </div>
   );
