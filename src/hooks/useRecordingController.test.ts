@@ -91,6 +91,57 @@ function setDefaultInvokeMockImplementation() {
   invokeMock.mockImplementation(async (cmd: string) => getDefaultInvokeResponse(cmd));
 }
 
+type HarnessOptions = {
+  initialTopic?: string;
+  initialSource?: string;
+  initialSession?: StartResponse | null;
+  initialStatus?: string;
+  isTrayWindow?: boolean;
+  isSettingsWindow?: boolean;
+  enableTrayCommandListeners?: boolean;
+  loadSessions?: () => Promise<void>;
+  flushPendingSessionDetails?: (sessionId: string) => Promise<void>;
+};
+
+function renderControllerHarness(opts: HarnessOptions = {}) {
+  const loadSessions = opts.loadSessions ?? vi.fn(async () => undefined);
+  const initialSession: StartResponse | null =
+    opts.initialSession === undefined ? null : opts.initialSession;
+  return renderHook(() => {
+    const [topic, setTopic] = useState(opts.initialTopic ?? "");
+    const [tagsInput] = useState("");
+    const [source, setSource] = useState(opts.initialSource ?? "slack");
+    const [notesInput] = useState("");
+    const [session, setSession] = useState<StartResponse | null>(initialSession);
+    const [lastSessionId, setLastSessionId] = useState<string | null>(
+      initialSession?.session_id ?? null,
+    );
+    const [status, setStatus] = useState(opts.initialStatus ?? "idle");
+
+    const controller = useRecordingController({
+      enableTrayCommandListeners: opts.enableTrayCommandListeners,
+      isSettingsWindow: opts.isSettingsWindow ?? false,
+      isTrayWindow: opts.isTrayWindow ?? false,
+      topic,
+      setTopic,
+      tagsInput,
+      source,
+      setSource,
+      notesInput,
+      session,
+      setSession,
+      lastSessionId,
+      setLastSessionId,
+      status,
+      setStatus,
+      loadSessions,
+      flushPendingSessionDetails: opts.flushPendingSessionDetails,
+    });
+
+    return { controller, topic, setTopic, source, setSource, status };
+  });
+}
+
 describe("useRecordingController", () => {
   beforeEach(() => {
     listeners.clear();
@@ -887,7 +938,6 @@ describe("useRecordingController", () => {
   });
 
   it("flushes pending session details before stopping the recording", async () => {
-    const loadSessions = vi.fn(async () => undefined);
     const callOrder: string[] = [];
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "stop_recording") {
@@ -900,37 +950,10 @@ describe("useRecordingController", () => {
       callOrder.push("flush");
     });
 
-    const { result } = renderHook(() => {
-      const [topic, setTopic] = useState("");
-      const [tagsInput] = useState("");
-      const [source, setSource] = useState("slack");
-      const [notesInput] = useState("");
-      const [session, setSession] = useState<StartResponse | null>({
-        session_id: "active-session",
-        session_dir: "/tmp/active",
-        status: "recording",
-      });
-      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
-      const [status, setStatus] = useState("recording");
-
-      return useRecordingController({
-        isSettingsWindow: false,
-        isTrayWindow: false,
-        topic,
-        setTopic,
-        tagsInput,
-        source,
-        setSource,
-        notesInput,
-        session,
-        setSession,
-        lastSessionId,
-        setLastSessionId,
-        status,
-        setStatus,
-        loadSessions,
-        flushPendingSessionDetails,
-      });
+    const { result } = renderControllerHarness({
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
+      flushPendingSessionDetails,
     });
 
     await waitFor(() => {
@@ -938,7 +961,7 @@ describe("useRecordingController", () => {
     });
 
     await act(async () => {
-      await result.current.stop();
+      await result.current.controller.stop();
     });
 
     expect(flushPendingSessionDetails).toHaveBeenCalledWith("active-session");
@@ -946,43 +969,15 @@ describe("useRecordingController", () => {
   });
 
   it("does not block stop if flushPendingSessionDetails rejects", async () => {
-    const loadSessions = vi.fn(async () => undefined);
     const flushError = new Error("flush failed");
     const flushPendingSessionDetails = vi.fn(async () => {
       throw flushError;
     });
 
-    const { result } = renderHook(() => {
-      const [topic, setTopic] = useState("");
-      const [tagsInput] = useState("");
-      const [source, setSource] = useState("slack");
-      const [notesInput] = useState("");
-      const [session, setSession] = useState<StartResponse | null>({
-        session_id: "active-session",
-        session_dir: "/tmp/active",
-        status: "recording",
-      });
-      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
-      const [status, setStatus] = useState("recording");
-
-      return useRecordingController({
-        isSettingsWindow: false,
-        isTrayWindow: false,
-        topic,
-        setTopic,
-        tagsInput,
-        source,
-        setSource,
-        notesInput,
-        session,
-        setSession,
-        lastSessionId,
-        setLastSessionId,
-        status,
-        setStatus,
-        loadSessions,
-        flushPendingSessionDetails,
-      });
+    const { result } = renderControllerHarness({
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
+      flushPendingSessionDetails,
     });
 
     await waitFor(() => {
@@ -990,7 +985,7 @@ describe("useRecordingController", () => {
     });
 
     await act(async () => {
-      await result.current.stop();
+      await result.current.controller.stop();
     });
 
     expect(flushPendingSessionDetails).toHaveBeenCalledWith("active-session");
@@ -998,7 +993,6 @@ describe("useRecordingController", () => {
   });
 
   it("flushes a pending tray topic autosave before stopping", async () => {
-    const loadSessions = vi.fn(async () => undefined);
     const callOrder: string[] = [];
     invokeMock.mockImplementation(async (cmd: string, _args?: unknown) => {
       if (cmd === "update_session_details") {
@@ -1012,47 +1006,23 @@ describe("useRecordingController", () => {
       return getDefaultInvokeResponse(cmd);
     });
 
-    const { result } = renderHook(() => {
-      const [topic, setTopic] = useState("");
-      const [tagsInput] = useState("");
-      const [source, setSource] = useState("slack");
-      const [notesInput] = useState("");
-      const [session, setSession] = useState<StartResponse | null>({
-        session_id: "active-session",
-        session_dir: "/tmp/active",
-        status: "recording",
-      });
-      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
-      const [status, setStatus] = useState("recording");
-
-      return {
-        controller: useRecordingController({
-          isSettingsWindow: false,
-          isTrayWindow: true,
-          topic,
-          setTopic,
-          tagsInput,
-          source,
-          setSource,
-          notesInput,
-          session,
-          setSession,
-          lastSessionId,
-          setLastSessionId,
-          status,
-          setStatus,
-          loadSessions,
-        }),
-        topic,
-        setTopic,
-      };
+    const { result } = renderControllerHarness({
+      isTrayWindow: true,
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
     });
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
     });
 
+    // Fake timers go on AFTER the initial hydration waitFor — waitFor
+    // polls via real setTimeout and would deadlock otherwise. Any
+    // autosave side effect from the mount-time real timer is cleared
+    // below so it can't pollute the flush/stop ordering assertion.
     vi.useFakeTimers();
+    invokeMock.mockClear();
+    callOrder.length = 0;
 
     // Simulate the user typing a topic during recording. The autosave
     // effect schedules a 450ms debounce; we stop *before* it fires.
@@ -1091,41 +1061,11 @@ describe("useRecordingController", () => {
   });
 
   it("clears the tray topic after a successful tray stop", async () => {
-    const loadSessions = vi.fn(async () => undefined);
-
-    const { result } = renderHook(() => {
-      const [topic, setTopic] = useState("Daily sync");
-      const [tagsInput] = useState("");
-      const [source, setSource] = useState("slack");
-      const [notesInput] = useState("");
-      const [session, setSession] = useState<StartResponse | null>({
-        session_id: "active-session",
-        session_dir: "/tmp/active",
-        status: "recording",
-      });
-      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
-      const [status, setStatus] = useState("recording");
-
-      return {
-        controller: useRecordingController({
-          isSettingsWindow: false,
-          isTrayWindow: true,
-          topic,
-          setTopic,
-          tagsInput,
-          source,
-          setSource,
-          notesInput,
-          session,
-          setSession,
-          lastSessionId,
-          setLastSessionId,
-          status,
-          setStatus,
-          loadSessions,
-        }),
-        topic,
-      };
+    const { result } = renderControllerHarness({
+      isTrayWindow: true,
+      initialTopic: "Daily sync",
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
     });
 
     await waitFor(() => {
@@ -1142,7 +1082,6 @@ describe("useRecordingController", () => {
   });
 
   it("keeps tray topic intact if stop_recording rejects", async () => {
-    const loadSessions = vi.fn(async () => undefined);
     const stopError = new Error("audio encoder crashed");
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "stop_recording") {
@@ -1160,39 +1099,11 @@ describe("useRecordingController", () => {
       return getDefaultInvokeResponse(cmd);
     });
 
-    const { result } = renderHook(() => {
-      const [topic, setTopic] = useState("Daily sync");
-      const [tagsInput] = useState("");
-      const [source, setSource] = useState("slack");
-      const [notesInput] = useState("");
-      const [session, setSession] = useState<StartResponse | null>({
-        session_id: "active-session",
-        session_dir: "/tmp/active",
-        status: "recording",
-      });
-      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
-      const [status, setStatus] = useState("recording");
-
-      return {
-        controller: useRecordingController({
-          isSettingsWindow: false,
-          isTrayWindow: true,
-          topic,
-          setTopic,
-          tagsInput,
-          source,
-          setSource,
-          notesInput,
-          session,
-          setSession,
-          lastSessionId,
-          setLastSessionId,
-          status,
-          setStatus,
-          loadSessions,
-        }),
-        topic,
-      };
+    const { result } = renderControllerHarness({
+      isTrayWindow: true,
+      initialTopic: "Daily sync",
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
     });
 
     await waitFor(() => {
@@ -1209,7 +1120,6 @@ describe("useRecordingController", () => {
   });
 
   it("flushes pending session details when tray:stop fires in the main window", async () => {
-    const loadSessions = vi.fn(async () => undefined);
     const callOrder: string[] = [];
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "stop_recording") {
@@ -1222,38 +1132,11 @@ describe("useRecordingController", () => {
       callOrder.push("flush");
     });
 
-    const { result: _result } = renderHook(() => {
-      const [topic, setTopic] = useState("");
-      const [tagsInput] = useState("");
-      const [source, setSource] = useState("slack");
-      const [notesInput] = useState("");
-      const [session, setSession] = useState<StartResponse | null>({
-        session_id: "active-session",
-        session_dir: "/tmp/active",
-        status: "recording",
-      });
-      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
-      const [status, setStatus] = useState("recording");
-
-      return useRecordingController({
-        enableTrayCommandListeners: true,
-        isSettingsWindow: false,
-        isTrayWindow: false,
-        topic,
-        setTopic,
-        tagsInput,
-        source,
-        setSource,
-        notesInput,
-        session,
-        setSession,
-        lastSessionId,
-        setLastSessionId,
-        status,
-        setStatus,
-        loadSessions,
-        flushPendingSessionDetails,
-      });
+    renderControllerHarness({
+      enableTrayCommandListeners: true,
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
+      flushPendingSessionDetails,
     });
 
     await waitFor(() => {
@@ -1269,7 +1152,6 @@ describe("useRecordingController", () => {
   });
 
   it("does not schedule a tray topic autosave while a stop is in flight", async () => {
-    const loadSessions = vi.fn(async () => undefined);
     let resolveStopRecording: () => void = () => undefined;
     const stopRecordingPromise = new Promise<string>((resolve) => {
       resolveStopRecording = () => resolve("recorded");
@@ -1295,40 +1177,11 @@ describe("useRecordingController", () => {
       return getDefaultInvokeResponse(cmd);
     });
 
-    const { result } = renderHook(() => {
-      const [topic, setTopic] = useState("initial");
-      const [tagsInput] = useState("");
-      const [source, setSource] = useState("slack");
-      const [notesInput] = useState("");
-      const [session, setSession] = useState<StartResponse | null>({
-        session_id: "active-session",
-        session_dir: "/tmp/active",
-        status: "recording",
-      });
-      const [lastSessionId, setLastSessionId] = useState<string | null>("active-session");
-      const [status, setStatus] = useState("recording");
-
-      return {
-        controller: useRecordingController({
-          isSettingsWindow: false,
-          isTrayWindow: true,
-          topic,
-          setTopic,
-          tagsInput,
-          source,
-          setSource,
-          notesInput,
-          session,
-          setSession,
-          lastSessionId,
-          setLastSessionId,
-          status,
-          setStatus,
-          loadSessions,
-        }),
-        topic,
-        setTopic,
-      };
+    const { result } = renderControllerHarness({
+      isTrayWindow: true,
+      initialTopic: "initial",
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
     });
 
     await waitFor(() => {
