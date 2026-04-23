@@ -6,6 +6,9 @@ type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
 
 const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
   const defaultImpl: InvokeMock = async (cmd: string, _args?: unknown) => {
+    if (cmd === "auto_delete_old_session_audio") {
+      return { deleted: 0, scanned: 0 };
+    }
     if (cmd === "get_ui_sync_state") {
       return { source: "slack", topic: "", is_recording: false, active_session_id: null };
     }
@@ -43,6 +46,8 @@ const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         system_device_name: "",
         auto_run_pipeline_on_stop: false,
         api_call_logging_enabled: false,
+        auto_delete_audio_enabled: false,
+        auto_delete_audio_days: 30,
       };
     }
     if (cmd === "check_for_update") {
@@ -448,6 +453,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -653,6 +660,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -811,6 +820,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -936,6 +947,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1031,6 +1044,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1131,6 +1146,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1242,6 +1259,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1429,6 +1448,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1512,6 +1533,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1574,6 +1597,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1962,5 +1987,18 @@ describe("App main window", () => {
       "href",
       "https://example.com/release"
     );
+  });
+
+  it("triggers auto_delete_old_session_audio once at startup before listing sessions", async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("auto_delete_old_session_audio");
+    });
+    const calls = invokeMock.mock.calls.map(([cmd]) => cmd);
+    const autoDeleteCalls = calls.filter((cmd) => cmd === "auto_delete_old_session_audio");
+    expect(autoDeleteCalls).toHaveLength(1);
+    const autoDeleteIdx = calls.indexOf("auto_delete_old_session_audio");
+    const listSessionsIdx = calls.lastIndexOf("list_sessions");
+    expect(listSessionsIdx).toBeGreaterThan(autoDeleteIdx);
   });
 });

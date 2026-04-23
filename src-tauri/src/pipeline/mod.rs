@@ -1299,6 +1299,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1370,6 +1372,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1469,6 +1473,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1599,6 +1605,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1701,6 +1709,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1820,6 +1830,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1986,6 +1998,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2052,6 +2066,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2101,6 +2117,8 @@ mod tests {
             artifact_opener_app: String::new(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         };
 
         assert_eq!(

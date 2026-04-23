@@ -28,6 +28,8 @@ const { invokeMock } = vi.hoisted(() => ({
         system_device_name: "",
         auto_run_pipeline_on_stop: false,
         api_call_logging_enabled: false,
+        auto_delete_audio_enabled: false,
+        auto_delete_audio_days: 30,
       };
     }
     if (cmd === "detect_system_source_device") {
@@ -128,6 +130,8 @@ function mockSettings() {
     system_device_name: "",
     auto_run_pipeline_on_stop: false,
     api_call_logging_enabled: false,
+    auto_delete_audio_enabled: false,
+    auto_delete_audio_days: 30,
   };
 }
 
@@ -469,6 +473,8 @@ describe("App settings window", () => {
         payload: expect.objectContaining({
           auto_run_pipeline_on_stop: true,
           api_call_logging_enabled: true,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         }),
       });
     });

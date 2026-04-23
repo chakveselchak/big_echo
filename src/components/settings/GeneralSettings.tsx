@@ -1,5 +1,5 @@
-import { Button, Checkbox, Flex, Form, Input, Select, Tooltip } from "antd";
-import { FileSyncOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Flex, Form, Input, InputNumber, Select, Tooltip } from "antd";
+import { FileSyncOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import type { PublicSettings, TextEditorAppOption } from "../../types";
 import { localIconForEditor } from "../../lib/appUtils";
 
@@ -52,7 +52,7 @@ export function GeneralSettings({
   );
 
   return (
-    <Form layout="vertical" style={{ maxWidth: 520 }}>
+    <Form layout="vertical" style={{ maxWidth: 760 }}>
       <Form.Item
         label={
           <label htmlFor="recording_root">
@@ -128,6 +128,38 @@ export function GeneralSettings({
           }))}
           onChange={(value) => setSettings({ ...settings, artifact_open_app: value })}
         />
+      </Form.Item>
+
+      <Form.Item>
+        <Flex align="center" gap={8} wrap="wrap">
+          <Checkbox
+            id="auto_delete_audio_enabled"
+            aria-label="Auto-delete audio files for old sessions"
+            checked={Boolean(settings.auto_delete_audio_enabled)}
+            onChange={(e) =>
+              setSettings({ ...settings, auto_delete_audio_enabled: e.target.checked })
+            }
+          >
+            Auto-delete audio files for sessions older than
+            {(isDirty("auto_delete_audio_enabled") ||
+              isDirty("auto_delete_audio_days")) && dirtyDot}
+          </Checkbox>
+          <InputNumber
+            aria-label="Days before audio auto-delete"
+            min={1}
+            max={3650}
+            value={settings.auto_delete_audio_days}
+            disabled={!settings.auto_delete_audio_enabled}
+            onChange={(v) =>
+              setSettings({ ...settings, auto_delete_audio_days: Number(v ?? 1) })
+            }
+            style={{ width: 80 }}
+          />
+          <span>days</span>
+          <Tooltip title="Runs at app startup">
+            <QuestionCircleOutlined style={{ color: "#999", cursor: "help" }} />
+          </Tooltip>
+        </Flex>
       </Form.Item>
 
       <Form.Item>

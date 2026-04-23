@@ -255,15 +255,38 @@ select {
   font-weight: 620;
 }
 
+.main-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  display: grid;
+  /* Cover the .app-shell top padding so cards don't peek above the header
+     during scroll. Side margins/paddings extend the sticky background to
+     the edges of the app shell so the drop shadow spans full width. */
+  padding: 18px 10px 0 10px;
+  margin: -18px -13px 0 -13px;
+  /* Soft drop shadow at the bottom so users see where scrolled session
+     cards "disappear" under the sticky header. */
+  box-shadow: 0 8px 12px -6px rgba(15, 25, 40, 0.22);
+}
+
+.app-shell.mac-content {
+  /* `mac-window` sets `overflow: hidden`, which establishes a non-scrolling
+     scroll container and breaks `position: sticky` for descendants. `clip`
+     visually clips the same way (rounded corners preserved) but does NOT
+     create a scroll container, so sticky propagates to the viewport. */
+  overflow: clip;
+}
+
 .main-tabs {
   display: flex;
   align-items: center;
   gap: 8px;
   background: rgba(245, 247, 250, 0.92);
-  border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  padding: 6px;
   flex-wrap: wrap;
+  padding-bottom: 10px;
 }
 
 .main-tab-button {
@@ -439,17 +462,11 @@ select {
 }
 
 .session-toolbar {
-  display: grid;
-  gap: 10px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--stroke);
-}
-
-.session-toolbar-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
 }
 
 .session-toolbar-actions {
@@ -458,14 +475,7 @@ select {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.field.session-search-label {
-  gap: 0;
-  color: var(--text-muted);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  margin-left: auto;
 }
 
 .field {
@@ -507,13 +517,35 @@ select {
 
 .session-toolbar-search {
   position: relative;
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
+/* Match the 34px height + 10px radius of .refresh-icon-button and
+   .session-import-button so the whole toolbar reads as one row of
+   uniformly-sized controls. */
+.session-toolbar-search .ant-input-affix-wrapper,
+.session-toolbar-search .ant-input-search-button {
+  height: 34px;
+  min-height: 0;
+}
 .session-toolbar-search .ant-input-affix-wrapper {
-  background: rgba(245, 247, 250, 0.96);
+  background: #ffffff;
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+  padding-top: 0;
+  padding-bottom: 0;
+  display: flex;
+  align-items: center;
 }
 .session-toolbar-search .ant-input-affix-wrapper .ant-input {
   background: transparent;
+  height: auto;
+  padding: 0;
+}
+.session-toolbar-search .ant-input-search-button {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
 }
 
 .session-search-icon {
@@ -1088,13 +1120,15 @@ select {
   cursor: not-allowed;
 }
 
-.refresh-icon-button {
+.refresh-icon-button,
+.session-import-button {
   border: 1px solid var(--stroke);
   background: var(--surface-elevated);
   padding: 0;
   margin: 0;
   width: 34px;
   height: 34px;
+  min-height: 0;
   color: var(--accent-strong);
   cursor: pointer;
   display: inline-flex;
@@ -1104,7 +1138,8 @@ select {
   box-shadow: var(--shadow-sm);
 }
 
-.refresh-icon-button svg {
+.refresh-icon-button svg,
+.session-import-button .anticon svg {
   width: 15px;
   height: 15px;
 }
@@ -1124,11 +1159,13 @@ select {
   }
 }
 
-.refresh-icon-button:hover {
+.refresh-icon-button:hover,
+.session-import-button:hover {
   color: var(--accent);
 }
 
-.refresh-icon-button:disabled {
+.refresh-icon-button:disabled,
+.session-import-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -1164,6 +1201,11 @@ select {
 .sessions-grid {
   display: grid;
   gap: 8px;
+}
+
+.sessions-load-sentinel {
+  height: 1px;
+  width: 100%;
 }
 
 .sessions-empty-state {
@@ -1711,6 +1753,11 @@ select {
     padding: 12px 8px 18px;
   }
 
+  .main-sticky-header {
+    padding-top: 12px;
+    margin-top: -12px;
+  }
+
   .hero {
     flex-direction: column;
     align-items: flex-start;
@@ -1718,11 +1765,6 @@ select {
 
   .session-toolbar {
     gap: 8px;
-  }
-
-  .session-toolbar-header {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .session-toolbar-actions {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { ConfigProvider, Menu } from "antd";
 import type { MenuProps } from "antd";
@@ -18,6 +18,9 @@ import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import { ArtifactModal } from "./ArtifactModal";
 import { SummaryPromptModal } from "./SummaryPromptModal";
 import type { SummaryPromptDialogState } from "./SummaryPromptModal";
+
+const INITIAL_VISIBLE = 20;
+const PAGE_SIZE = 40;
 
 type SessionContextMenuState = {
   sessionId: string;
@@ -96,6 +99,7 @@ export function SessionList({
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   // Cache the default summary prompt fetched from backend so clicking the
   // "Настроить промпт саммари" button is instant on every repeat click
   // (the first one pays one IPC round-trip).
@@ -242,6 +246,48 @@ export function SessionList({
     };
   }, [sessionContextMenu]);
 
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const filteredSessionsLengthRef = useRef(filteredSessions.length);
+  filteredSessionsLengthRef.current = filteredSessions.length;
+
+  const setSentinelRef = useCallback((node: HTMLDivElement | null) => {
+    // Tear down the observer attached to the previous sentinel node (if any).
+    // This runs both on unmount (node === null) and on remount with a new
+    // node. Stable observer across batch loads avoids a WebKit issue where
+    // a freshly-created observer can drop its initial intersection callback.
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((current) => {
+            const max = filteredSessionsLengthRef.current;
+            if (current >= max) return current;
+            return Math.min(current + PAGE_SIZE, max);
+          });
+        }
+      },
+      { rootMargin: "2000px" },
+    );
+    observer.observe(node);
+    observerRef.current = observer;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+    };
+  }, []);
+
+  const isSearchActive = sessionSearchQuery.trim().length > 0;
+  const displayedSessions = isSearchActive
+    ? filteredSessions
+    : filteredSessions.slice(0, visibleCount);
+
   const sessionContextMenuItem = sessionContextMenu
     ? filteredSessions.find((item) => item.session_id === sessionContextMenu.sessionId)
     : null;
@@ -345,52 +391,57 @@ export function SessionList({
           ariaLabel="Searching sessions"
         />
       ) : (
-      <div className="sessions-grid">
-        {filteredSessions.map((item) => {
-          const detail = getSessionDetail(item);
-          const textPending = Boolean(textPendingBySession[item.session_id]);
-          const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
-          const pipelineState = pipelineStateBySession[item.session_id];
-          const query = sessionSearchQuery.trim().toLowerCase();
-          const artifactHit = sessionArtifactSearchHits[item.session_id];
-          const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
-          const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
+        <>
+          <div className="sessions-grid">
+            {displayedSessions.map((item) => {
+              const detail = getSessionDetail(item);
+              const textPending = Boolean(textPendingBySession[item.session_id]);
+              const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
+              const pipelineState = pipelineStateBySession[item.session_id];
+              const query = sessionSearchQuery.trim().toLowerCase();
+              const artifactHit = sessionArtifactSearchHits[item.session_id];
+              const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
+              const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
 
-          return (
-            <SessionCard
-              key={item.session_id}
-              item={item}
-              detail={detail}
-              textPending={textPending}
-              summaryPending={summaryPending}
-              pipelineState={pipelineState}
-              searchQuery={sessionSearchQuery}
-              knownTagOptions={knownTagOptions}
-              transcriptMatch={transcriptMatch}
-              summaryMatch={summaryMatch}
-              onContextMenu={openSessionContextMenu}
-              onDetailChange={(nextDetail) =>
-                setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))
-              }
-              onOpenArtifact={openSessionArtifact}
-              onGetText={getText}
-              onGetSummary={getSummary}
-              onOpenSummaryPrompt={(d) => void openSummaryPromptDialog(d)}
-              onDelete={requestDeleteSession}
-              onDeleteAudio={requestDeleteAudio}
-              onFieldBlur={flushSessionDetails}
-              onOpenFolder={openSessionFolder}
-              setStatus={setStatus}
-            />
-          );
-        })}
-        {!filteredSessions.length && (
-          <div className="sessions-empty-state">
-            <div className="sessions-empty-state-title">{emptyStateTitle}</div>
-            <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
+              return (
+                <SessionCard
+                  key={item.session_id}
+                  item={item}
+                  detail={detail}
+                  textPending={textPending}
+                  summaryPending={summaryPending}
+                  pipelineState={pipelineState}
+                  searchQuery={sessionSearchQuery}
+                  knownTagOptions={knownTagOptions}
+                  transcriptMatch={transcriptMatch}
+                  summaryMatch={summaryMatch}
+                  onContextMenu={openSessionContextMenu}
+                  onDetailChange={(nextDetail) =>
+                    setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))
+                  }
+                  onOpenArtifact={openSessionArtifact}
+                  onGetText={getText}
+                  onGetSummary={getSummary}
+                  onOpenSummaryPrompt={(d) => void openSummaryPromptDialog(d)}
+                  onDelete={requestDeleteSession}
+                  onDeleteAudio={requestDeleteAudio}
+                  onFieldBlur={flushSessionDetails}
+                  onOpenFolder={openSessionFolder}
+                  setStatus={setStatus}
+                />
+              );
+            })}
+            {!displayedSessions.length && (
+              <div className="sessions-empty-state">
+                <div className="sessions-empty-state-title">{emptyStateTitle}</div>
+                <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+          {!isSearchActive && visibleCount < filteredSessions.length && (
+            <div ref={setSentinelRef} className="sessions-load-sentinel" aria-hidden />
+          )}
+        </>
       )}
 
       {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (
