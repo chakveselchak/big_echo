@@ -6,6 +6,9 @@ type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
 
 const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
   const defaultImpl: InvokeMock = async (cmd: string, _args?: unknown) => {
+    if (cmd === "auto_delete_old_session_audio") {
+      return { deleted: 0, scanned: 0 };
+    }
     if (cmd === "get_ui_sync_state") {
       return { source: "slack", topic: "", is_recording: false, active_session_id: null };
     }
@@ -1984,5 +1987,18 @@ describe("App main window", () => {
       "href",
       "https://example.com/release"
     );
+  });
+
+  it("triggers auto_delete_old_session_audio once at startup before listing sessions", async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("auto_delete_old_session_audio");
+    });
+    const calls = invokeMock.mock.calls.map(([cmd]) => cmd);
+    const autoDeleteCalls = calls.filter((cmd) => cmd === "auto_delete_old_session_audio");
+    expect(autoDeleteCalls).toHaveLength(1);
+    const autoDeleteIdx = calls.indexOf("auto_delete_old_session_audio");
+    const listSessionsIdx = calls.lastIndexOf("list_sessions");
+    expect(listSessionsIdx).toBeGreaterThan(autoDeleteIdx);
   });
 });

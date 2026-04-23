@@ -113,6 +113,19 @@ export function MainPage() {
     loadSessionsRef.current = loadSessions;
   }, [loadSessions]);
 
+  const autoDeleteDoneRef = useRef(false);
+  useEffect(() => {
+    if (autoDeleteDoneRef.current) return;
+    autoDeleteDoneRef.current = true;
+    void tauriInvoke<{ deleted: number; scanned: number }>(
+      "auto_delete_old_session_audio",
+    )
+      .catch(() => undefined)
+      .finally(() => {
+        void loadSessionsRef.current?.();
+      });
+  }, []);
+
   useEffect(() => {
     if (mainTab !== "sessions") return;
     loadSessionsRef.current?.().catch((err) => setStatus(`error: ${String(err)}`));
