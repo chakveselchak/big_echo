@@ -1100,13 +1100,15 @@ select {
   cursor: not-allowed;
 }
 
-.refresh-icon-button {
+.refresh-icon-button,
+.session-import-button {
   border: 1px solid var(--stroke);
   background: var(--surface-elevated);
   padding: 0;
   margin: 0;
   width: 34px;
   height: 34px;
+  min-height: 0;
   color: var(--accent-strong);
   cursor: pointer;
   display: inline-flex;
@@ -1116,7 +1118,8 @@ select {
   box-shadow: var(--shadow-sm);
 }
 
-.refresh-icon-button svg {
+.refresh-icon-button svg,
+.session-import-button .anticon svg {
   width: 15px;
   height: 15px;
 }
@@ -1136,11 +1139,13 @@ select {
   }
 }
 
-.refresh-icon-button:hover {
+.refresh-icon-button:hover,
+.session-import-button:hover {
   color: var(--accent);
 }
 
-.refresh-icon-button:disabled {
+.refresh-icon-button:disabled,
+.session-import-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
