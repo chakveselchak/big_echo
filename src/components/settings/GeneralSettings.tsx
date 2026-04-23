@@ -134,18 +134,18 @@ export function GeneralSettings({
         <Flex align="center" gap={8} wrap="wrap">
           <Checkbox
             id="auto_delete_audio_enabled"
-            aria-label="Автоматически удалять аудио-файлы для старых сессий"
+            aria-label="Auto-delete audio files for old sessions"
             checked={Boolean(settings.auto_delete_audio_enabled)}
             onChange={(e) =>
               setSettings({ ...settings, auto_delete_audio_enabled: e.target.checked })
             }
           >
-            Автоматически удалять аудио-файлы для сессий, старше
+            Auto-delete audio files for sessions older than
             {(isDirty("auto_delete_audio_enabled") ||
               isDirty("auto_delete_audio_days")) && dirtyDot}
           </Checkbox>
           <InputNumber
-            aria-label="Дней до автоудаления аудио"
+            aria-label="Days before audio auto-delete"
             min={1}
             max={3650}
             value={settings.auto_delete_audio_days}
@@ -155,8 +155,8 @@ export function GeneralSettings({
             }
             style={{ width: 80 }}
           />
-          <span>дней</span>
-          <Tooltip title="Проверка выполняется при запуске приложения">
+          <span>days</span>
+          <Tooltip title="Runs at app startup">
             <QuestionCircleOutlined style={{ color: "#999", cursor: "help" }} />
           </Tooltip>
         </Flex>
