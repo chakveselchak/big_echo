@@ -160,4 +160,15 @@ describe("SessionList lazy loading", () => {
 
     expect(screen.getAllByTestId("session-card")).toHaveLength(25);
   });
+
+  it("renders all filtered sessions and creates no observer when search is active", () => {
+    const sessions = Array.from({ length: 50 }, (_, i) => makeSession(i));
+    const filtered = sessions.slice(0, 30);
+    renderList(sessions, {
+      filteredSessions: filtered,
+      sessionSearchQuery: "topic",
+    });
+    expect(screen.getAllByTestId("session-card")).toHaveLength(30);
+    expect(ioInstances).toHaveLength(0);
+  });
 });
