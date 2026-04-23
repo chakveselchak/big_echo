@@ -1,5 +1,5 @@
-import { Button, Checkbox, Flex, Form, Input, Select, Tooltip } from "antd";
-import { FileSyncOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Flex, Form, Input, InputNumber, Select, Tooltip } from "antd";
+import { FileSyncOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import type { PublicSettings, TextEditorAppOption } from "../../types";
 import { localIconForEditor } from "../../lib/appUtils";
 
@@ -128,6 +128,38 @@ export function GeneralSettings({
           }))}
           onChange={(value) => setSettings({ ...settings, artifact_open_app: value })}
         />
+      </Form.Item>
+
+      <Form.Item>
+        <Flex align="center" gap={8} wrap="wrap">
+          <Checkbox
+            id="auto_delete_audio_enabled"
+            aria-label="Автоматически удалять аудио-файлы для старых сессий"
+            checked={Boolean(settings.auto_delete_audio_enabled)}
+            onChange={(e) =>
+              setSettings({ ...settings, auto_delete_audio_enabled: e.target.checked })
+            }
+          >
+            Автоматически удалять аудио-файлы для сессий, старше
+            {(isDirty("auto_delete_audio_enabled") ||
+              isDirty("auto_delete_audio_days")) && dirtyDot}
+          </Checkbox>
+          <InputNumber
+            aria-label="Дней до автоудаления аудио"
+            min={1}
+            max={3650}
+            value={settings.auto_delete_audio_days}
+            disabled={!settings.auto_delete_audio_enabled}
+            onChange={(v) =>
+              setSettings({ ...settings, auto_delete_audio_days: Number(v ?? 1) })
+            }
+            style={{ width: 80 }}
+          />
+          <span>дней</span>
+          <Tooltip title="Проверка выполняется при запуске приложения">
+            <QuestionCircleOutlined style={{ color: "#999", cursor: "help" }} />
+          </Tooltip>
+        </Flex>
       </Form.Item>
 
       <Form.Item>

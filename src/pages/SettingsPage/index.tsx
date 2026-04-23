@@ -94,7 +94,9 @@ export function SettingsPage() {
       isDirty("recording_root") ||
       isDirty("artifact_open_app") ||
       isDirty("auto_run_pipeline_on_stop") ||
-      isDirty("api_call_logging_enabled"),
+      isDirty("api_call_logging_enabled") ||
+      isDirty("auto_delete_audio_enabled") ||
+      isDirty("auto_delete_audio_days"),
     audio:
       isDirty("audio_format") ||
       isDirty("opus_bitrate_kbps") ||
