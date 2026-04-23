@@ -171,4 +171,65 @@ describe("SessionList lazy loading", () => {
     expect(screen.getAllByTestId("session-card")).toHaveLength(30);
     expect(ioInstances).toHaveLength(0);
   });
+
+  it("renders no sentinel and no observer when filteredSessions.length === INITIAL_VISIBLE", () => {
+    renderList(Array.from({ length: 20 }, (_, i) => makeSession(i)));
+    expect(screen.getAllByTestId("session-card")).toHaveLength(20);
+    expect(ioInstances).toHaveLength(0);
+  });
+
+  it("does not over-render when filteredSessions shrinks below visibleCount", () => {
+    const sessions = Array.from({ length: 100 }, (_, i) => makeSession(i));
+    const { rerender } = renderList(sessions);
+
+    act(() => {
+      ioInstances[0].cb(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        ioInstances[0] as unknown as IntersectionObserver,
+      );
+    });
+    expect(screen.getAllByTestId("session-card")).toHaveLength(60);
+
+    const noop = () => undefined;
+    const noopAsync = async () => undefined;
+    const shrunk = sessions.slice(0, 30);
+    rerender(
+      <SessionList
+        sessions={sessions}
+        filteredSessions={shrunk}
+        sessionDetails={{}}
+        setSessionDetails={noop}
+        sessionSearchQuery=""
+        sessionArtifactSearchHits={{}}
+        textPendingBySession={{}}
+        summaryPendingBySession={{}}
+        pipelineStateBySession={{}}
+        deleteTarget={null}
+        deletePendingSessionId={null}
+        audioDeleteTargetSessionId={null}
+        audioDeletePendingSessionId={null}
+        isSearching={false}
+        isInitialLoading={false}
+        artifactPreview={null}
+        knownTags={[]}
+        settings={null}
+        setDeleteTarget={noop}
+        setAudioDeleteTargetSessionId={noop}
+        confirmDeleteSession={noopAsync}
+        confirmDeleteAudio={noopAsync}
+        closeArtifactPreview={noop}
+        openSessionFolder={noop}
+        openSessionArtifact={noop}
+        getText={noop}
+        getSummary={noop}
+        saveSessionDetails={async () => true}
+        flushSessionDetails={noop}
+        requestDeleteSession={noop}
+        requestDeleteAudio={noop}
+        setStatus={noop}
+      />,
+    );
+
+    expect(screen.getAllByTestId("session-card")).toHaveLength(30);
+  });
 });

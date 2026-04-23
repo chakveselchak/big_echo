@@ -1187,6 +1187,11 @@ select {
   gap: 8px;
 }
 
+.sessions-load-sentinel {
+  height: 1px;
+  width: 100%;
+}
+
 .sessions-empty-state {
   border: 1px dashed var(--stroke);
   border-radius: var(--radius-md);
