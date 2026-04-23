@@ -242,9 +242,7 @@ select {
   background: var(--surface-elevated);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  /* Inner shadow at top hints that scrolled content "goes under" the sticky
-     header above. Combined with the existing 1px white inset highlight. */
-  box-shadow: var(--shadow-sm), inset 0 10px 12px -8px rgba(15, 25, 40, 0.18);
+  box-shadow: var(--shadow-sm);
   padding: 14px;
   display: grid;
   gap: 10px;
@@ -268,6 +266,9 @@ select {
      during scroll. */
   padding-top: 18px;
   margin-top: -18px;
+  /* Soft drop shadow at the bottom so users see where scrolled session
+     cards "disappear" under the sticky header. */
+  box-shadow: 0 8px 12px -6px rgba(15, 25, 40, 0.22);
 }
 
 .app-shell.mac-content {
