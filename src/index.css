@@ -286,6 +286,7 @@ select {
   background: rgba(245, 247, 250, 0.92);
   border-radius: var(--radius-md);
   flex-wrap: wrap;
+  padding-bottom: 10px;
 }
 
 .main-tab-button {
