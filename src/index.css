@@ -464,16 +464,11 @@ select {
 }
 
 .session-toolbar {
-  display: grid;
-  gap: 10px;
-  padding-bottom: 12px;
-}
-
-.session-toolbar-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
 }
 
 .session-toolbar-actions {
@@ -482,14 +477,7 @@ select {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.field.session-search-label {
-  gap: 0;
-  color: var(--text-muted);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  margin-left: auto;
 }
 
 .field {
@@ -531,6 +519,8 @@ select {
 
 .session-toolbar-search {
   position: relative;
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .session-toolbar-search .ant-input-affix-wrapper {
@@ -1752,11 +1742,6 @@ select {
 
   .session-toolbar {
     gap: 8px;
-  }
-
-  .session-toolbar-header {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .session-toolbar-actions {
