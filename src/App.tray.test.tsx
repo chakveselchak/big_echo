@@ -69,6 +69,8 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
       system_device_name: "",
       auto_run_pipeline_on_stop: false,
       api_call_logging_enabled: false,
+      auto_delete_audio_enabled: false,
+      auto_delete_audio_days: 30,
     };
   }
   if (cmd === "list_audio_input_devices") {
@@ -273,6 +275,8 @@ describe("Tray window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {
@@ -310,6 +314,8 @@ describe("Tray window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {
@@ -394,6 +400,8 @@ describe("Tray window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {

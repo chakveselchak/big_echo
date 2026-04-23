@@ -43,6 +43,8 @@ const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         system_device_name: "",
         auto_run_pipeline_on_stop: false,
         api_call_logging_enabled: false,
+        auto_delete_audio_enabled: false,
+        auto_delete_audio_days: 30,
       };
     }
     if (cmd === "check_for_update") {
@@ -448,6 +450,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -653,6 +657,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -811,6 +817,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -936,6 +944,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1031,6 +1041,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1131,6 +1143,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1242,6 +1256,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1429,6 +1445,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1512,6 +1530,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {
@@ -1574,6 +1594,8 @@ describe("App main window", () => {
           system_device_name: "",
           auto_run_pipeline_on_stop: false,
           api_call_logging_enabled: false,
+          auto_delete_audio_enabled: false,
+          auto_delete_audio_days: 30,
         };
       }
       if (cmd === "list_sessions") {

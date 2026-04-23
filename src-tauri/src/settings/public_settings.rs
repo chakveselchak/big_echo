@@ -39,6 +39,8 @@ pub struct PublicSettings {
     pub artifact_opener_app: String,
     pub auto_run_pipeline_on_stop: bool,
     pub api_call_logging_enabled: bool,
+    pub auto_delete_audio_enabled: bool,
+    pub auto_delete_audio_days: u32,
 }
 
 impl Default for PublicSettings {
@@ -65,6 +67,8 @@ impl Default for PublicSettings {
             artifact_opener_app: default_text_editor_id().unwrap_or_default().to_string(),
             auto_run_pipeline_on_stop: false,
             api_call_logging_enabled: false,
+            auto_delete_audio_enabled: false,
+            auto_delete_audio_days: 30,
         }
     }
 }
@@ -423,5 +427,44 @@ mod tests {
             s.validate(),
             Err("SalutSpeech supports only opus, mp3, or wav audio".to_string())
         );
+    }
+
+    #[test]
+    fn auto_delete_audio_is_disabled_by_default_with_30_days() {
+        let settings = PublicSettings::default();
+        assert!(!settings.auto_delete_audio_enabled);
+        assert_eq!(settings.auto_delete_audio_days, 30);
+    }
+
+    #[test]
+    fn missing_auto_delete_audio_fields_use_defaults() {
+        // Older settings.json that predates the auto-delete feature must
+        // deserialize without complaint and pick up the documented defaults.
+        let body = r#"{
+            "recording_root":"./recordings",
+            "artifact_open_app":"",
+            "transcription_provider":"nexara",
+            "transcription_url":"",
+            "transcription_task":"transcribe",
+            "transcription_diarization_setting":"general",
+            "salute_speech_scope":"SALUTE_SPEECH_CORP",
+            "salute_speech_model":"general",
+            "salute_speech_language":"ru-RU",
+            "salute_speech_sample_rate":48000,
+            "salute_speech_channels_count":1,
+            "summary_url":"",
+            "summary_prompt":"",
+            "openai_model":"gpt-4.1-mini",
+            "audio_format":"opus",
+            "opus_bitrate_kbps":24,
+            "mic_device_name":"",
+            "system_device_name":"",
+            "auto_run_pipeline_on_stop":false,
+            "api_call_logging_enabled":false
+        }"#;
+        let parsed: PublicSettings =
+            serde_json::from_str(body).expect("settings should parse");
+        assert!(!parsed.auto_delete_audio_enabled);
+        assert_eq!(parsed.auto_delete_audio_days, 30);
     }
 }
