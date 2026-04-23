@@ -11,7 +11,7 @@ use crate::storage::sqlite_repo::{
 };
 use crate::tray_manager::set_tray_indicator_from_state;
 use crate::{get_settings_from_dirs, root_recordings_dir};
-use chrono::{Duration, Local};
+use chrono::{DateTime, Duration, Local, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -544,30 +544,23 @@ pub fn delete_session(
     Ok("deleted".to_string())
 }
 
-/// Delete just the audio file for a session, without removing the session
-/// itself. Used by the "Удалить аудио" button in the session card. After
-/// success the session remains in the list but its artifacts.audio_file is
-/// cleared, so the frontend will hide the audio player.
-#[tauri::command]
-pub fn delete_session_audio(
-    dirs: tauri::State<AppDirs>,
-    state: tauri::State<AppState>,
-    session_id: String,
-) -> Result<(), String> {
-    // Refuse to wipe the audio file that is being written right now.
-    let active_session_id = state
-        .active_session
-        .lock()
-        .map_err(|_| "state lock poisoned".to_string())?
-        .as_ref()
-        .map(|meta| meta.session_id.clone());
-    if active_session_id.as_deref() == Some(session_id.as_str()) {
-        return Err("Cannot delete audio of active recording session".to_string());
-    }
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AutoDeleteSummary {
+    pub deleted: u32,
+    pub scanned: u32,
+}
 
-    let session_dir = get_session_dir(&dirs.app_data_dir, &session_id)?
+/// Removes the audio file for a session and clears `meta.artifacts.audio_file`
+/// so the frontend hides the audio player on next list refresh. Pure file +
+/// metadata work — does NOT check whether the session is currently being
+/// recorded; the caller is responsible for that guard.
+pub fn wipe_session_audio_file(
+    app_data_dir: &Path,
+    session_id: &str,
+) -> Result<(), String> {
+    let session_dir = get_session_dir(app_data_dir, session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
-    let meta_path = get_meta_path(&dirs.app_data_dir, &session_id)?
+    let meta_path = get_meta_path(app_data_dir, session_id)?
         .ok_or_else(|| "Session metadata not found".to_string())?;
     let mut meta = load_meta(&meta_path)?;
 
@@ -579,13 +572,32 @@ pub fn delete_session_audio(
         }
     }
 
-    // Clear audio_file reference in meta.json so list_sessions surfaces the
-    // "no audio" state (backend returns empty audio_file → frontend hides
-    // the player).
     meta.artifacts.audio_file = String::new();
     save_meta(&meta_path, &meta)?;
-
     Ok(())
+}
+
+/// Delete just the audio file for a session, without removing the session
+/// itself. Used by the "Удалить аудио" button in the session card. After
+/// success the session remains in the list but its artifacts.audio_file is
+/// cleared, so the frontend will hide the audio player.
+#[tauri::command]
+pub fn delete_session_audio(
+    dirs: tauri::State<AppDirs>,
+    state: tauri::State<AppState>,
+    session_id: String,
+) -> Result<(), String> {
+    let active_session_id = state
+        .active_session
+        .lock()
+        .map_err(|_| "state lock poisoned".to_string())?
+        .as_ref()
+        .map(|meta| meta.session_id.clone());
+    if active_session_id.as_deref() == Some(session_id.as_str()) {
+        return Err("Cannot delete audio of active recording session".to_string());
+    }
+
+    wipe_session_audio_file(&dirs.app_data_dir, &session_id)
 }
 
 #[tauri::command]
@@ -845,14 +857,101 @@ pub fn sync_sessions(
     Ok(SyncSessionsResult { added, removed })
 }
 
+/// Pure sweep over the session DB: deletes audio for sessions whose
+/// `ended_at_iso` is older than `cutoff`, skipping the active recording
+/// (if any), Recording-status sessions, sessions without audio, and
+/// sessions whose ended_at_iso is missing or unparseable. Per-session
+/// errors are logged via eprintln! and do NOT abort the sweep.
+pub(crate) fn run_auto_delete_audio_sweep(
+    app_data_dir: &Path,
+    cutoff: DateTime<Utc>,
+    active_session_id: Option<&str>,
+) -> Result<AutoDeleteSummary, String> {
+    let sessions = repo_list_sessions(app_data_dir)?;
+    let mut summary = AutoDeleteSummary { deleted: 0, scanned: 0 };
+    for session in sessions {
+        summary.scanned += 1;
+        if active_session_id == Some(session.session_id.as_str()) {
+            continue;
+        }
+        let meta_path = match get_meta_path(app_data_dir, &session.session_id) {
+            Ok(Some(p)) => p,
+            _ => continue,
+        };
+        let meta = match load_meta(&meta_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.status == SessionStatus::Recording {
+            continue;
+        }
+        if meta.artifacts.audio_file.trim().is_empty() {
+            continue;
+        }
+        let ended_at = match meta.ended_at_iso.as_deref() {
+            Some(s) => match DateTime::parse_from_rfc3339(s) {
+                Ok(dt) => dt.with_timezone(&Utc),
+                Err(_) => continue,
+            },
+            None => continue,
+        };
+        if ended_at >= cutoff {
+            continue;
+        }
+        match wipe_session_audio_file(app_data_dir, &session.session_id) {
+            Ok(()) => summary.deleted += 1,
+            Err(err) => {
+                eprintln!(
+                    "auto_delete_old_session_audio: failed for {}: {}",
+                    session.session_id, err
+                );
+            }
+        }
+    }
+    Ok(summary)
+}
+
+/// Triggered once per app launch from MainPage. Reads settings, computes
+/// the cutoff timestamp, and delegates to `run_auto_delete_audio_sweep`.
+#[tauri::command]
+pub fn auto_delete_old_session_audio(
+    dirs: tauri::State<AppDirs>,
+    state: tauri::State<AppState>,
+) -> Result<AutoDeleteSummary, String> {
+    let settings = get_settings_from_dirs(dirs.inner())?;
+    if !settings.auto_delete_audio_enabled {
+        return Ok(AutoDeleteSummary { deleted: 0, scanned: 0 });
+    }
+    let days = settings.auto_delete_audio_days as i64;
+    if days <= 0 {
+        return Ok(AutoDeleteSummary { deleted: 0, scanned: 0 });
+    }
+    let cutoff = Utc::now() - Duration::days(days);
+
+    let active_session_id = state
+        .active_session
+        .lock()
+        .map_err(|_| "state lock poisoned".to_string())?
+        .as_ref()
+        .map(|meta| meta.session_id.clone());
+
+    run_auto_delete_audio_sweep(
+        &dirs.app_data_dir,
+        cutoff,
+        active_session_id.as_deref(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_state::AppState;
     use crate::domain::session::{SessionArtifacts, SessionStatus};
     use crate::settings::public_settings::{save_settings, PublicSettings};
+    use crate::storage::session_store::save_meta;
     use crate::storage::sqlite_repo::list_sessions as repo_list_sessions;
-    use chrono::Local;
+    use crate::storage::sqlite_repo::upsert_session;
+    use chrono::{Duration as ChronoDuration, Local, Utc};
     use tempfile::tempdir;
 
     fn sample_meta() -> SessionMeta {
@@ -1156,5 +1255,235 @@ mod tests {
             listed[0].meta.as_ref().map(|meta| meta.source.as_str()),
             Some("other")
         );
+    }
+
+    fn write_session_with_audio(
+        app_data_dir: &Path,
+        recording_root: &Path,
+        session_id: &str,
+        ended_at: Option<chrono::DateTime<Utc>>,
+        status: SessionStatus,
+        audio_file: &str,
+    ) {
+        let session_dir = recording_root.join(session_id);
+        fs::create_dir_all(&session_dir).expect("create session dir");
+        let audio_path = session_dir.join(audio_file);
+        fs::write(&audio_path, b"FAKE").expect("write audio");
+
+        let mut meta = SessionMeta::new(
+            session_id.to_string(),
+            "slack".to_string(),
+            vec![],
+            "Topic".to_string(),
+            String::new(),
+        );
+        meta.status = status;
+        meta.ended_at_iso = ended_at.map(|dt| dt.to_rfc3339());
+        meta.artifacts = SessionArtifacts {
+            audio_file: audio_file.to_string(),
+            transcript_file: "transcript.md".to_string(),
+            summary_file: "summary.md".to_string(),
+            meta_file: "meta.json".to_string(),
+        };
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(app_data_dir, &meta, &session_dir, &meta_path)
+            .expect("upsert session");
+    }
+
+    fn fixture_dirs() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        fs::create_dir_all(&app_data_dir).expect("mkdir app-data");
+        let recording_root = tmp.path().join("recordings");
+        (tmp, app_data_dir, recording_root)
+    }
+
+    #[test]
+    fn wipe_session_audio_clears_meta_and_removes_file() {
+        let (_tmp, app_data_dir, recording_root) = fixture_dirs();
+        write_session_with_audio(
+            &app_data_dir,
+            &recording_root,
+            "s-old",
+            Some(Utc::now() - ChronoDuration::days(30)),
+            SessionStatus::Done,
+            "audio.opus",
+        );
+
+        wipe_session_audio_file(&app_data_dir, "s-old").expect("wipe ok");
+
+        let meta_path = get_meta_path(&app_data_dir, "s-old")
+            .expect("get meta path")
+            .expect("meta path exists");
+        let meta = load_meta(&meta_path).expect("load meta");
+        assert_eq!(meta.artifacts.audio_file, "");
+        let session_dir = get_session_dir(&app_data_dir, "s-old")
+            .expect("get session dir")
+            .expect("session dir exists");
+        assert!(!session_dir.join("audio.opus").exists());
+    }
+
+    #[test]
+    fn auto_delete_sweep_removes_only_old_audio() {
+        let (_tmp, app_data_dir, recording_root) = fixture_dirs();
+        write_session_with_audio(
+            &app_data_dir,
+            &recording_root,
+            "s-old",
+            Some(Utc::now() - ChronoDuration::days(30)),
+            SessionStatus::Done,
+            "audio-old.opus",
+        );
+        write_session_with_audio(
+            &app_data_dir,
+            &recording_root,
+            "s-fresh",
+            Some(Utc::now() - ChronoDuration::days(1)),
+            SessionStatus::Done,
+            "audio-fresh.opus",
+        );
+
+        let cutoff = Utc::now() - ChronoDuration::days(7);
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
+            .expect("sweep ok");
+
+        assert_eq!(summary, AutoDeleteSummary { deleted: 1, scanned: 2 });
+        assert!(!recording_root.join("s-old").join("audio-old.opus").exists());
+        assert!(recording_root.join("s-fresh").join("audio-fresh.opus").exists());
+
+        let old_meta = load_meta(
+            &get_meta_path(&app_data_dir, "s-old")
+                .expect("meta path")
+                .expect("exists"),
+        )
+        .expect("load meta");
+        assert_eq!(old_meta.artifacts.audio_file, "");
+    }
+
+    #[test]
+    fn auto_delete_sweep_skips_recording_session_even_when_old() {
+        let (_tmp, app_data_dir, recording_root) = fixture_dirs();
+        write_session_with_audio(
+            &app_data_dir,
+            &recording_root,
+            "s-recording-old",
+            Some(Utc::now() - ChronoDuration::days(30)),
+            SessionStatus::Recording,
+            "audio.opus",
+        );
+
+        let cutoff = Utc::now() - ChronoDuration::days(7);
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
+            .expect("sweep ok");
+
+        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert!(recording_root.join("s-recording-old").join("audio.opus").exists());
+    }
+
+    #[test]
+    fn auto_delete_sweep_skips_active_session_even_when_old() {
+        let (_tmp, app_data_dir, recording_root) = fixture_dirs();
+        write_session_with_audio(
+            &app_data_dir,
+            &recording_root,
+            "s-active",
+            Some(Utc::now() - ChronoDuration::days(30)),
+            SessionStatus::Done,
+            "audio.opus",
+        );
+
+        let cutoff = Utc::now() - ChronoDuration::days(7);
+        let summary =
+            run_auto_delete_audio_sweep(&app_data_dir, cutoff, Some("s-active"))
+                .expect("sweep ok");
+
+        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert!(recording_root.join("s-active").join("audio.opus").exists());
+    }
+
+    #[test]
+    fn auto_delete_sweep_skips_session_without_audio() {
+        let (_tmp, app_data_dir, recording_root) = fixture_dirs();
+
+        let session_dir = recording_root.join("s-no-audio");
+        fs::create_dir_all(&session_dir).expect("create session dir");
+        let mut meta = SessionMeta::new(
+            "s-no-audio".to_string(),
+            "slack".to_string(),
+            vec![],
+            "Topic".to_string(),
+            String::new(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.ended_at_iso = Some((Utc::now() - ChronoDuration::days(30)).to_rfc3339());
+        meta.artifacts.audio_file = String::new();
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
+
+        let cutoff = Utc::now() - ChronoDuration::days(7);
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
+            .expect("sweep ok");
+
+        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+    }
+
+    #[test]
+    fn auto_delete_sweep_skips_session_with_unparseable_ended_at() {
+        let (_tmp, app_data_dir, recording_root) = fixture_dirs();
+
+        let session_dir = recording_root.join("s-bad-ended");
+        fs::create_dir_all(&session_dir).expect("create session dir");
+        fs::write(session_dir.join("audio.opus"), b"FAKE").expect("write audio");
+        let mut meta = SessionMeta::new(
+            "s-bad-ended".to_string(),
+            "slack".to_string(),
+            vec![],
+            "Topic".to_string(),
+            String::new(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.ended_at_iso = Some("not-a-valid-date".to_string());
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
+
+        let cutoff = Utc::now() - ChronoDuration::days(7);
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
+            .expect("sweep ok");
+
+        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert!(session_dir.join("audio.opus").exists());
+    }
+
+    #[test]
+    fn auto_delete_sweep_skips_session_with_missing_ended_at() {
+        let (_tmp, app_data_dir, recording_root) = fixture_dirs();
+
+        let session_dir = recording_root.join("s-no-end");
+        fs::create_dir_all(&session_dir).expect("create session dir");
+        fs::write(session_dir.join("audio.opus"), b"FAKE").expect("write audio");
+        let mut meta = SessionMeta::new(
+            "s-no-end".to_string(),
+            "slack".to_string(),
+            vec![],
+            "Topic".to_string(),
+            String::new(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.ended_at_iso = None;
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
+
+        let cutoff = Utc::now() - ChronoDuration::days(7);
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
+            .expect("sweep ok");
+
+        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert!(session_dir.join("audio.opus").exists());
     }
 }

@@ -22,8 +22,8 @@ use commands::recording::{
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
 };
 use commands::sessions::{
-    delete_session, delete_session_audio, get_live_input_levels, get_session_meta,
-    get_ui_sync_state, import_audio_session, list_known_tags, list_sessions,
+    auto_delete_old_session_audio, delete_session, delete_session_audio, get_live_input_levels,
+    get_session_meta, get_ui_sync_state, import_audio_session, list_known_tags, list_sessions,
     open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
     set_ui_sync_state, sync_sessions, update_session_details,
 };
@@ -451,6 +451,7 @@ fn main() {
             read_session_artifact,
             delete_session,
             delete_session_audio,
+            auto_delete_old_session_audio,
             list_sessions,
             list_known_tags,
             search_session_artifacts,
@@ -646,6 +647,7 @@ mod ipc_runtime_tests {
                 read_session_artifact,
                 delete_session,
                 delete_session_audio,
+                auto_delete_old_session_audio,
                 list_known_tags,
                 get_session_meta,
                 update_session_details,
