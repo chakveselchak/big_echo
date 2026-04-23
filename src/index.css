@@ -261,7 +261,6 @@ select {
   z-index: 5;
   background: var(--surface);
   display: grid;
-  gap: 14px;
   /* Cover the .app-shell top padding so cards don't peek above the header
      during scroll. Side margins/paddings extend the sticky background to
      the edges of the app shell so the drop shadow spans full width. */
