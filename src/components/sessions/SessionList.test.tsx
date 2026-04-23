@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { SessionList } from "./SessionList";
@@ -127,5 +127,36 @@ describe("SessionList lazy loading", () => {
     const sessions = Array.from({ length: 25 }, (_, i) => makeSession(i));
     renderList(sessions);
     expect(screen.getAllByTestId("session-card")).toHaveLength(20);
+  });
+
+  it("loads 40 more cards when the sentinel intersects the viewport", () => {
+    const sessions = Array.from({ length: 100 }, (_, i) => makeSession(i));
+    renderList(sessions);
+    expect(screen.getAllByTestId("session-card")).toHaveLength(20);
+    expect(ioInstances).toHaveLength(1);
+
+    act(() => {
+      ioInstances[0].cb(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        ioInstances[0] as unknown as IntersectionObserver,
+      );
+    });
+
+    expect(screen.getAllByTestId("session-card")).toHaveLength(60);
+  });
+
+  it("clamps the next batch to filteredSessions.length", () => {
+    const sessions = Array.from({ length: 25 }, (_, i) => makeSession(i));
+    renderList(sessions);
+    expect(screen.getAllByTestId("session-card")).toHaveLength(20);
+
+    act(() => {
+      ioInstances[0].cb(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        ioInstances[0] as unknown as IntersectionObserver,
+      );
+    });
+
+    expect(screen.getAllByTestId("session-card")).toHaveLength(25);
   });
 });

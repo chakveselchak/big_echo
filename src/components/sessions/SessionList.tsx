@@ -20,6 +20,7 @@ import { SummaryPromptModal } from "./SummaryPromptModal";
 import type { SummaryPromptDialogState } from "./SummaryPromptModal";
 
 const INITIAL_VISIBLE = 20;
+const PAGE_SIZE = 40;
 
 type SessionContextMenuState = {
   sessionId: string;
@@ -103,6 +104,7 @@ export function SessionList({
   // "Настроить промпт саммари" button is instant on every repeat click
   // (the first one pays one IPC round-trip).
   const cachedDefaultPromptRef = useRef<string | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Stable reference across renders — a new array on every render would
   // force `Select` (with `options` prop deeply diffed) to rebuild its
@@ -245,6 +247,30 @@ export function SessionList({
     };
   }, [sessionContextMenu]);
 
+  const isSearchActive = sessionSearchQuery.trim().length > 0;
+  const displayedSessions = isSearchActive
+    ? filteredSessions
+    : filteredSessions.slice(0, visibleCount);
+
+  useEffect(() => {
+    if (isSearchActive) return;
+    if (visibleCount >= filteredSessions.length) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((current) =>
+            Math.min(current + PAGE_SIZE, filteredSessions.length),
+          );
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [isSearchActive, visibleCount, filteredSessions.length]);
+
   const sessionContextMenuItem = sessionContextMenu
     ? filteredSessions.find((item) => item.session_id === sessionContextMenu.sessionId)
     : null;
@@ -333,11 +359,6 @@ export function SessionList({
     }
   }
 
-  const isSearchActive = sessionSearchQuery.trim().length > 0;
-  const displayedSessions = isSearchActive
-    ? filteredSessions
-    : filteredSessions.slice(0, visibleCount);
-
   return (
     <>
       {isInitialLoading ? (
@@ -353,6 +374,7 @@ export function SessionList({
           ariaLabel="Searching sessions"
         />
       ) : (
+      <>
       <div className="sessions-grid">
         {displayedSessions.map((item) => {
           const detail = getSessionDetail(item);
@@ -399,6 +421,10 @@ export function SessionList({
           </div>
         )}
       </div>
+      {!isSearchActive && visibleCount < filteredSessions.length && (
+        <div ref={sentinelRef} className="sessions-load-sentinel" aria-hidden />
+      )}
+      </>
       )}
 
       {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (
