@@ -876,11 +876,24 @@ pub(crate) fn run_auto_delete_audio_sweep(
         }
         let meta_path = match get_meta_path(app_data_dir, &session.session_id) {
             Ok(Some(p)) => p,
-            _ => continue,
+            Ok(None) => continue,
+            Err(err) => {
+                eprintln!(
+                    "auto_delete_old_session_audio: meta path lookup failed for {}: {}",
+                    session.session_id, err
+                );
+                continue;
+            }
         };
         let meta = match load_meta(&meta_path) {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(err) => {
+                eprintln!(
+                    "auto_delete_old_session_audio: load_meta failed for {}: {}",
+                    session.session_id, err
+                );
+                continue;
+            }
         };
         if meta.status == SessionStatus::Recording {
             continue;
