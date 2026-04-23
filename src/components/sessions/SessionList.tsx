@@ -247,6 +247,8 @@ export function SessionList({
     };
   }, [sessionContextMenu]);
 
+  // Declared above the IO effect below because that effect's dep array
+  // references `isSearchActive` synchronously at render time.
   const isSearchActive = sessionSearchQuery.trim().length > 0;
   const displayedSessions = isSearchActive
     ? filteredSessions
@@ -374,57 +376,57 @@ export function SessionList({
           ariaLabel="Searching sessions"
         />
       ) : (
-      <>
-      <div className="sessions-grid">
-        {displayedSessions.map((item) => {
-          const detail = getSessionDetail(item);
-          const textPending = Boolean(textPendingBySession[item.session_id]);
-          const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
-          const pipelineState = pipelineStateBySession[item.session_id];
-          const query = sessionSearchQuery.trim().toLowerCase();
-          const artifactHit = sessionArtifactSearchHits[item.session_id];
-          const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
-          const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
+        <>
+          <div className="sessions-grid">
+            {displayedSessions.map((item) => {
+              const detail = getSessionDetail(item);
+              const textPending = Boolean(textPendingBySession[item.session_id]);
+              const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
+              const pipelineState = pipelineStateBySession[item.session_id];
+              const query = sessionSearchQuery.trim().toLowerCase();
+              const artifactHit = sessionArtifactSearchHits[item.session_id];
+              const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
+              const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
 
-          return (
-            <SessionCard
-              key={item.session_id}
-              item={item}
-              detail={detail}
-              textPending={textPending}
-              summaryPending={summaryPending}
-              pipelineState={pipelineState}
-              searchQuery={sessionSearchQuery}
-              knownTagOptions={knownTagOptions}
-              transcriptMatch={transcriptMatch}
-              summaryMatch={summaryMatch}
-              onContextMenu={openSessionContextMenu}
-              onDetailChange={(nextDetail) =>
-                setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))
-              }
-              onOpenArtifact={openSessionArtifact}
-              onGetText={getText}
-              onGetSummary={getSummary}
-              onOpenSummaryPrompt={(d) => void openSummaryPromptDialog(d)}
-              onDelete={requestDeleteSession}
-              onDeleteAudio={requestDeleteAudio}
-              onFieldBlur={flushSessionDetails}
-              onOpenFolder={openSessionFolder}
-              setStatus={setStatus}
-            />
-          );
-        })}
-        {!displayedSessions.length && (
-          <div className="sessions-empty-state">
-            <div className="sessions-empty-state-title">{emptyStateTitle}</div>
-            <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
+              return (
+                <SessionCard
+                  key={item.session_id}
+                  item={item}
+                  detail={detail}
+                  textPending={textPending}
+                  summaryPending={summaryPending}
+                  pipelineState={pipelineState}
+                  searchQuery={sessionSearchQuery}
+                  knownTagOptions={knownTagOptions}
+                  transcriptMatch={transcriptMatch}
+                  summaryMatch={summaryMatch}
+                  onContextMenu={openSessionContextMenu}
+                  onDetailChange={(nextDetail) =>
+                    setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))
+                  }
+                  onOpenArtifact={openSessionArtifact}
+                  onGetText={getText}
+                  onGetSummary={getSummary}
+                  onOpenSummaryPrompt={(d) => void openSummaryPromptDialog(d)}
+                  onDelete={requestDeleteSession}
+                  onDeleteAudio={requestDeleteAudio}
+                  onFieldBlur={flushSessionDetails}
+                  onOpenFolder={openSessionFolder}
+                  setStatus={setStatus}
+                />
+              );
+            })}
+            {!displayedSessions.length && (
+              <div className="sessions-empty-state">
+                <div className="sessions-empty-state-title">{emptyStateTitle}</div>
+                <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      {!isSearchActive && visibleCount < filteredSessions.length && (
-        <div ref={sentinelRef} className="sessions-load-sentinel" aria-hidden />
-      )}
-      </>
+          {!isSearchActive && visibleCount < filteredSessions.length && (
+            <div ref={sentinelRef} className="sessions-load-sentinel" aria-hidden />
+          )}
+        </>
       )}
 
       {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (

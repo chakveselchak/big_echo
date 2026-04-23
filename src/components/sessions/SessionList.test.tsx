@@ -143,6 +143,7 @@ describe("SessionList lazy loading", () => {
     });
 
     expect(screen.getAllByTestId("session-card")).toHaveLength(60);
+    expect(ioInstances[0].disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("clamps the next batch to filteredSessions.length", () => {
