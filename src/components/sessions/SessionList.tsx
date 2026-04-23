@@ -19,6 +19,8 @@ import { ArtifactModal } from "./ArtifactModal";
 import { SummaryPromptModal } from "./SummaryPromptModal";
 import type { SummaryPromptDialogState } from "./SummaryPromptModal";
 
+const INITIAL_VISIBLE = 20;
+
 type SessionContextMenuState = {
   sessionId: string;
   x: number;
@@ -96,6 +98,7 @@ export function SessionList({
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   // Cache the default summary prompt fetched from backend so clicking the
   // "Настроить промпт саммари" button is instant on every repeat click
   // (the first one pays one IPC round-trip).
@@ -330,6 +333,11 @@ export function SessionList({
     }
   }
 
+  const isSearchActive = sessionSearchQuery.trim().length > 0;
+  const displayedSessions = isSearchActive
+    ? filteredSessions
+    : filteredSessions.slice(0, visibleCount);
+
   return (
     <>
       {isInitialLoading ? (
@@ -346,7 +354,7 @@ export function SessionList({
         />
       ) : (
       <div className="sessions-grid">
-        {filteredSessions.map((item) => {
+        {displayedSessions.map((item) => {
           const detail = getSessionDetail(item);
           const textPending = Boolean(textPendingBySession[item.session_id]);
           const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
@@ -384,7 +392,7 @@ export function SessionList({
             />
           );
         })}
-        {!filteredSessions.length && (
+        {!displayedSessions.length && (
           <div className="sessions-empty-state">
             <div className="sessions-empty-state-title">{emptyStateTitle}</div>
             <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
