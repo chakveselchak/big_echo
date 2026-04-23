@@ -524,7 +524,7 @@ select {
 }
 
 .session-toolbar-search .ant-input-affix-wrapper {
-  background: rgba(245, 247, 250, 0.96);
+  background: #ffffff;
 }
 .session-toolbar-search .ant-input-affix-wrapper .ant-input {
   background: transparent;

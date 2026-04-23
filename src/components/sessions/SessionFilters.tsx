@@ -68,10 +68,10 @@ export const SessionFilters = forwardRef<InputRef, SessionFiltersProps>(
             className="secondary-button session-import-button"
             icon={<DownloadOutlined aria-hidden="true" />}
             aria-label="Загрузить аудио"
+            title="Загрузить аудио"
             onClick={onImportAudio}
-          >
-            Загрузить аудио
-          </Button>
+          />
+
           <Button
             htmlType="button"
             className="secondary-button refresh-icon-button"
