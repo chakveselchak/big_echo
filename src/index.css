@@ -285,9 +285,7 @@ select {
   align-items: center;
   gap: 8px;
   background: rgba(245, 247, 250, 0.92);
-  border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  padding: 6px;
   flex-wrap: wrap;
 }
 
