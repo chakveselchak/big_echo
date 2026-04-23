@@ -52,7 +52,7 @@ export function GeneralSettings({
   );
 
   return (
-    <Form layout="vertical" style={{ maxWidth: 520 }}>
+    <Form layout="vertical" style={{ maxWidth: 760 }}>
       <Form.Item
         label={
           <label htmlFor="recording_root">
