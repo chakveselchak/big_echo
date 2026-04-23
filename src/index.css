@@ -263,9 +263,10 @@ select {
   display: grid;
   gap: 14px;
   /* Cover the .app-shell top padding so cards don't peek above the header
-     during scroll. */
-  padding-top: 18px;
-  margin-top: -18px;
+     during scroll. Side margins/paddings extend the sticky background to
+     the edges of the app shell so the drop shadow spans full width. */
+  padding: 18px 10px 0 10px;
+  margin: -18px -13px 0 -13px;
   /* Soft drop shadow at the bottom so users see where scrolled session
      cards "disappear" under the sticky header. */
   box-shadow: 0 8px 12px -6px rgba(15, 25, 40, 0.22);
@@ -466,7 +467,6 @@ select {
   display: grid;
   gap: 10px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--stroke);
 }
 
 .session-toolbar-header {
