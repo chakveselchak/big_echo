@@ -143,7 +143,10 @@ describe("SessionList lazy loading", () => {
     });
 
     expect(screen.getAllByTestId("session-card")).toHaveLength(60);
-    expect(ioInstances[0].disconnect).toHaveBeenCalledTimes(1);
+    // Observer is reused across batch loads — not torn down on visibleCount
+    // change. Locks in that we don't fall back to per-render observer
+    // recreation (which is the WebKit drop-callback failure mode).
+    expect(ioInstances).toHaveLength(1);
   });
 
   it("clamps the next batch to filteredSessions.length", () => {

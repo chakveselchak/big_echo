@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { ConfigProvider, Menu } from "antd";
 import type { MenuProps } from "antd";
@@ -104,7 +104,6 @@ export function SessionList({
   // "Настроить промпт саммари" button is instant on every repeat click
   // (the first one pays one IPC round-trip).
   const cachedDefaultPromptRef = useRef<string | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Stable reference across renders — a new array on every render would
   // force `Select` (with `options` prop deeply diffed) to rebuild its
@@ -247,31 +246,47 @@ export function SessionList({
     };
   }, [sessionContextMenu]);
 
-  // Declared above the IO effect below because that effect's dep array
-  // references `isSearchActive` synchronously at render time.
-  const isSearchActive = sessionSearchQuery.trim().length > 0;
-  const displayedSessions = isSearchActive
-    ? filteredSessions
-    : filteredSessions.slice(0, visibleCount);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const filteredSessionsLengthRef = useRef(filteredSessions.length);
+  filteredSessionsLengthRef.current = filteredSessions.length;
 
-  useEffect(() => {
-    if (isSearchActive) return;
-    if (visibleCount >= filteredSessions.length) return;
-    const node = sentinelRef.current;
+  const setSentinelRef = useCallback((node: HTMLDivElement | null) => {
+    // Tear down the observer attached to the previous sentinel node (if any).
+    // This runs both on unmount (node === null) and on remount with a new
+    // node. Stable observer across batch loads avoids a WebKit issue where
+    // a freshly-created observer can drop its initial intersection callback.
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
     if (!node) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
-          setVisibleCount((current) =>
-            Math.min(current + PAGE_SIZE, filteredSessions.length),
-          );
+          setVisibleCount((current) => {
+            const max = filteredSessionsLengthRef.current;
+            if (current >= max) return current;
+            return Math.min(current + PAGE_SIZE, max);
+          });
         }
       },
-      { rootMargin: "1500px" },
+      { rootMargin: "2000px" },
     );
     observer.observe(node);
-    return () => observer.disconnect();
-  }, [isSearchActive, visibleCount, filteredSessions.length]);
+    observerRef.current = observer;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+    };
+  }, []);
+
+  const isSearchActive = sessionSearchQuery.trim().length > 0;
+  const displayedSessions = isSearchActive
+    ? filteredSessions
+    : filteredSessions.slice(0, visibleCount);
 
   const sessionContextMenuItem = sessionContextMenu
     ? filteredSessions.find((item) => item.session_id === sessionContextMenu.sessionId)
@@ -424,7 +439,7 @@ export function SessionList({
             )}
           </div>
           {!isSearchActive && visibleCount < filteredSessions.length && (
-            <div ref={sentinelRef} className="sessions-load-sentinel" aria-hidden />
+            <div ref={setSentinelRef} className="sessions-load-sentinel" aria-hidden />
           )}
         </>
       )}
