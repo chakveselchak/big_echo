@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { ConfigProvider, Menu } from "antd";
 import type { MenuProps } from "antd";
@@ -21,6 +21,7 @@ import type { SummaryPromptDialogState } from "./SummaryPromptModal";
 
 const INITIAL_VISIBLE = 20;
 const PAGE_SIZE = 40;
+const SENTINEL_PREFETCH_OFFSET = 5;
 
 type SessionContextMenuState = {
   sessionId: string;
@@ -267,7 +268,7 @@ export function SessionList({
           );
         }
       },
-      { rootMargin: "300px" },
+      { rootMargin: "0px" },
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -376,21 +377,27 @@ export function SessionList({
           ariaLabel="Searching sessions"
         />
       ) : (
-        <>
-          <div className="sessions-grid">
-            {displayedSessions.map((item) => {
-              const detail = getSessionDetail(item);
-              const textPending = Boolean(textPendingBySession[item.session_id]);
-              const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
-              const pipelineState = pipelineStateBySession[item.session_id];
-              const query = sessionSearchQuery.trim().toLowerCase();
-              const artifactHit = sessionArtifactSearchHits[item.session_id];
-              const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
-              const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
+        <div className="sessions-grid">
+          {displayedSessions.map((item, idx) => {
+            const detail = getSessionDetail(item);
+            const textPending = Boolean(textPendingBySession[item.session_id]);
+            const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
+            const pipelineState = pipelineStateBySession[item.session_id];
+            const query = sessionSearchQuery.trim().toLowerCase();
+            const artifactHit = sessionArtifactSearchHits[item.session_id];
+            const transcriptMatch = query !== "" && Boolean(artifactHit?.transcript_match);
+            const summaryMatch = query !== "" && Boolean(artifactHit?.summary_match);
+            const showSentinelBeforeThisCard =
+              !isSearchActive &&
+              visibleCount < filteredSessions.length &&
+              idx === Math.max(0, displayedSessions.length - SENTINEL_PREFETCH_OFFSET);
 
-              return (
+            return (
+              <Fragment key={item.session_id}>
+                {showSentinelBeforeThisCard && (
+                  <div ref={sentinelRef} className="sessions-load-sentinel" aria-hidden />
+                )}
                 <SessionCard
-                  key={item.session_id}
                   item={item}
                   detail={detail}
                   textPending={textPending}
@@ -414,19 +421,16 @@ export function SessionList({
                   onOpenFolder={openSessionFolder}
                   setStatus={setStatus}
                 />
-              );
-            })}
-            {!displayedSessions.length && (
-              <div className="sessions-empty-state">
-                <div className="sessions-empty-state-title">{emptyStateTitle}</div>
-                <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
-              </div>
-            )}
-          </div>
-          {!isSearchActive && visibleCount < filteredSessions.length && (
-            <div ref={sentinelRef} className="sessions-load-sentinel" aria-hidden />
+              </Fragment>
+            );
+          })}
+          {!displayedSessions.length && (
+            <div className="sessions-empty-state">
+              <div className="sessions-empty-state-title">{emptyStateTitle}</div>
+              <div className="sessions-empty-state-copy">{emptyStateCopy}</div>
+            </div>
           )}
-        </>
+        </div>
       )}
 
       {sessionContextMenu && sessionContextMenuItem && sessionContextMenuDetail && (
