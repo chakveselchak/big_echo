@@ -255,6 +255,27 @@ select {
   font-weight: 620;
 }
 
+.main-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  display: grid;
+  gap: 14px;
+  /* Cover the .app-shell top padding so cards don't peek above the header
+     during scroll. */
+  padding-top: 18px;
+  margin-top: -18px;
+}
+
+.app-shell.mac-content {
+  /* `mac-window` sets `overflow: hidden`, which establishes a non-scrolling
+     scroll container and breaks `position: sticky` for descendants. `clip`
+     visually clips the same way (rounded corners preserved) but does NOT
+     create a scroll container, so sticky propagates to the viewport. */
+  overflow: clip;
+}
+
 .main-tabs {
   display: flex;
   align-items: center;
@@ -1709,6 +1730,11 @@ select {
   .app-shell {
     width: min(100vw, calc(100vw - 16px));
     padding: 12px 8px 18px;
+  }
+
+  .main-sticky-header {
+    padding-top: 12px;
+    margin-top: -12px;
   }
 
   .hero {

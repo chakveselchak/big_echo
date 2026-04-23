@@ -132,35 +132,50 @@ export function MainPage() {
 
   return (
     <main className="app-shell mac-window mac-content" ref={appMainRef}>
-      <div className="main-tabs" role="tablist" aria-label="Main sections">
-        <button
-          type="button"
-          role="tab"
-          className={`main-tab-button${mainTab === "sessions" ? " is-active" : ""}`}
-          aria-selected={mainTab === "sessions"}
-          onClick={() => handleTabSelect("sessions")}
-        >
-          Sessions
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`main-tab-button${mainTab === "settings" ? " is-active" : ""}`}
-          aria-selected={mainTab === "settings"}
-          onClick={() => handleTabSelect("settings")}
-        >
-          Settings
-        </button>
-        {showNewVersionTab && (
+      <div className="main-sticky-header">
+        <div className="main-tabs" role="tablist" aria-label="Main sections">
           <button
             type="button"
             role="tab"
-            className={`main-tab-button${mainTab === "new-version" ? " is-active" : ""}`}
-            aria-selected={mainTab === "new-version"}
-            onClick={() => handleTabSelect("new-version")}
+            className={`main-tab-button${mainTab === "sessions" ? " is-active" : ""}`}
+            aria-selected={mainTab === "sessions"}
+            onClick={() => handleTabSelect("sessions")}
           >
-            🔥 New version
+            Sessions
           </button>
+          <button
+            type="button"
+            role="tab"
+            className={`main-tab-button${mainTab === "settings" ? " is-active" : ""}`}
+            aria-selected={mainTab === "settings"}
+            onClick={() => handleTabSelect("settings")}
+          >
+            Settings
+          </button>
+          {showNewVersionTab && (
+            <button
+              type="button"
+              role="tab"
+              className={`main-tab-button${mainTab === "new-version" ? " is-active" : ""}`}
+              aria-selected={mainTab === "new-version"}
+              onClick={() => handleTabSelect("new-version")}
+            >
+              🔥 New version
+            </button>
+          )}
+        </div>
+        {mainTab === "sessions" && (
+          <SessionFilters
+            ref={sessionSearchInputRef}
+            searchQuery={sessionSearchQuery}
+            onSearchChange={setSessionSearchQuery}
+            onImportAudio={() => void importAudioSession()}
+            onRefresh={() => {
+              setRefreshKey((k) => k + 1);
+              void loadSessions();
+            }}
+            refreshKey={refreshKey}
+          />
         )}
       </div>
 
@@ -168,17 +183,6 @@ export function MainPage() {
         className="panel"
         style={mainTab === "sessions" ? undefined : { display: "none" }}
       >
-        <SessionFilters
-          ref={sessionSearchInputRef}
-          searchQuery={sessionSearchQuery}
-          onSearchChange={setSessionSearchQuery}
-          onImportAudio={() => void importAudioSession()}
-          onRefresh={() => {
-            setRefreshKey((k) => k + 1);
-            void loadSessions();
-          }}
-          refreshKey={refreshKey}
-        />
         <SessionList
           sessions={sessions}
           filteredSessions={filteredSessions}
