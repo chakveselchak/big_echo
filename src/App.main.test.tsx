@@ -48,6 +48,9 @@ const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         api_call_logging_enabled: false,
         auto_delete_audio_enabled: false,
         auto_delete_audio_days: 30,
+        yandex_sync_enabled: false,
+        yandex_sync_interval: "24h",
+        yandex_sync_remote_folder: "BigEcho",
       };
     }
     if (cmd === "check_for_update") {
@@ -455,6 +458,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -662,6 +668,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -822,6 +831,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -949,6 +961,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -1046,6 +1061,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -1148,6 +1166,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -1261,6 +1282,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -1450,6 +1474,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -1535,6 +1562,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {
@@ -1599,6 +1629,9 @@ describe("App main window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "list_sessions") {

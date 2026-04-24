@@ -30,6 +30,9 @@ const { invokeMock } = vi.hoisted(() => ({
         api_call_logging_enabled: false,
         auto_delete_audio_enabled: false,
         auto_delete_audio_days: 30,
+        yandex_sync_enabled: false,
+        yandex_sync_interval: "24h",
+        yandex_sync_remote_folder: "BigEcho",
       };
     }
     if (cmd === "detect_system_source_device") {
@@ -50,6 +53,20 @@ const { invokeMock } = vi.hoisted(() => ({
     if (cmd === "pick_recording_root") {
       return "/Users/test/BigEcho Recordings";
     }
+    if (cmd === "yandex_sync_has_token") return Promise.resolve(false);
+    if (cmd === "yandex_sync_status") return Promise.resolve({ is_running: false, last_run: null });
+    if (cmd === "yandex_sync_set_token") return Promise.resolve();
+    if (cmd === "yandex_sync_clear_token") return Promise.resolve();
+    if (cmd === "yandex_sync_now")
+      return Promise.resolve({
+        started_at_iso: "",
+        finished_at_iso: "",
+        duration_ms: 0,
+        uploaded: 0,
+        skipped: 0,
+        failed: 0,
+        errors: [],
+      });
     return null;
   }),
 }));
@@ -132,6 +149,9 @@ function mockSettings() {
     api_call_logging_enabled: false,
     auto_delete_audio_enabled: false,
     auto_delete_audio_days: 30,
+    yandex_sync_enabled: false,
+    yandex_sync_interval: "24h",
+    yandex_sync_remote_folder: "BigEcho",
   };
 }
 
@@ -475,6 +495,9 @@ describe("App settings window", () => {
           api_call_logging_enabled: true,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         }),
       });
     });
@@ -636,5 +659,24 @@ describe("App settings window", () => {
 
     expect(screen.getByText("Nexara API key: не изменён")).toBeInTheDocument();
     expect(screen.getByText("OpenAI API key: не изменён")).toBeInTheDocument();
+  });
+
+  test("renders the Sync Yandex.Disk tab", async () => {
+    render(<App />);
+    const tab = await screen.findByRole("tab", { name: /Sync Yandex.Disk/i });
+    fireEvent.click(tab);
+    await screen.findByText(/Enable Yandex\.Disk sync/i);
+  });
+
+  test("shows Sync now next to Save settings only on Yandex tab, disabled without token", async () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: /Sync now/i })).not.toBeInTheDocument();
+
+    const tab = await screen.findByRole("tab", { name: /Sync Yandex.Disk/i });
+    fireEvent.click(tab);
+
+    const syncNow = await screen.findByRole("button", { name: /Sync now/i });
+    expect(syncNow).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Save settings/i })).toBeInTheDocument();
   });
 });

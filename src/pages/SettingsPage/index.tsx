@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
+import { useYandexSync } from "../../hooks/useYandexSync";
 import type { PublicSettings, SettingsTab } from "../../types";
 import { tauriInvoke } from "../../lib/tauri";
 import { getErrorMessage } from "../../lib/appUtils";
 import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
+import { YandexSyncSettings } from "../../components/settings/YandexSyncSettings";
 import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
 
 type SyncSessionsResult = {
@@ -60,6 +62,8 @@ export function SettingsPage() {
     textEditorApps,
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
 
+  const yandexSync = useYandexSync(settingsTab === "yandex");
+
   if (!settings) {
     return (
       <LoadingPlaceholder
@@ -102,6 +106,10 @@ export function SettingsPage() {
       isDirty("opus_bitrate_kbps") ||
       isDirty("mic_device_name") ||
       isDirty("system_device_name"),
+    yandex:
+      isDirty("yandex_sync_enabled") ||
+      isDirty("yandex_sync_interval") ||
+      isDirty("yandex_sync_remote_folder"),
   };
 
   const dirtyDot = (
@@ -186,6 +194,22 @@ export function SettingsPage() {
         />
       ),
     },
+    {
+      key: "yandex" as SettingsTab,
+      label: (
+        <>
+          Sync Yandex.Disk{dirtyByTab.yandex && dirtyDot}
+        </>
+      ),
+      children: (
+        <YandexSyncSettings
+          settings={settings}
+          setSettings={setSettings}
+          isDirty={isDirty}
+          yandexSync={yandexSync}
+        />
+      ),
+    },
   ];
 
   return (
@@ -217,6 +241,15 @@ export function SettingsPage() {
         <Button type="primary" onClick={() => void saveSettings()} disabled={!canSaveSettings}>
           Save settings
         </Button>
+        {settingsTab === "yandex" && (
+          <Button
+            onClick={() => void yandexSync.syncNow()}
+            loading={yandexSync.status.is_running}
+            disabled={!yandexSync.hasToken || yandexSync.status.is_running}
+          >
+            Sync now
+          </Button>
+        )}
       </Flex>
     </div>
   );

@@ -57,6 +57,27 @@ pub fn set_secret(app_data_dir: &Path, name: &str, value: &str) -> Result<(), St
     Ok(())
 }
 
+pub fn clear_secret(app_data_dir: &Path, name: &str) -> Result<(), String> {
+    // Remove from the OS keyring. Treat "no entry" as success.
+    if let Ok(entry) = keyring::Entry::new(SERVICE_NAME, name) {
+        match entry.delete_credential() {
+            Ok(()) => {}
+            Err(keyring::Error::NoEntry) => {}
+            Err(err) => eprintln!("warning: failed to delete keyring secret {name}: {err}"),
+        }
+    }
+
+    // Remove from the fallback file.
+    let path = fallback_path(app_data_dir);
+    if path.exists() {
+        let mut map = load_fallback_map(&path)?;
+        if map.remove(name).is_some() {
+            save_fallback_map(&path, &map)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn get_secret(app_data_dir: &Path, name: &str) -> Result<String, String> {
     let keyring_result = keyring::Entry::new(SERVICE_NAME, name)
         .map_err(|e| e.to_string())
@@ -74,4 +95,42 @@ pub fn get_secret(app_data_dir: &Path, name: &str) -> Result<String, String> {
     Err(keyring_result
         .err()
         .unwrap_or_else(|| "No matching entry found in secure storage".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn clear_secret_removes_previously_stored_value() {
+        let tmp = tempdir().expect("tempdir");
+        set_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN", "abc123").expect("set");
+
+        clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("clear");
+
+        // Public API contract: after clear, get_secret no longer returns the value.
+        // (The keyring may or may not have been writable in this environment, so we
+        // only assert the observable contract, not the underlying file state.)
+        match get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN") {
+            Err(_) => {}
+            Ok(v) => panic!("expected secret to be cleared, got {v:?}"),
+        }
+    }
+
+    #[test]
+    fn clear_secret_is_idempotent_after_prior_clear() {
+        let tmp = tempdir().expect("tempdir");
+        set_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN", "abc123").expect("set");
+
+        // First clear removes it.
+        clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("first clear");
+        // Second clear is a no-op on the now-absent key.
+        clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("second clear");
+
+        match get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN") {
+            Err(_) => {}
+            Ok(v) => panic!("expected secret to remain cleared, got {v:?}"),
+        }
+    }
 }

@@ -59,5 +59,19 @@ export function validateSettings(settings: PublicSettings | null): string[] {
       errors.push("Количество каналов SalutSpeech должно быть больше 0");
     }
   }
+  const rawFolder = settings.yandex_sync_remote_folder ?? "";
+  const trimmedFolder = rawFolder.trim().replace(/^\/+|\/+$/g, "");
+  if (
+    trimmedFolder.length === 0 ||
+    trimmedFolder === ".." ||
+    /\.\./.test(trimmedFolder) ||
+    /\\/.test(trimmedFolder) ||
+    // eslint-disable-next-line no-control-regex
+    /[\x00-\x1f\x7f]/.test(trimmedFolder)
+  ) {
+    errors.push(
+      "Yandex.Disk folder must not be empty or contain ..\\ or control characters"
+    );
+  }
   return errors;
 }

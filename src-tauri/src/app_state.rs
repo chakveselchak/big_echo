@@ -1,5 +1,6 @@
 use crate::audio;
 use crate::domain::session::SessionMeta;
+use crate::services::yandex_disk::state::{new_shared_state, SharedYandexSyncState};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub tray_app: Mutex<Option<AppHandle>>,
     pub known_tags: Mutex<BTreeSet<String>>,
     pub known_tags_hydrated: Mutex<bool>,
+    pub yandex_sync: SharedYandexSyncState,
 }
 
 impl Default for AppState {
@@ -28,6 +30,7 @@ impl Default for AppState {
             tray_app: Mutex::new(None),
             known_tags: Mutex::new(BTreeSet::new()),
             known_tags_hydrated: Mutex::new(false),
+            yandex_sync: new_shared_state(),
         }
     }
 }
