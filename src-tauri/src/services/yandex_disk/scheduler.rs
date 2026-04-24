@@ -33,6 +33,7 @@ pub fn interval_to_duration(s: &str) -> Duration {
     match s {
         "1h" => Duration::from_secs(3600),
         "6h" => Duration::from_secs(6 * 3600),
+        "24h" => Duration::from_secs(24 * 3600),
         "48h" => Duration::from_secs(48 * 3600),
         _ => Duration::from_secs(24 * 3600),
     }
