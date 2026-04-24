@@ -57,6 +57,27 @@ pub fn set_secret(app_data_dir: &Path, name: &str, value: &str) -> Result<(), St
     Ok(())
 }
 
+pub fn clear_secret(app_data_dir: &Path, name: &str) -> Result<(), String> {
+    // Remove from the OS keyring. Treat "no entry" as success.
+    if let Ok(entry) = keyring::Entry::new(SERVICE_NAME, name) {
+        match entry.delete_credential() {
+            Ok(()) => {}
+            Err(keyring::Error::NoEntry) => {}
+            Err(err) => eprintln!("warning: failed to delete keyring secret {name}: {err}"),
+        }
+    }
+
+    // Remove from the fallback file.
+    let path = fallback_path(app_data_dir);
+    if path.exists() {
+        let mut map = load_fallback_map(&path)?;
+        if map.remove(name).is_some() {
+            save_fallback_map(&path, &map)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn get_secret(app_data_dir: &Path, name: &str) -> Result<String, String> {
     let keyring_result = keyring::Entry::new(SERVICE_NAME, name)
         .map_err(|e| e.to_string())
@@ -74,4 +95,34 @@ pub fn get_secret(app_data_dir: &Path, name: &str) -> Result<String, String> {
     Err(keyring_result
         .err()
         .unwrap_or_else(|| "No matching entry found in secure storage".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn clear_secret_removes_from_fallback_file() {
+        let tmp = tempdir().expect("tempdir");
+        set_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN", "abc123").expect("set");
+        // Sanity: value is readable back
+        let _ = get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN");
+
+        clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("clear");
+
+        // After clear, the fallback no longer contains the key.
+        let path = tmp.path().join(FALLBACK_FILE_NAME);
+        if path.exists() {
+            let map = load_fallback_map(&path).expect("load fallback");
+            assert!(!map.contains_key("YANDEX_DISK_OAUTH_TOKEN"));
+        }
+    }
+
+    #[test]
+    fn clear_secret_is_idempotent_when_not_set() {
+        let tmp = tempdir().expect("tempdir");
+        clear_secret(tmp.path(), "NON_EXISTENT_KEY").expect("first clear");
+        clear_secret(tmp.path(), "NON_EXISTENT_KEY").expect("second clear");
+    }
 }
