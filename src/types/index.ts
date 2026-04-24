@@ -124,3 +124,16 @@ export type UpdateInfo = {
   name: string;
   published_at: string;
 };
+
+export type YandexSyncFileError = { path: string; message: string };
+export type YandexSyncLastRun = {
+  started_at_iso: string;
+  finished_at_iso: string;
+  duration_ms: number;
+  uploaded: number;
+  skipped: number;
+  failed: number;
+  errors: YandexSyncFileError[];
+};
+export type YandexSyncStatus = { is_running: boolean; last_run: YandexSyncLastRun | null };
+export type YandexSyncProgress = { current: number; total: number; rel_path: string };
