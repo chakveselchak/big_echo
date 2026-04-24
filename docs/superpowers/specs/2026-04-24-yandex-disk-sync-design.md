@@ -212,7 +212,8 @@ Registered in the `invoke_handler!` list in `src-tauri/src/lib.rs`.
 | `yandex_sync_has_token` | `() -> Result<bool, String>` | Reads via `get_secret`; `NoEntry` → `false` |
 | `yandex_sync_now` | `() -> Result<LastRunSummary, String>` | Short-circuits with error `"Yandex sync already running"` if `is_running`. Otherwise reads settings + token and runs `sync_runner::run` on the current task, forwarding progress events to the frontend. Returns the final `LastRunSummary`. |
 | `yandex_sync_status` | `() -> Result<YandexSyncStatus, String>` | Snapshot of runtime state |
-| `open_external_url` | `(url: String) -> Result<(), String>` | Shells out to the OS default browser. Validates `url` starts with `https://` to keep the surface narrow. |
+
+(`open_external_url` already exists in `commands/updates.rs` and is used for the "Get token" button without modification.)
 
 Secret strings never appear in any return value or error message exposed to the frontend.
 
@@ -267,7 +268,7 @@ Internal state (via a new hook `useYandexSync`):
 Layout (antd `Form`, `maxWidth: 760`):
 
 1. Checkbox `Enable Yandex.Disk sync` — bound to `yandex_sync_enabled`.
-2. `Form.Item` "OAuth token": `Input.Password` + `Save token` + status badge + `Clear`. Below: `Get token` button with `LinkOutlined`; clicking invokes a new tiny Tauri command `open_external_url(url: String)` that shells out via the same cross-platform pattern as `open_path_in_file_manager` (`open` on macOS, `xdg-open` on Linux, `powershell Start-Process` on Windows). The frontend passes `"https://yandex.ru/dev/disk/poligon/"`.
+2. `Form.Item` "OAuth token": `Input.Password` + `Save token` + status badge + `Clear`. Below: `Get token` button with `LinkOutlined`; clicking invokes the **already-existing** Tauri command `open_external_url(url: String)` (lives in `commands/updates.rs` and is already registered in `main.rs`). The frontend passes `"https://yandex.ru/dev/disk/poligon/"`. No new command needed.
 3. `Form.Item` "Folder on Yandex.Disk": `Input`, default `BigEcho`. Disabled when `!enabled`.
 4. `Form.Item` "Sync interval": `Select` with four options. Disabled when `!enabled`. Caption below: *Runs on app startup and every {interval} while the app is running.*
 5. `Button` "Sync now" (primary). Disabled if `!hasToken || status.is_running`. Always clickable irrespective of `yandex_sync_enabled` (manual override).
