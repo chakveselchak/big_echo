@@ -581,4 +581,22 @@ mod tests {
         };
         assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
     }
+
+    #[test]
+    fn rejects_remote_folder_with_embedded_control_char() {
+        let s = PublicSettings {
+            yandex_sync_remote_folder: "Big\nEcho".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+    }
+
+    #[test]
+    fn accepts_remote_folder_with_surrounding_slashes() {
+        let s = PublicSettings {
+            yandex_sync_remote_folder: "/BigEcho/".to_string(),
+            ..Default::default()
+        };
+        assert!(s.validate().is_ok());
+    }
 }
