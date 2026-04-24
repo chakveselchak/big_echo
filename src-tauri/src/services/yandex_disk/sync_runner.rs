@@ -8,7 +8,6 @@ use std::sync::Arc;
 pub const MAX_ERRORS_REPORTED: usize = 20;
 
 pub struct SyncParams {
-    pub token: String,
     pub local_root: PathBuf,
     pub remote_folder: String,
 }
@@ -314,7 +313,6 @@ mod tests {
 
     fn params(root: &Path) -> SyncParams {
         SyncParams {
-            token: "t".into(),
             local_root: root.to_path_buf(),
             remote_folder: "BigEcho".into(),
         }

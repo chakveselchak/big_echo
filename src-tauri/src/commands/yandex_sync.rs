@@ -73,7 +73,7 @@ pub async fn yandex_sync_now<R: Runtime>(
     let mut g = state
         .yandex_sync
         .lock()
-        .map_err(|_| "yandex_sync state poisoned".to_string())?;
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     g.is_running = false;
     match result {
         Ok(summary) => {
@@ -95,7 +95,6 @@ async fn do_run<R: Runtime, E: Emitter<R> + Clone + Send + Sync>(
         return Err("Yandex.Disk token is not set".to_string());
     }
     let params = SyncParams {
-        token: token.clone(),
         local_root: resolved_local_root(app_data_dir, &settings.recording_root),
         remote_folder: settings.yandex_sync_remote_folder.clone(),
     };
