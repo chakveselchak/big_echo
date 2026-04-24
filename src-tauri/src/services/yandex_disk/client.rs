@@ -34,7 +34,8 @@ pub trait YandexDiskApi: Send + Sync {
 pub struct HttpYandexDiskClient {
     base_url: String,
     token: String,
-    http: Client,
+    http_meta: Client,
+    http_upload: Client,
 }
 
 impl HttpYandexDiskClient {
@@ -43,14 +44,21 @@ impl HttpYandexDiskClient {
     }
 
     pub fn with_base(base: impl Into<String>, token: impl Into<String>) -> Self {
-        let http = Client::builder()
+        let http_meta = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .build()
-            .expect("reqwest client should build");
+            .expect("reqwest meta client should build");
+        let http_upload = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            // No overall timeout: large uploads may take minutes.
+            .build()
+            .expect("reqwest upload client should build");
         Self {
             base_url: base.into().trim_end_matches('/').to_string(),
             token: token.into(),
-            http,
+            http_meta,
+            http_upload,
         }
     }
 
@@ -109,11 +117,15 @@ struct ListDirResponse {
 
 #[async_trait]
 impl YandexDiskApi for HttpYandexDiskClient {
+    // FIXME(performance): parent_paths walks every level on every call, so ancestor
+    // directories get re-PUT once per distinct leaf. Yandex returns 409 in steady
+    // state, but we still pay the round trip. Replace with a "try leaf; on 404
+    // recurse into parent" approach once we have real sync traffic to benchmark.
     async fn ensure_dir(&self, remote_path: &str) -> Result<(), YandexError> {
         for path in Self::parent_paths(remote_path) {
             let url = format!("{}/resources?path={}", self.base_url, urlencoding::encode(&path));
             let res = self
-                .http
+                .http_meta
                 .put(&url)
                 .header("Authorization", self.auth_header_value())
                 .send()
@@ -146,7 +158,7 @@ impl YandexDiskApi for HttpYandexDiskClient {
                 )
             );
             let res = self
-                .http
+                .http_meta
                 .get(&url)
                 .header("Authorization", self.auth_header_value())
                 .send()
@@ -181,13 +193,24 @@ impl YandexDiskApi for HttpYandexDiskClient {
     }
 
     async fn upload_file(&self, remote_path: &str, local_path: &Path) -> Result<(), YandexError> {
+        // Open the file and fetch its size before any network traffic so that a
+        // missing local path surfaces as YandexError::Io immediately.
+        let file = File::open(local_path)
+            .await
+            .map_err(|e| YandexError::Io(e.to_string()))?;
+        let size = file
+            .metadata()
+            .await
+            .map_err(|e| YandexError::Io(e.to_string()))?
+            .len();
+
         let get_href_url = format!(
             "{}/resources/upload?path={}&overwrite=false",
             self.base_url,
             urlencoding::encode(remote_path)
         );
         let href_res = self
-            .http
+            .http_meta
             .get(&get_href_url)
             .header("Authorization", self.auth_header_value())
             .send()
@@ -207,18 +230,10 @@ impl YandexDiskApi for HttpYandexDiskClient {
             .await
             .map_err(|e| YandexError::Parse(e.to_string()))?;
 
-        let file = File::open(local_path)
-            .await
-            .map_err(|e| YandexError::Io(e.to_string()))?;
-        let size = file
-            .metadata()
-            .await
-            .map_err(|e| YandexError::Io(e.to_string()))?
-            .len();
         let body = reqwest::Body::from(file);
 
         let put_res = self
-            .http
+            .http_upload
             .put(&href.href)
             .header("Content-Length", size)
             .body(body)
@@ -425,5 +440,16 @@ mod tests {
             .await
             .expect_err("must fail");
         assert_eq!(err, YandexError::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn upload_file_missing_local_path_returns_io_error() {
+        let server = MockServer::start().await;
+        // No mocks required: upload_file should fail on File::open before any HTTP call.
+        let err = client_for(&server)
+            .upload_file("disk:/X/y.opus", std::path::Path::new("/nonexistent/path/y.opus"))
+            .await
+            .expect_err("must fail");
+        assert!(matches!(err, YandexError::Io(_)));
     }
 }
