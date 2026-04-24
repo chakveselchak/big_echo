@@ -34,6 +34,10 @@ use commands::settings::{
     save_public_settings,
 };
 use commands::updates::{check_for_update, open_external_url};
+use commands::yandex_sync::{
+    yandex_sync_clear_token, yandex_sync_has_token, yandex_sync_now, yandex_sync_set_token,
+    yandex_sync_status,
+};
 #[cfg(test)]
 use domain::session::SessionMeta;
 use domain::session::SessionStatus;
@@ -473,7 +477,12 @@ fn main() {
             run_summary,
             sync_sessions,
             check_for_update,
-            open_external_url
+            open_external_url,
+            yandex_sync_set_token,
+            yandex_sync_clear_token,
+            yandex_sync_has_token,
+            yandex_sync_status,
+            yandex_sync_now
         ])
         .build(tauri::generate_context!())
         .expect("error while building bigecho app");
@@ -659,7 +668,12 @@ mod ipc_runtime_tests {
                 retry_pipeline,
                 run_transcription,
                 run_summary,
-                sync_sessions
+                sync_sessions,
+                yandex_sync_set_token,
+                yandex_sync_clear_token,
+                yandex_sync_has_token,
+                yandex_sync_status,
+                yandex_sync_now
             ])
             .build(ctx)
             .expect("failed to build test app");
@@ -1637,5 +1651,73 @@ mod ipc_runtime_tests {
             .filter(|e| e.event_type == "pipeline_retry_scheduled")
             .count();
         assert_eq!(scheduled_count, 1);
+    }
+
+    #[test]
+    fn invoke_yandex_sync_now_errors_when_already_running() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        {
+            let state = app.state::<AppState>();
+            let mut g = state.yandex_sync.lock().expect("yandex_sync lock");
+            g.is_running = true;
+        }
+        let response =
+            get_ipc_response(&webview, invoke_request("yandex_sync_now", serde_json::json!({})));
+        let err = response.expect_err("should fail");
+        assert_eq!(extract_err_string(err), "Yandex sync already running");
+    }
+
+    #[test]
+    fn invoke_yandex_sync_status_returns_current_snapshot() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("yandex_sync_status", serde_json::json!({})),
+        )
+        .expect("status must succeed");
+        let value = extract_ok_json(response);
+        assert_eq!(value["is_running"], serde_json::Value::Bool(false));
+        assert!(value["last_run"].is_null());
+    }
+
+    #[test]
+    fn invoke_yandex_sync_has_token_returns_false_when_unset() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("yandex_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token must succeed");
+        let value = extract_ok_json(response);
+        assert_eq!(value, serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn invoke_yandex_sync_set_then_has_token() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let set = get_ipc_response(
+            &webview,
+            invoke_request("yandex_sync_set_token", serde_json::json!({ "token": "abc" })),
+        );
+        assert!(set.is_ok());
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("yandex_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token must succeed");
+        let value = extract_ok_json(response);
+        assert_eq!(value, serde_json::Value::Bool(true));
     }
 }
