@@ -100,9 +100,6 @@ export function YandexSyncSettings({ settings, setSettings, isDirty, enabled }: 
             Save token
           </Button>
           {tokenBadge}
-          <Button onClick={() => void y.clearToken()} disabled={!y.hasToken}>
-            Clear
-          </Button>
         </Flex>
         <Flex gap={8} align="center" style={{ marginTop: 8 }}>
           <Button icon={<LinkOutlined aria-hidden="true" />} onClick={openTokenPage}>
@@ -112,51 +109,55 @@ export function YandexSyncSettings({ settings, setSettings, isDirty, enabled }: 
         </Flex>
       </Form.Item>
 
-      <Form.Item
-        label={
-          <label htmlFor="yandex_sync_remote_folder">
-            Folder on Yandex.Disk (will be created if missing)
-            {isDirty("yandex_sync_remote_folder") && dirtyDot}
-          </label>
-        }
-      >
-        <Input
-          id="yandex_sync_remote_folder"
-          value={settings.yandex_sync_remote_folder}
-          onChange={(e) =>
-            setSettings({ ...settings, yandex_sync_remote_folder: e.target.value })
+      <Flex gap={16}>
+        <Form.Item
+          style={{ flex: 1, marginBottom: 0 }}
+          label={
+            <label htmlFor="yandex_sync_remote_folder">
+              Folder on Yandex.Disk (will be created if missing)
+              {isDirty("yandex_sync_remote_folder") && dirtyDot}
+            </label>
           }
-          disabled={fieldsDisabled}
-        />
-      </Form.Item>
+        >
+          <Input
+            id="yandex_sync_remote_folder"
+            value={settings.yandex_sync_remote_folder}
+            onChange={(e) =>
+              setSettings({ ...settings, yandex_sync_remote_folder: e.target.value })
+            }
+            disabled={fieldsDisabled}
+          />
+        </Form.Item>
 
-      <Form.Item
-        label={
-          <label htmlFor="yandex_sync_interval">
-            Sync interval
-            {isDirty("yandex_sync_interval") && dirtyDot}
-          </label>
-        }
-        help={`Runs on app startup and every ${settings.yandex_sync_interval} while the app is running.`}
-      >
-        <Select
-          id="yandex_sync_interval"
-          value={settings.yandex_sync_interval}
-          disabled={fieldsDisabled}
-          onChange={(value) =>
-            setSettings({
-              ...settings,
-              yandex_sync_interval: value as PublicSettings["yandex_sync_interval"],
-            })
+        <Form.Item
+          style={{ flex: 1, marginBottom: 0 }}
+          label={
+            <label htmlFor="yandex_sync_interval">
+              Sync interval
+              {isDirty("yandex_sync_interval") && dirtyDot}
+            </label>
           }
-          options={[
-            { value: "1h", label: "Every hour" },
-            { value: "6h", label: "Every 6 hours" },
-            { value: "24h", label: "Every 24 hours" },
-            { value: "48h", label: "Every 48 hours" },
-          ]}
-        />
-      </Form.Item>
+          help={`Runs on app startup and every ${settings.yandex_sync_interval} while the app is running.`}
+        >
+          <Select
+            id="yandex_sync_interval"
+            value={settings.yandex_sync_interval}
+            disabled={fieldsDisabled}
+            onChange={(value) =>
+              setSettings({
+                ...settings,
+                yandex_sync_interval: value as PublicSettings["yandex_sync_interval"],
+              })
+            }
+            options={[
+              { value: "1h", label: "Every hour" },
+              { value: "6h", label: "Every 6 hours" },
+              { value: "24h", label: "Every 24 hours" },
+              { value: "48h", label: "Every 48 hours" },
+            ]}
+          />
+        </Form.Item>
+      </Flex>
 
       <Form.Item>
         <Button
