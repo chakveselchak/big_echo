@@ -1,5 +1,9 @@
+use crate::app_state::{AppDirs, AppState};
 use crate::services::yandex_disk::state::SharedYandexSyncState;
+use crate::settings::public_settings::load_settings;
+use std::path::Path;
 use std::time::Duration;
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SchedulerAction {
@@ -34,28 +38,6 @@ pub fn interval_to_duration(s: &str) -> Duration {
     }
 }
 
-use crate::app_state::{AppDirs, AppState};
-use crate::services::yandex_disk::client::{HttpYandexDiskClient, YandexDiskApi};
-use crate::services::yandex_disk::sync_runner::{run, SyncParams, SyncProgress};
-use crate::settings::public_settings::load_settings;
-use crate::settings::secret_store::get_secret;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
-
-const TOKEN_KEY: &str = "YANDEX_DISK_OAUTH_TOKEN";
-const PROGRESS_EVENT: &str = "yandex-sync-progress";
-const FINISHED_EVENT: &str = "yandex-sync-finished";
-
-fn resolved_local_root(app_data_dir: &Path, recording_root: &str) -> PathBuf {
-    let p = PathBuf::from(recording_root);
-    if p.is_absolute() {
-        p
-    } else {
-        app_data_dir.join(p)
-    }
-}
-
 pub async fn run_loop(app: AppHandle) {
     let dirs = app.state::<AppDirs>().inner().clone();
     let shared = app.state::<AppState>().yandex_sync.clone();
@@ -78,11 +60,18 @@ async fn tick_once(app: &AppHandle, app_data_dir: &Path, shared: &SharedYandexSy
         Ok(s) => s,
         Err(_) => return,
     };
-    let token = match get_secret(app_data_dir, TOKEN_KEY) {
-        Ok(t) if !t.trim().is_empty() => t,
-        _ => return,
-    };
-    if decide_action(settings.yandex_sync_enabled, true, shared) != SchedulerAction::Trigger {
+    // Fast-exit when disabled; execute_sync will re-check token and load settings.
+    if !settings.yandex_sync_enabled {
+        return;
+    }
+    // Confirm token is set before paying the cost of locking + calling execute_sync.
+    let token_ok = crate::settings::secret_store::get_secret(
+        app_data_dir,
+        crate::services::yandex_disk::runner::TOKEN_KEY,
+    )
+    .map(|t| !t.trim().is_empty())
+    .unwrap_or(false);
+    if decide_action(settings.yandex_sync_enabled, token_ok, shared) != SchedulerAction::Trigger {
         return;
     }
 
@@ -97,37 +86,15 @@ async fn tick_once(app: &AppHandle, app_data_dir: &Path, shared: &SharedYandexSy
         g.is_running = true;
     }
 
-    let params = SyncParams {
-        local_root: resolved_local_root(app_data_dir, &settings.recording_root),
-        remote_folder: settings.yandex_sync_remote_folder.clone(),
-    };
-    let api: Arc<dyn YandexDiskApi> = Arc::new(HttpYandexDiskClient::new(token));
-
-    let app_for_progress = app.clone();
-    let emit = move |p: SyncProgress| match p {
-        SyncProgress::Item {
-            current,
-            total,
-            rel_path,
-        } => {
-            let payload = serde_json::json!({
-                "current": current, "total": total, "rel_path": rel_path
-            });
-            let _ = app_for_progress.emit(PROGRESS_EVENT, payload);
-        }
-        SyncProgress::Finished(summary) => {
-            let _ = app_for_progress.emit(FINISHED_EVENT, &summary);
-        }
-        SyncProgress::Started { .. } => {}
-    };
-
-    let summary = run(&params, api, &emit).await;
+    let result = crate::services::yandex_disk::runner::execute_sync(app, app_data_dir).await;
 
     let mut g = shared
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     g.is_running = false;
-    g.last_run = Some(summary);
+    if let Ok(summary) = result {
+        g.last_run = Some(summary);
+    }
 }
 
 #[cfg(test)]
