@@ -67,6 +67,7 @@ describe("useYandexSync", () => {
     await act(async () => {
       await result.current.clearToken();
     });
+    expect(invokeMock).toHaveBeenCalledWith("yandex_sync_clear_token");
     expect(result.current.hasToken).toBe(false);
   });
 

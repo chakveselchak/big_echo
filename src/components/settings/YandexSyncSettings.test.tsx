@@ -62,8 +62,13 @@ describe("YandexSyncSettings", () => {
         enabled
       />,
     );
-    const folder = await screen.findByLabelText(/Folder on Yandex.Disk/i) as HTMLInputElement;
+    const folder = (await screen.findByLabelText(/Folder on Yandex.Disk/i)) as HTMLInputElement;
     expect(folder).toBeDisabled();
+
+    // AntD Select in this version does not set aria-disabled on the combobox element.
+    // Find the wrapper container via the combobox and check for the disabled class.
+    const selectContainer = screen.getByRole("combobox").closest(".ant-select")!;
+    expect(selectContainer).toHaveClass("ant-select-disabled");
   });
 
   it("Sync now is disabled until a token is saved", async () => {
