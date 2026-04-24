@@ -103,26 +103,34 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn clear_secret_removes_from_fallback_file() {
+    fn clear_secret_removes_previously_stored_value() {
         let tmp = tempdir().expect("tempdir");
         set_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN", "abc123").expect("set");
-        // Sanity: value is readable back
-        let _ = get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN");
 
         clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("clear");
 
-        // After clear, the fallback no longer contains the key.
-        let path = tmp.path().join(FALLBACK_FILE_NAME);
-        if path.exists() {
-            let map = load_fallback_map(&path).expect("load fallback");
-            assert!(!map.contains_key("YANDEX_DISK_OAUTH_TOKEN"));
+        // Public API contract: after clear, get_secret no longer returns the value.
+        // (The keyring may or may not have been writable in this environment, so we
+        // only assert the observable contract, not the underlying file state.)
+        match get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN") {
+            Err(_) => {}
+            Ok(v) => panic!("expected secret to be cleared, got {v:?}"),
         }
     }
 
     #[test]
-    fn clear_secret_is_idempotent_when_not_set() {
+    fn clear_secret_is_idempotent_after_prior_clear() {
         let tmp = tempdir().expect("tempdir");
-        clear_secret(tmp.path(), "NON_EXISTENT_KEY").expect("first clear");
-        clear_secret(tmp.path(), "NON_EXISTENT_KEY").expect("second clear");
+        set_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN", "abc123").expect("set");
+
+        // First clear removes it.
+        clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("first clear");
+        // Second clear is a no-op on the now-absent key.
+        clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("second clear");
+
+        match get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN") {
+            Err(_) => {}
+            Ok(v) => panic!("expected secret to remain cleared, got {v:?}"),
+        }
     }
 }
