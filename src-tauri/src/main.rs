@@ -300,6 +300,9 @@ fn main() {
         spawn_retry_worker(AppDirs {
             app_data_dir: data_dir.clone(),
         });
+        tauri::async_runtime::spawn(services::yandex_disk::scheduler::run_loop(
+            app.handle().clone(),
+        ));
         window_manager::spawn_live_levels_worker(
             app.handle().clone(),
             AppDirs {
