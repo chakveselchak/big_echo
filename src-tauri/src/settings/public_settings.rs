@@ -41,6 +41,9 @@ pub struct PublicSettings {
     pub api_call_logging_enabled: bool,
     pub auto_delete_audio_enabled: bool,
     pub auto_delete_audio_days: u32,
+    pub yandex_sync_enabled: bool,
+    pub yandex_sync_interval: String,
+    pub yandex_sync_remote_folder: String,
 }
 
 impl Default for PublicSettings {
@@ -69,8 +72,25 @@ impl Default for PublicSettings {
             api_call_logging_enabled: false,
             auto_delete_audio_enabled: false,
             auto_delete_audio_days: 30,
+            yandex_sync_enabled: false,
+            yandex_sync_interval: "24h".to_string(),
+            yandex_sync_remote_folder: "BigEcho".to_string(),
         }
     }
+}
+
+fn sanitized_remote_folder(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_matches('/').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("..") || trimmed.contains('\\') {
+        return None;
+    }
+    if trimmed.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 impl PublicSettings {
@@ -83,6 +103,13 @@ impl PublicSettings {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        const YANDEX_INTERVALS: &[&str] = &["1h", "6h", "24h", "48h"];
+        if !YANDEX_INTERVALS.contains(&self.yandex_sync_interval.as_str()) {
+            return Err("Invalid Yandex sync interval".to_string());
+        }
+        if sanitized_remote_folder(&self.yandex_sync_remote_folder).is_none() {
+            return Err("Invalid Yandex remote folder".to_string());
+        }
         if !matches!(
             self.audio_format.as_str(),
             "opus" | "mp3" | "m4a" | "ogg" | "wav"
@@ -466,5 +493,92 @@ mod tests {
             serde_json::from_str(body).expect("settings should parse");
         assert!(!parsed.auto_delete_audio_enabled);
         assert_eq!(parsed.auto_delete_audio_days, 30);
+    }
+
+    #[test]
+    fn yandex_sync_defaults_are_disabled_with_24h_interval() {
+        let s = PublicSettings::default();
+        assert!(!s.yandex_sync_enabled);
+        assert_eq!(s.yandex_sync_interval, "24h");
+        assert_eq!(s.yandex_sync_remote_folder, "BigEcho");
+    }
+
+    #[test]
+    fn missing_yandex_sync_fields_use_defaults() {
+        let body = r#"{
+            "recording_root":"./recordings",
+            "artifact_open_app":"",
+            "transcription_provider":"nexara",
+            "transcription_url":"",
+            "transcription_task":"transcribe",
+            "transcription_diarization_setting":"general",
+            "salute_speech_scope":"SALUTE_SPEECH_CORP",
+            "salute_speech_model":"general",
+            "salute_speech_language":"ru-RU",
+            "salute_speech_sample_rate":48000,
+            "salute_speech_channels_count":1,
+            "summary_url":"",
+            "summary_prompt":"",
+            "openai_model":"gpt-4.1-mini",
+            "audio_format":"opus",
+            "opus_bitrate_kbps":24,
+            "mic_device_name":"",
+            "system_device_name":"",
+            "auto_run_pipeline_on_stop":false,
+            "api_call_logging_enabled":false,
+            "auto_delete_audio_enabled":false,
+            "auto_delete_audio_days":30
+        }"#;
+        let parsed: PublicSettings = serde_json::from_str(body).expect("settings should parse");
+        assert!(!parsed.yandex_sync_enabled);
+        assert_eq!(parsed.yandex_sync_interval, "24h");
+        assert_eq!(parsed.yandex_sync_remote_folder, "BigEcho");
+    }
+
+    #[test]
+    fn accepts_valid_yandex_sync_intervals() {
+        for iv in ["1h", "6h", "24h", "48h"] {
+            let s = PublicSettings {
+                yandex_sync_interval: iv.to_string(),
+                ..Default::default()
+            };
+            assert!(s.validate().is_ok(), "interval {iv} should be valid");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_yandex_sync_interval() {
+        let s = PublicSettings {
+            yandex_sync_interval: "5m".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(s.validate(), Err("Invalid Yandex sync interval".to_string()));
+    }
+
+    #[test]
+    fn rejects_remote_folder_with_dotdot() {
+        let s = PublicSettings {
+            yandex_sync_remote_folder: "BigEcho/../evil".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+    }
+
+    #[test]
+    fn rejects_empty_remote_folder_after_trim() {
+        let s = PublicSettings {
+            yandex_sync_remote_folder: "   /".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+    }
+
+    #[test]
+    fn rejects_remote_folder_with_backslash() {
+        let s = PublicSettings {
+            yandex_sync_remote_folder: "Big\\Echo".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
     }
 }

@@ -21,6 +21,9 @@ export type PublicSettings = {
   api_call_logging_enabled: boolean;
   auto_delete_audio_enabled: boolean;
   auto_delete_audio_days: number;
+  yandex_sync_enabled: boolean;
+  yandex_sync_interval: "1h" | "6h" | "24h" | "48h";
+  yandex_sync_remote_folder: string;
 };
 
 export type MacosSystemAudioPermissionStatus = {
@@ -76,7 +79,7 @@ export type UiSyncStateView = {
 export type SecretSaveState = "unknown" | "updated" | "unchanged" | "error";
 export type PipelineUiState = { kind: "success" | "error"; text: string };
 export type LiveInputLevels = { mic: number; system: number };
-export type SettingsTab = "audiototext" | "generals" | "audio";
+export type SettingsTab = "audiototext" | "generals" | "audio" | "yandex";
 export type DeleteTarget = { sessionId: string; force: boolean };
 
 export type TextEditorAppOption = {

@@ -71,6 +71,9 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
       api_call_logging_enabled: false,
       auto_delete_audio_enabled: false,
       auto_delete_audio_days: 30,
+      yandex_sync_enabled: false,
+      yandex_sync_interval: "24h",
+      yandex_sync_remote_folder: "BigEcho",
     };
   }
   if (cmd === "list_audio_input_devices") {
@@ -277,6 +280,9 @@ describe("Tray window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {
@@ -316,6 +322,9 @@ describe("Tray window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {
@@ -402,6 +411,9 @@ describe("Tray window", () => {
           api_call_logging_enabled: false,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {

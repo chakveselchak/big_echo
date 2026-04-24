@@ -30,6 +30,9 @@ const { invokeMock } = vi.hoisted(() => ({
         api_call_logging_enabled: false,
         auto_delete_audio_enabled: false,
         auto_delete_audio_days: 30,
+        yandex_sync_enabled: false,
+        yandex_sync_interval: "24h",
+        yandex_sync_remote_folder: "BigEcho",
       };
     }
     if (cmd === "detect_system_source_device") {
@@ -132,6 +135,9 @@ function mockSettings() {
     api_call_logging_enabled: false,
     auto_delete_audio_enabled: false,
     auto_delete_audio_days: 30,
+    yandex_sync_enabled: false,
+    yandex_sync_interval: "24h",
+    yandex_sync_remote_folder: "BigEcho",
   };
 }
 
@@ -475,6 +481,9 @@ describe("App settings window", () => {
           api_call_logging_enabled: true,
           auto_delete_audio_enabled: false,
           auto_delete_audio_days: 30,
+          yandex_sync_enabled: false,
+          yandex_sync_interval: "24h",
+          yandex_sync_remote_folder: "BigEcho",
         }),
       });
     });
