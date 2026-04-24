@@ -24,6 +24,8 @@ pub struct YandexSyncRuntimeState {
     pub last_run: Option<LastRunSummary>,
 }
 
+/// Uses `std::sync::Mutex` intentionally: callers must keep critical sections
+/// synchronous (acquire, mutate or clone, release before any `.await`).
 pub type SharedYandexSyncState = Arc<Mutex<YandexSyncRuntimeState>>;
 
 pub fn new_shared_state() -> SharedYandexSyncState {
@@ -61,7 +63,7 @@ mod tests {
     fn snapshot_reflects_current_state() {
         let shared = new_shared_state();
         {
-            let mut g = shared.lock().unwrap();
+            let mut g = shared.lock().expect("yandex_sync state lock");
             g.is_running = true;
             g.last_run = Some(LastRunSummary {
                 started_at_iso: "2026-04-24T10:00:00+00:00".into(),
