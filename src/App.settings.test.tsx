@@ -667,4 +667,16 @@ describe("App settings window", () => {
     fireEvent.click(tab);
     await screen.findByText(/Enable Yandex\.Disk sync/i);
   });
+
+  test("shows Sync now next to Save settings only on Yandex tab, disabled without token", async () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: /Sync now/i })).not.toBeInTheDocument();
+
+    const tab = await screen.findByRole("tab", { name: /Sync Yandex.Disk/i });
+    fireEvent.click(tab);
+
+    const syncNow = await screen.findByRole("button", { name: /Sync now/i });
+    expect(syncNow).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Save settings/i })).toBeInTheDocument();
+  });
 });

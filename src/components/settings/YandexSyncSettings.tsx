@@ -15,13 +15,13 @@ import {
 import { LinkOutlined } from "@ant-design/icons";
 import type { PublicSettings } from "../../types";
 import { tauriInvoke } from "../../lib/tauri";
-import { useYandexSync } from "../../hooks/useYandexSync";
+import type { UseYandexSyncReturn } from "../../hooks/useYandexSync";
 
 type Props = {
   settings: PublicSettings;
   setSettings: (s: PublicSettings) => void;
   isDirty: (field: keyof PublicSettings) => boolean;
-  enabled: boolean;
+  yandexSync: UseYandexSyncReturn;
 };
 
 const TOKEN_URL = "https://yandex.ru/dev/disk/poligon/";
@@ -48,8 +48,7 @@ function formatDuration(ms: number): string {
   return `${m}m ${s}s`;
 }
 
-export function YandexSyncSettings({ settings, setSettings, isDirty, enabled }: Props) {
-  const y = useYandexSync(enabled);
+export function YandexSyncSettings({ settings, setSettings, isDirty, yandexSync: y }: Props) {
   const [tokenInput, setTokenInput] = useState("");
 
   const handleSaveToken = async () => {
@@ -68,7 +67,6 @@ export function YandexSyncSettings({ settings, setSettings, isDirty, enabled }: 
       ? <Tag color="green">Saved</Tag>
       : <Tag>Not set</Tag>;
 
-  const canSyncNow = y.hasToken && !y.status.is_running;
   const fieldsDisabled = !settings.yandex_sync_enabled;
 
   return (
@@ -158,17 +156,6 @@ export function YandexSyncSettings({ settings, setSettings, isDirty, enabled }: 
           />
         </Form.Item>
       </Flex>
-
-      <Form.Item>
-        <Button
-          type="primary"
-          onClick={() => void y.syncNow()}
-          loading={y.status.is_running}
-          disabled={!canSyncNow}
-        >
-          Sync now
-        </Button>
-      </Form.Item>
 
       {y.status.is_running && y.progress && (
         <div style={{ marginBottom: 12 }}>

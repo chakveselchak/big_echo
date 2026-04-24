@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
+import { useYandexSync } from "../../hooks/useYandexSync";
 import type { PublicSettings, SettingsTab } from "../../types";
 import { tauriInvoke } from "../../lib/tauri";
 import { getErrorMessage } from "../../lib/appUtils";
@@ -60,6 +61,8 @@ export function SettingsPage() {
     settingsTab,
     textEditorApps,
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
+
+  const yandexSync = useYandexSync(settingsTab === "yandex");
 
   if (!settings) {
     return (
@@ -203,7 +206,7 @@ export function SettingsPage() {
           settings={settings}
           setSettings={setSettings}
           isDirty={isDirty}
-          enabled={settingsTab === "yandex"}
+          yandexSync={yandexSync}
         />
       ),
     },
@@ -238,6 +241,15 @@ export function SettingsPage() {
         <Button type="primary" onClick={() => void saveSettings()} disabled={!canSaveSettings}>
           Save settings
         </Button>
+        {settingsTab === "yandex" && (
+          <Button
+            onClick={() => void yandexSync.syncNow()}
+            loading={yandexSync.status.is_running}
+            disabled={!yandexSync.hasToken || yandexSync.status.is_running}
+          >
+            Sync now
+          </Button>
+        )}
       </Flex>
     </div>
   );

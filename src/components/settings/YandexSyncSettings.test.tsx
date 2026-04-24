@@ -2,14 +2,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { YandexSyncSettings } from "./YandexSyncSettings";
-import type { PublicSettings } from "../../types";
+import type { PublicSettings, YandexSyncLastRun, YandexSyncStatus } from "../../types";
+import type { UseYandexSyncReturn } from "../../hooks/useYandexSync";
 
 const invokeMock = vi.fn();
 vi.mock("../../lib/tauri", () => ({
   tauriInvoke: (...args: unknown[]) => invokeMock(...args),
-}));
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: () => Promise.resolve(() => undefined),
 }));
 
 function baseSettings(overrides: Partial<PublicSettings> = {}): PublicSettings {
@@ -43,14 +41,26 @@ function baseSettings(overrides: Partial<PublicSettings> = {}): PublicSettings {
   };
 }
 
+function makeYandexSyncStub(overrides: Partial<UseYandexSyncReturn> = {}): UseYandexSyncReturn {
+  const defaultStatus: YandexSyncStatus = { is_running: false, last_run: null };
+  return {
+    hasToken: false,
+    tokenState: "unknown",
+    status: defaultStatus,
+    progress: null,
+    refreshHasToken: vi.fn(async () => undefined),
+    refreshStatus: vi.fn(async () => defaultStatus),
+    saveToken: vi.fn(async (_v: string) => undefined),
+    clearToken: vi.fn(async () => undefined),
+    syncNow: vi.fn(async (): Promise<YandexSyncLastRun | null> => null),
+    ...overrides,
+  };
+}
+
 describe("YandexSyncSettings", () => {
   beforeEach(() => {
     invokeMock.mockReset();
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "yandex_sync_has_token") return Promise.resolve(false);
-      if (cmd === "yandex_sync_status") return Promise.resolve({ is_running: false, last_run: null });
-      return Promise.resolve();
-    });
+    invokeMock.mockResolvedValue(undefined);
   });
 
   it("disables interval and remote-folder inputs when master switch is off", async () => {
@@ -59,29 +69,14 @@ describe("YandexSyncSettings", () => {
         settings={baseSettings({ yandex_sync_enabled: false })}
         setSettings={() => undefined}
         isDirty={() => false}
-        enabled
+        yandexSync={makeYandexSyncStub()}
       />,
     );
     const folder = (await screen.findByLabelText(/Folder on Yandex.Disk/i)) as HTMLInputElement;
     expect(folder).toBeDisabled();
 
-    // AntD Select in this version does not set aria-disabled on the combobox element.
-    // Find the wrapper container via the combobox and check for the disabled class.
     const selectContainer = screen.getByRole("combobox").closest(".ant-select")!;
     expect(selectContainer).toHaveClass("ant-select-disabled");
-  });
-
-  it("Sync now is disabled until a token is saved", async () => {
-    render(
-      <YandexSyncSettings
-        settings={baseSettings()}
-        setSettings={() => undefined}
-        isDirty={() => false}
-        enabled
-      />,
-    );
-    const btn = await screen.findByRole("button", { name: /Sync now/i });
-    expect(btn).toBeDisabled();
   });
 
   it("Get token button invokes open_external_url with Polygon URL", async () => {
@@ -90,7 +85,7 @@ describe("YandexSyncSettings", () => {
         settings={baseSettings()}
         setSettings={() => undefined}
         isDirty={() => false}
-        enabled
+        yandexSync={makeYandexSyncStub()}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /Get token/i }));
@@ -101,51 +96,47 @@ describe("YandexSyncSettings", () => {
     );
   });
 
-  it("Save token invokes yandex_sync_set_token with trimmed value", async () => {
+  it("Save token calls yandexSync.saveToken with trimmed value", async () => {
+    const saveToken = vi.fn(async (_v: string) => undefined);
     render(
       <YandexSyncSettings
         settings={baseSettings()}
         setSettings={() => undefined}
         isDirty={() => false}
-        enabled
+        yandexSync={makeYandexSyncStub({ saveToken })}
       />,
     );
     fireEvent.change(screen.getByPlaceholderText(/OAuth token/i), {
       target: { value: "  abc  " },
     });
     fireEvent.click(screen.getByRole("button", { name: /Save token/i }));
-    await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("yandex_sync_set_token", { token: "abc" }),
-    );
+    await waitFor(() => expect(saveToken).toHaveBeenCalledWith("abc"));
   });
 
-  it("renders last_run counters when status has a last_run", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "yandex_sync_has_token") return Promise.resolve(true);
-      if (cmd === "yandex_sync_status")
-        return Promise.resolve({
-          is_running: false,
-          last_run: {
-            started_at_iso: "2026-04-24T10:00:00Z",
-            finished_at_iso: "2026-04-24T10:02:14Z",
-            duration_ms: 134_000,
-            uploaded: 3,
-            skipped: 128,
-            failed: 1,
-            errors: [{ path: "a/b.opus", message: "network" }],
-          },
-        });
-      return Promise.resolve();
-    });
+  it("renders last_run counters when status has a last_run", () => {
     render(
       <YandexSyncSettings
         settings={baseSettings()}
         setSettings={() => undefined}
         isDirty={() => false}
-        enabled
+        yandexSync={makeYandexSyncStub({
+          hasToken: true,
+          status: {
+            is_running: false,
+            last_run: {
+              started_at_iso: "2026-04-24T10:00:00Z",
+              finished_at_iso: "2026-04-24T10:02:14Z",
+              duration_ms: 134_000,
+              uploaded: 3,
+              skipped: 128,
+              failed: 1,
+              errors: [{ path: "a/b.opus", message: "network" }],
+            },
+          },
+        })}
       />,
     );
-    await screen.findByText(/Uploaded 3 · Skipped 128 · Failed 1/);
-    await screen.findByText(/Show errors/);
+    expect(screen.getByText(/Uploaded 3 · Skipped 128 · Failed 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Show errors/)).toBeInTheDocument();
   });
 });

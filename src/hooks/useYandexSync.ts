@@ -119,3 +119,5 @@ export function useYandexSync(enabled: boolean) {
     syncNow,
   };
 }
+
+export type UseYandexSyncReturn = ReturnType<typeof useYandexSync>;
