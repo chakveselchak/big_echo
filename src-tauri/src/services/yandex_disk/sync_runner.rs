@@ -46,6 +46,9 @@ fn collect_local_files(root: &Path) -> std::io::Result<Vec<LocalFile>> {
             }
             let size = entry.metadata()?.len();
             let rel = p.strip_prefix(root).unwrap_or(&p).to_path_buf();
+            // FIXME(portability): non-UTF-8 path components are silently replaced with
+            // U+FFFD. On macOS/Windows this is unreachable; on Linux such files would
+            // upload under a mangled name. Reject them before upload once we target Linux.
             let rel_posix = rel
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy().to_string())
@@ -98,6 +101,9 @@ pub async fn run(
     let mut failed = 0u32;
     let mut errors: Vec<FileError> = Vec::new();
 
+    // FIXME(perf): collect_local_files uses std::fs which blocks the Tokio worker
+    // thread. Wrap in tokio::task::spawn_blocking if recording roots can hold
+    // thousands of files.
     let files = match collect_local_files(&params.local_root) {
         Ok(v) => v,
         Err(err) => {
@@ -144,6 +150,8 @@ pub async fn run(
 
     let mut listing_cache: HashMap<String, HashMap<String, u64>> = HashMap::new();
     let mut created_dirs: HashSet<String> = HashSet::new();
+    // Root dir was already ensured above; skip it in the per-file loop.
+    created_dirs.insert(remote_dir_for(&params.remote_folder, ""));
 
     for (idx, lf) in files.iter().enumerate() {
         let rel_dir = parent_rel_dir(&lf.rel_path);
@@ -164,14 +172,11 @@ pub async fn run(
             created_dirs.insert(remote_dir.clone());
         }
 
-        let remote_map = if let Some(m) = listing_cache.get(&remote_dir) {
-            m
+        let remote_map = if listing_cache.contains_key(&remote_dir) {
+            listing_cache.get(&remote_dir).expect("just checked")
         } else {
             match api.list_dir(&remote_dir).await {
-                Ok(m) => {
-                    listing_cache.insert(remote_dir.clone(), m);
-                    listing_cache.get(&remote_dir).unwrap()
-                }
+                Ok(m) => listing_cache.entry(remote_dir.clone()).or_insert(m),
                 Err(err) => {
                     failed += 1;
                     push_error(&mut errors, &lf.rel_path, format!("list_dir: {err}"));
@@ -223,6 +228,7 @@ mod tests {
         dirs: HashSet<String>,
         files: HashMap<String, u64>,
         upload_failures: HashSet<String>,
+        upload_calls: usize,
     }
 
     struct FakeApi {
@@ -249,8 +255,8 @@ mod tests {
                 .upload_failures
                 .insert(remote_path.to_string());
         }
-        fn upload_count(&self) -> usize {
-            self.inner.lock().unwrap().files.len()
+        fn upload_call_count(&self) -> usize {
+            self.inner.lock().unwrap().upload_calls
         }
     }
 
@@ -286,6 +292,7 @@ mod tests {
             if g.upload_failures.contains(remote_path) {
                 return Err(YandexError::Network("simulated".into()));
             }
+            g.upload_calls += 1;
             let size = std::fs::metadata(local_path).unwrap().len();
             g.files.insert(remote_path.to_string(), size);
             Ok(())
@@ -338,7 +345,7 @@ mod tests {
         assert_eq!(summary.uploaded, 1);
         assert_eq!(summary.skipped, 0);
         assert_eq!(summary.failed, 0);
-        assert_eq!(api.upload_count(), 1);
+        assert_eq!(api.upload_call_count(), 1);
     }
 
     #[tokio::test]
