@@ -62,7 +62,11 @@ export function YandexSyncSettings({ settings, setSettings, isDirty, enabled }: 
     void tauriInvoke("open_external_url", { url: TOKEN_URL });
   };
 
-  const tokenBadge = y.hasToken ? <Tag color="green">Saved</Tag> : <Tag>Not set</Tag>;
+  const tokenBadge = y.tokenState === "error"
+    ? <Tag color="red">Error</Tag>
+    : y.hasToken
+      ? <Tag color="green">Saved</Tag>
+      : <Tag>Not set</Tag>;
 
   const canSyncNow = y.hasToken && !y.status.is_running;
   const fieldsDisabled = !settings.yandex_sync_enabled;
