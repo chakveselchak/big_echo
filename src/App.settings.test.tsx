@@ -53,6 +53,20 @@ const { invokeMock } = vi.hoisted(() => ({
     if (cmd === "pick_recording_root") {
       return "/Users/test/BigEcho Recordings";
     }
+    if (cmd === "yandex_sync_has_token") return Promise.resolve(false);
+    if (cmd === "yandex_sync_status") return Promise.resolve({ is_running: false, last_run: null });
+    if (cmd === "yandex_sync_set_token") return Promise.resolve();
+    if (cmd === "yandex_sync_clear_token") return Promise.resolve();
+    if (cmd === "yandex_sync_now")
+      return Promise.resolve({
+        started_at_iso: "",
+        finished_at_iso: "",
+        duration_ms: 0,
+        uploaded: 0,
+        skipped: 0,
+        failed: 0,
+        errors: [],
+      });
     return null;
   }),
 }));
@@ -645,5 +659,12 @@ describe("App settings window", () => {
 
     expect(screen.getByText("Nexara API key: не изменён")).toBeInTheDocument();
     expect(screen.getByText("OpenAI API key: не изменён")).toBeInTheDocument();
+  });
+
+  test("renders the Sync Yandex.Disk tab", async () => {
+    render(<App />);
+    const tab = await screen.findByRole("tab", { name: /Sync Yandex.Disk/i });
+    fireEvent.click(tab);
+    await screen.findByText(/Enable Yandex\.Disk sync/i);
   });
 });
