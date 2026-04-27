@@ -5,6 +5,7 @@ import { useSessions } from "../../hooks/useSessions";
 import { initializeAnalytics } from "../../lib/analytics";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 import type { StartResponse } from "../../types";
+import { NexaraBalance } from "../../components/NexaraBalance";
 import { SessionFilters } from "../../components/sessions/SessionFilters";
 import { SessionList } from "../../components/sessions/SessionList";
 import { SettingsPage } from "../SettingsPage";
@@ -176,6 +177,7 @@ export function MainPage() {
               🔥 New version
             </button>
           )}
+          <NexaraBalance />
         </div>
         {mainTab === "sessions" && (
           <SessionFilters

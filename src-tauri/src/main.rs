@@ -17,6 +17,7 @@ use app_state::StartRecordingResponse;
 use app_state::{AppDirs, AppState};
 use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
+use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
@@ -485,7 +486,8 @@ fn main() {
             yandex_sync_clear_token,
             yandex_sync_has_token,
             yandex_sync_status,
-            yandex_sync_now
+            yandex_sync_now,
+            get_nexara_balance
         ])
         .build(tauri::generate_context!())
         .expect("error while building bigecho app");

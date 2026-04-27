@@ -1,3 +1,4 @@
+pub mod nexara;
 pub mod recording;
 pub mod sessions;
 pub mod settings;
