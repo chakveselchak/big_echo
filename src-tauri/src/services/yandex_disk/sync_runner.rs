@@ -7,6 +7,11 @@ use std::sync::Arc;
 
 pub const MAX_ERRORS_REPORTED: usize = 20;
 
+/// Filenames we never sync. macOS sprinkles `.DS_Store` inside every directory
+/// the Finder has touched; uploading them clutters the Yandex.Disk view and
+/// produces noise on every sync run.
+const IGNORED_FILENAMES: &[&str] = &[".DS_Store"];
+
 pub struct SyncParams {
     pub local_root: PathBuf,
     pub remote_folder: String,
@@ -14,7 +19,11 @@ pub struct SyncParams {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncProgress {
-    Started { total: u32 },
+    /// Emitted once after the pre-flight scan finishes and the upload loop is
+    /// about to start. `total_objects` is the count of local files considered
+    /// (after `.DS_Store` filtering); `not_synced` is the subset that needs
+    /// upload (missing remotely or remote size differs).
+    Started { total_objects: u32, not_synced: u32 },
     Item { current: u32, total: u32, rel_path: String },
     Finished(LastRunSummary),
 }
@@ -41,6 +50,12 @@ fn collect_local_files(root: &Path) -> std::io::Result<Vec<LocalFile>> {
                 continue;
             }
             if !kind.is_file() {
+                continue;
+            }
+            if IGNORED_FILENAMES
+                .iter()
+                .any(|ignored| entry.file_name() == *ignored)
+            {
                 continue;
             }
             let size = entry.metadata()?.len();
@@ -96,7 +111,6 @@ pub async fn run(
     let started_at = Utc::now();
     let started_iso = started_at.to_rfc3339();
     let mut uploaded = 0u32;
-    let mut skipped = 0u32;
     let mut failed = 0u32;
     let mut errors: Vec<FileError> = Vec::new();
 
@@ -111,6 +125,8 @@ pub async fn run(
                 started_at_iso: started_iso,
                 finished_at_iso: finished.to_rfc3339(),
                 duration_ms: (finished - started_at).num_milliseconds().max(0) as u64,
+                total_objects: 0,
+                not_synced: 0,
                 uploaded: 0,
                 skipped: 0,
                 failed: 1,
@@ -123,8 +139,7 @@ pub async fn run(
             return summary;
         }
     };
-    let total = files.len() as u32;
-    progress(SyncProgress::Started { total });
+    let total_objects = files.len() as u32;
 
     if let Err(err) = api
         .ensure_dir(&remote_dir_for(&params.remote_folder, ""))
@@ -135,9 +150,11 @@ pub async fn run(
             started_at_iso: started_iso,
             finished_at_iso: finished.to_rfc3339(),
             duration_ms: (finished - started_at).num_milliseconds().max(0) as u64,
+            total_objects,
+            not_synced: total_objects,
             uploaded: 0,
             skipped: 0,
-            failed: total.max(1),
+            failed: total_objects.max(1),
             errors: vec![FileError {
                 path: params.remote_folder.clone(),
                 message: format!("ensure root dir: {err}"),
@@ -147,18 +164,55 @@ pub async fn run(
         return summary;
     }
 
+    // Pre-flight: list every remote directory we touch once, then classify
+    // each local file as "already in sync" (size matches) or "needs upload".
+    // Doing this upfront lets us report `total_objects` and `not_synced`
+    // before we start hitting the network for uploads, and lets us skip the
+    // upload loop entirely when nothing changed.
     let mut listing_cache: HashMap<String, HashMap<String, u64>> = HashMap::new();
+    let mut already_synced = 0u32;
+    let mut needs_upload: Vec<&LocalFile> = Vec::with_capacity(files.len());
+
+    for lf in &files {
+        let rel_dir = parent_rel_dir(&lf.rel_path);
+        let remote_dir = remote_dir_for(&params.remote_folder, rel_dir);
+
+        if !listing_cache.contains_key(&remote_dir) {
+            // List failures are not fatal: we treat the directory as empty
+            // (so every file in it counts as "needs upload"). The actual
+            // upload call will surface any persistent error.
+            let listing = api.list_dir(&remote_dir).await.unwrap_or_default();
+            listing_cache.insert(remote_dir.clone(), listing);
+        }
+        let remote_map = listing_cache
+            .get(&remote_dir)
+            .expect("just inserted");
+
+        let name = lf.rel_path.rsplit('/').next().unwrap_or(&lf.rel_path);
+        if remote_map.get(name).copied() == Some(lf.size) {
+            already_synced += 1;
+        } else {
+            needs_upload.push(lf);
+        }
+    }
+
+    let not_synced = needs_upload.len() as u32;
+    progress(SyncProgress::Started {
+        total_objects,
+        not_synced,
+    });
+
     let mut created_dirs: HashSet<String> = HashSet::new();
     // Root dir was already ensured above; skip it in the per-file loop.
     created_dirs.insert(remote_dir_for(&params.remote_folder, ""));
 
-    for (idx, lf) in files.iter().enumerate() {
+    for (idx, lf) in needs_upload.iter().enumerate() {
         let rel_dir = parent_rel_dir(&lf.rel_path);
         let remote_dir = remote_dir_for(&params.remote_folder, rel_dir);
         let current = (idx + 1) as u32;
         progress(SyncProgress::Item {
             current,
-            total,
+            total: not_synced,
             rel_path: lf.rel_path.clone(),
         });
 
@@ -171,25 +225,7 @@ pub async fn run(
             created_dirs.insert(remote_dir.clone());
         }
 
-        let remote_map = if listing_cache.contains_key(&remote_dir) {
-            listing_cache.get(&remote_dir).expect("just checked")
-        } else {
-            match api.list_dir(&remote_dir).await {
-                Ok(m) => listing_cache.entry(remote_dir.clone()).or_insert(m),
-                Err(err) => {
-                    failed += 1;
-                    push_error(&mut errors, &lf.rel_path, format!("list_dir: {err}"));
-                    continue;
-                }
-            }
-        };
-
         let name = lf.rel_path.rsplit('/').next().unwrap_or(&lf.rel_path);
-        if remote_map.get(name).copied() == Some(lf.size) {
-            skipped += 1;
-            continue;
-        }
-
         let remote_path = format!("{}/{}", remote_dir, name);
         match api.upload_file(&remote_path, &lf.abs_path).await {
             Ok(()) => uploaded += 1,
@@ -205,8 +241,10 @@ pub async fn run(
         started_at_iso: started_iso,
         finished_at_iso: finished.to_rfc3339(),
         duration_ms: (finished - started_at).num_milliseconds().max(0) as u64,
+        total_objects,
+        not_synced,
         uploaded,
-        skipped,
+        skipped: already_synced,
         failed,
         errors,
     };
@@ -324,11 +362,19 @@ mod tests {
         let api: Arc<dyn YandexDiskApi> = Arc::new(FakeApi::new());
         let (events, emit) = record_progress();
         let summary = run(&params(tmp.path()), api, &emit).await;
+        assert_eq!(summary.total_objects, 0);
+        assert_eq!(summary.not_synced, 0);
         assert_eq!(summary.uploaded, 0);
         assert_eq!(summary.skipped, 0);
         assert_eq!(summary.failed, 0);
         let events = events.lock().unwrap();
-        assert!(matches!(events[0], SyncProgress::Started { total: 0 }));
+        assert!(matches!(
+            events[0],
+            SyncProgress::Started {
+                total_objects: 0,
+                not_synced: 0
+            }
+        ));
         assert!(matches!(events.last(), Some(SyncProgress::Finished(_))));
     }
 
@@ -358,8 +404,11 @@ mod tests {
         let api_dyn: Arc<dyn YandexDiskApi> = api.clone();
         let (_events, emit) = record_progress();
         let summary = run(&params(tmp.path()), api_dyn, &emit).await;
+        assert_eq!(summary.total_objects, 1);
+        assert_eq!(summary.not_synced, 0);
         assert_eq!(summary.uploaded, 0);
         assert_eq!(summary.skipped, 1);
+        assert_eq!(api.upload_call_count(), 0);
     }
 
     #[tokio::test]
@@ -429,7 +478,13 @@ mod tests {
         let (events, emit) = record_progress();
         let _ = run(&params(tmp.path()), api, &emit).await;
         let evs = events.lock().unwrap();
-        assert!(matches!(evs[0], SyncProgress::Started { total: 2 }));
+        assert!(matches!(
+            evs[0],
+            SyncProgress::Started {
+                total_objects: 2,
+                not_synced: 2
+            }
+        ));
         match &evs[1] {
             SyncProgress::Item { current, total, rel_path } => {
                 assert_eq!(*current, 1);
@@ -447,5 +502,95 @@ mod tests {
             other => panic!("expected Item, got {:?}", other),
         }
         assert!(matches!(evs.last(), Some(SyncProgress::Finished(_))));
+    }
+
+    #[tokio::test]
+    async fn ds_store_files_are_ignored() {
+        let tmp = tempdir().unwrap();
+        write_file(tmp.path(), "10.04.2026/audio.opus", b"hello");
+        write_file(tmp.path(), "10.04.2026/.DS_Store", b"junk");
+        write_file(tmp.path(), ".DS_Store", b"junk-root");
+        let api = Arc::new(FakeApi::new());
+        let api_dyn: Arc<dyn YandexDiskApi> = api.clone();
+        let (events, emit) = record_progress();
+        let summary = run(&params(tmp.path()), api_dyn, &emit).await;
+
+        assert_eq!(summary.total_objects, 1);
+        assert_eq!(summary.not_synced, 1);
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(api.upload_call_count(), 1);
+        let uploaded_paths: Vec<String> =
+            api.inner.lock().unwrap().files.keys().cloned().collect();
+        assert!(
+            !uploaded_paths.iter().any(|p| p.ends_with("/.DS_Store")),
+            ".DS_Store should not be uploaded; got {uploaded_paths:?}"
+        );
+        // Only the audio file should appear as an Item; no Item for .DS_Store.
+        let item_paths: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|p| match p {
+                SyncProgress::Item { rel_path, .. } => Some(rel_path.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(item_paths, vec!["10.04.2026/audio.opus".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn preflight_classifies_total_and_not_synced() {
+        let tmp = tempdir().unwrap();
+        write_file(tmp.path(), "a.opus", b"aa");
+        write_file(tmp.path(), "b.opus", b"bbbb");
+        write_file(tmp.path(), "c.opus", b"cccccc");
+        let api = Arc::new(FakeApi::new());
+        // a is already in sync (size 2 matches), b has wrong remote size, c is missing
+        api.preload_file("disk:/BigEcho/a.opus", 2);
+        api.preload_file("disk:/BigEcho/b.opus", 999);
+        let api_dyn: Arc<dyn YandexDiskApi> = api.clone();
+        let (events, emit) = record_progress();
+        let summary = run(&params(tmp.path()), api_dyn, &emit).await;
+
+        assert_eq!(summary.total_objects, 3);
+        assert_eq!(summary.not_synced, 2);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.uploaded, 2);
+        assert_eq!(api.upload_call_count(), 2);
+        // Started event reflects the snapshot taken before uploads start.
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SyncProgress::Started {
+                total_objects: 3,
+                not_synced: 2
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn upload_loop_iterates_only_needs_upload() {
+        let tmp = tempdir().unwrap();
+        write_file(tmp.path(), "a.opus", b"aa");
+        write_file(tmp.path(), "b.opus", b"bb");
+        let api = Arc::new(FakeApi::new());
+        // Both already in sync — upload loop should not run.
+        api.preload_file("disk:/BigEcho/a.opus", 2);
+        api.preload_file("disk:/BigEcho/b.opus", 2);
+        let api_dyn: Arc<dyn YandexDiskApi> = api.clone();
+        let (events, emit) = record_progress();
+        let summary = run(&params(tmp.path()), api_dyn, &emit).await;
+
+        assert_eq!(summary.total_objects, 2);
+        assert_eq!(summary.not_synced, 0);
+        assert_eq!(summary.uploaded, 0);
+        assert_eq!(summary.skipped, 2);
+        assert_eq!(api.upload_call_count(), 0);
+        // No Item events emitted because nothing was uploaded.
+        let has_item = events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| matches!(p, SyncProgress::Item { .. }));
+        assert!(!has_item);
     }
 }

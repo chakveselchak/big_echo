@@ -48,6 +48,7 @@ function makeYandexSyncStub(overrides: Partial<UseYandexSyncReturn> = {}): UseYa
     tokenState: "unknown",
     status: defaultStatus,
     progress: null,
+    preflight: null,
     refreshHasToken: vi.fn(async () => undefined),
     refreshStatus: vi.fn(async () => defaultStatus),
     saveToken: vi.fn(async (_v: string) => undefined),
@@ -127,6 +128,8 @@ describe("YandexSyncSettings", () => {
               started_at_iso: "2026-04-24T10:00:00Z",
               finished_at_iso: "2026-04-24T10:02:14Z",
               duration_ms: 134_000,
+              total_objects: 131,
+              not_synced: 4,
               uploaded: 3,
               skipped: 128,
               failed: 1,
@@ -136,7 +139,28 @@ describe("YandexSyncSettings", () => {
         })}
       />,
     );
+    expect(
+      screen.getByText(/Всего объектов: 131, не синхронизировано: 4/),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Uploaded 3 · Skipped 128 · Failed 1/)).toBeInTheDocument();
     expect(screen.getByText(/Show errors/)).toBeInTheDocument();
+  });
+
+  it("renders pre-flight status while sync is running", () => {
+    render(
+      <YandexSyncSettings
+        settings={baseSettings()}
+        setSettings={() => undefined}
+        isDirty={() => false}
+        yandexSync={makeYandexSyncStub({
+          hasToken: true,
+          status: { is_running: true, last_run: null },
+          preflight: { total_objects: 42, not_synced: 7 },
+        })}
+      />,
+    );
+    expect(
+      screen.getByText(/Всего объектов: 42, не синхронизировано: 7/),
+    ).toBeInTheDocument();
   });
 });

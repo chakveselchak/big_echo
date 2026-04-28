@@ -210,6 +210,14 @@ pub struct CaptureArtifacts {
     pub mic_rate: u32,
     pub system_path: Option<PathBuf>,
     pub system_rate: u32,
+    /// Non-fatal warning produced while finalizing one of the capture
+    /// channels. The most common case is ScreenCaptureKit's
+    /// `SCStream.stopCapture` returning a teardown error after the audio
+    /// file has already been flushed to disk — so the data is intact and
+    /// the recording should NOT be discarded. Caller must treat this as a
+    /// successful capture and surface the message via logs/events instead
+    /// of failing the session.
+    pub system_finalize_warning: Option<String>,
 }
 
 impl ContinuousCapture {
@@ -290,30 +298,7 @@ impl ContinuousCapture {
 
         #[cfg(target_os = "macos")]
         {
-            match (mic_result, system_result) {
-                (Ok(Ok(mut artifacts)), Some(Ok(system_artifacts))) => {
-                    artifacts.system_path = Some(system_artifacts.path);
-                    artifacts.system_rate = system_artifacts.sample_rate;
-                    Ok(artifacts)
-                }
-                (Ok(Ok(artifacts)), Some(Err(err))) => {
-                    cleanup_artifacts(&artifacts);
-                    Err(err)
-                }
-                (Ok(Err(err)), Some(Ok(system_artifacts))) => {
-                    cleanup_system_artifact(&system_artifacts.path);
-                    Err(err)
-                }
-                (Ok(Err(err)), Some(Err(_))) => Err(err),
-                (Err(err), Some(Ok(system_artifacts))) => {
-                    cleanup_system_artifact(&system_artifacts.path);
-                    Err(err)
-                }
-                (Err(err), Some(Err(_))) => Err(err),
-                (Ok(Ok(artifacts)), None) => Ok(artifacts),
-                (Ok(Err(err)), None) => Err(err),
-                (Err(err), None) => Err(err),
-            }
+            merge_capture_results(mic_result, system_result)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -439,6 +424,7 @@ fn capture_until_stopped_device(
         mic_rate,
         system_path,
         system_rate,
+        system_finalize_warning: None,
     })
 }
 
@@ -503,6 +489,7 @@ fn capture_until_stopped_macos(
         mic_rate,
         system_path: None,
         system_rate: TARGET_RATE,
+        system_finalize_warning: None,
     })
 }
 
@@ -1100,6 +1087,58 @@ fn cleanup_system_artifact(path: &PathBuf) {
     let _ = remove_file(path);
 }
 
+/// Merges the microphone-thread result with the macOS system-audio stop
+/// result into a single `CaptureArtifacts` outcome.
+///
+/// The contract here is the centerpiece of recording reliability: a glitch
+/// in one channel must never destroy the data captured by the other.
+/// Specifically:
+/// - If the mic recording succeeded, we ALWAYS keep it. A failure to stop
+///   the system-audio stream is reported via `system_finalize_warning` so
+///   the caller can log it without failing the session.
+/// - If the system-audio stream produced a stop warning (file flushed but
+///   the stop call returned an error), we still attach the system path so
+///   the recording is complete; the warning propagates for visibility.
+/// - If the mic thread failed, the recording is unrecoverable; clean up
+///   any system-audio file so it doesn't linger as orphaned data.
+#[cfg(target_os = "macos")]
+fn merge_capture_results(
+    mic_result: Result<Result<CaptureArtifacts, String>, String>,
+    system_result: Option<
+        Result<crate::audio::macos_system_audio::NativeSystemAudioArtifacts, String>,
+    >,
+) -> Result<CaptureArtifacts, String> {
+    match (mic_result, system_result) {
+        (Ok(Ok(mut artifacts)), Some(Ok(system_artifacts))) => {
+            artifacts.system_path = Some(system_artifacts.path);
+            artifacts.system_rate = system_artifacts.sample_rate;
+            artifacts.system_finalize_warning = system_artifacts.stop_warning;
+            Ok(artifacts)
+        }
+        (Ok(Ok(mut artifacts)), Some(Err(err))) => {
+            // Critical reliability path: the mic captured fine, only the
+            // system-audio teardown failed. Preserve the mic data and
+            // surface the system error as a non-fatal warning.
+            artifacts.system_path = None;
+            artifacts.system_finalize_warning = Some(err);
+            Ok(artifacts)
+        }
+        (Ok(Err(err)), Some(Ok(system_artifacts))) => {
+            cleanup_system_artifact(&system_artifacts.path);
+            Err(err)
+        }
+        (Ok(Err(err)), Some(Err(_))) => Err(err),
+        (Err(err), Some(Ok(system_artifacts))) => {
+            cleanup_system_artifact(&system_artifacts.path);
+            Err(err)
+        }
+        (Err(err), Some(Err(_))) => Err(err),
+        (Ok(Ok(artifacts)), None) => Ok(artifacts),
+        (Ok(Err(err)), None) => Err(err),
+        (Err(err), None) => Err(err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1243,5 +1282,130 @@ mod tests {
             result,
             Err(ref err) if err == "native system capture failed"
         ));
+    }
+
+    // ── merge_capture_results ──────────────────────────────────────────────
+    //
+    // These tests pin down the contract that protects against the failure
+    // mode reported by users: a benign ScreenCaptureKit teardown error
+    // wiping out an otherwise-good microphone recording.
+
+    #[cfg(target_os = "macos")]
+    fn fake_mic_artifacts() -> CaptureArtifacts {
+        CaptureArtifacts {
+            mic_path: PathBuf::from("/tmp/bigecho_mic_fake.raw"),
+            mic_rate: 48_000,
+            system_path: None,
+            system_rate: 48_000,
+            system_finalize_warning: None,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn write_temp_file(name: &str, bytes: &[u8]) -> PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, bytes).expect("write temp file");
+        path
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn merge_keeps_mic_when_system_finalization_fails() {
+        // Mic captured cleanly but the macOS system audio teardown errored.
+        // Regression guard: previous logic deleted the mic file and returned
+        // Err — losing the user's primary recording over a benign glitch.
+        let mic_path = write_temp_file("bigecho_test_mic_keep.raw", b"mic data");
+        let mut artifacts = fake_mic_artifacts();
+        artifacts.mic_path = mic_path.clone();
+
+        let merged = merge_capture_results(
+            Ok(Ok(artifacts)),
+            Some(Err("Failed to stop native macOS system audio capture".to_string())),
+        )
+        .expect("mic recording must survive system-audio failure");
+
+        assert_eq!(merged.mic_path, mic_path, "mic path preserved");
+        assert!(mic_path.exists(), "mic file must NOT be deleted");
+        assert!(merged.system_path.is_none());
+        assert_eq!(
+            merged.system_finalize_warning.as_deref(),
+            Some("Failed to stop native macOS system audio capture"),
+            "warning surfaced for the caller to log"
+        );
+        let _ = std::fs::remove_file(&mic_path);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn merge_propagates_system_warning_when_both_succeed() {
+        let mut artifacts = fake_mic_artifacts();
+        artifacts.mic_path = PathBuf::from("/tmp/bigecho_mic_warn.raw");
+        let system_artifacts = crate::audio::macos_system_audio::NativeSystemAudioArtifacts {
+            path: PathBuf::from("/tmp/bigecho_sys_warn.raw"),
+            sample_rate: 48_000,
+            stop_warning: Some("teardown warning".to_string()),
+        };
+
+        let merged = merge_capture_results(Ok(Ok(artifacts)), Some(Ok(system_artifacts)))
+            .expect("both channels OK");
+
+        assert_eq!(
+            merged.system_path.as_deref(),
+            Some(std::path::Path::new("/tmp/bigecho_sys_warn.raw"))
+        );
+        assert_eq!(merged.system_finalize_warning.as_deref(), Some("teardown warning"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn merge_cleans_up_system_when_mic_fails() {
+        // If mic itself failed, system data alone is useless (no primary
+        // audio source). Ensure the orphaned system file is cleaned up.
+        let system_path = write_temp_file("bigecho_test_sys_orphan.raw", b"sys data");
+        let system_artifacts = crate::audio::macos_system_audio::NativeSystemAudioArtifacts {
+            path: system_path.clone(),
+            sample_rate: 48_000,
+            stop_warning: None,
+        };
+
+        let result = merge_capture_results(
+            Ok(Err("mic failed".to_string())),
+            Some(Ok(system_artifacts)),
+        );
+
+        assert!(matches!(result, Err(ref err) if err == "mic failed"));
+        assert!(!system_path.exists(), "system file should be cleaned up");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn merge_passes_through_no_system_capture() {
+        let mut artifacts = fake_mic_artifacts();
+        artifacts.mic_path = PathBuf::from("/tmp/bigecho_mic_only.raw");
+
+        let merged = merge_capture_results(Ok(Ok(artifacts)), None).expect("mic-only is OK");
+        assert!(merged.system_path.is_none());
+        assert!(merged.system_finalize_warning.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn merge_returns_mic_error_when_both_fail() {
+        let result = merge_capture_results(
+            Ok(Err("mic boom".to_string())),
+            Some(Err("system boom".to_string())),
+        );
+        // Mic error takes priority — it's the primary audio source.
+        assert!(matches!(result, Err(ref err) if err == "mic boom"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn merge_propagates_thread_panic_as_error() {
+        let result = merge_capture_results(
+            Err("Audio capture thread panicked".to_string()),
+            None,
+        );
+        assert!(matches!(result, Err(ref err) if err.contains("panicked")));
     }
 }

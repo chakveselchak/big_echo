@@ -130,6 +130,8 @@ export type YandexSyncLastRun = {
   started_at_iso: string;
   finished_at_iso: string;
   duration_ms: number;
+  total_objects: number;
+  not_synced: number;
   uploaded: number;
   skipped: number;
   failed: number;
@@ -137,3 +139,4 @@ export type YandexSyncLastRun = {
 };
 export type YandexSyncStatus = { is_running: boolean; last_run: YandexSyncLastRun | null };
 export type YandexSyncProgress = { current: number; total: number; rel_path: string };
+export type YandexSyncPreflight = { total_objects: number; not_synced: number };
