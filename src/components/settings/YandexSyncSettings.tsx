@@ -157,6 +157,13 @@ export function YandexSyncSettings({ settings, setSettings, isDirty, yandexSync:
         </Form.Item>
       </Flex>
 
+      {y.status.is_running && y.preflight && (
+        <div style={{ marginBottom: 12 }}>
+          Всего объектов: {y.preflight.total_objects}, не синхронизировано:{" "}
+          {y.preflight.not_synced}
+        </div>
+      )}
+
       {y.status.is_running && y.progress && (
         <div style={{ marginBottom: 12 }}>
           <div>
@@ -181,6 +188,10 @@ export function YandexSyncSettings({ settings, setSettings, isDirty, yandexSync:
               <div>
                 Last sync: {new Date(y.status.last_run.finished_at_iso).toLocaleString()} (
                 {formatDuration(y.status.last_run.duration_ms)})
+              </div>
+              <div>
+                Всего объектов: {y.status.last_run.total_objects}, не синхронизировано:{" "}
+                {y.status.last_run.not_synced}
               </div>
               <div>
                 Uploaded {y.status.last_run.uploaded} · Skipped {y.status.last_run.skipped} · Failed{" "}

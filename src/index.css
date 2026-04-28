@@ -334,6 +334,47 @@ select {
   box-shadow: 0 6px 14px rgba(0, 86, 200, 0.22);
 }
 
+.nexara-balance {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+}
+
+.nexara-balance-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex-shrink: 0;
+  margin-right: 10px;
+}
+
+.nexara-balance-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #2a2f37;
+  white-space: nowrap;
+}
+
+.nexara-balance-value.is-loading {
+  opacity: 0.5;
+}
+
+.nexara-balance-value.is-error {
+  color: var(--danger);
+}
+
+.nexara-balance-refresh {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.nexara-balance-refresh svg {
+  width: 13px;
+  height: 13px;
+}
+
 .form-grid {
   display: grid;
   gap: 10px;

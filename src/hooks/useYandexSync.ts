@@ -4,12 +4,14 @@ import { tauriInvoke } from "../lib/tauri";
 import type {
   SecretSaveState,
   YandexSyncLastRun,
+  YandexSyncPreflight,
   YandexSyncProgress,
   YandexSyncStatus,
 } from "../types";
 
 const POLL_MS = 2000;
 const PROGRESS_EVENT = "yandex-sync-progress";
+const PREFLIGHT_EVENT = "yandex-sync-preflight";
 const FINISHED_EVENT = "yandex-sync-finished";
 
 export function useYandexSync(enabled: boolean) {
@@ -17,6 +19,7 @@ export function useYandexSync(enabled: boolean) {
   const [tokenState, setTokenState] = useState<SecretSaveState>("unknown");
   const [status, setStatus] = useState<YandexSyncStatus>({ is_running: false, last_run: null });
   const [progress, setProgress] = useState<YandexSyncProgress | null>(null);
+  const [preflight, setPreflight] = useState<YandexSyncPreflight | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshHasToken = useCallback(async () => {
@@ -80,14 +83,19 @@ export function useYandexSync(enabled: boolean) {
 
   useEffect(() => {
     if (!enabled) return;
+    const unlistenPreflight = listen<YandexSyncPreflight>(PREFLIGHT_EVENT, (e) => {
+      setPreflight(e.payload);
+    });
     const unlistenProgress = listen<YandexSyncProgress>(PROGRESS_EVENT, (e) => {
       setProgress(e.payload);
     });
     const unlistenFinished = listen<YandexSyncLastRun>(FINISHED_EVENT, (e) => {
       setProgress(null);
+      setPreflight(null);
       setStatus({ is_running: false, last_run: e.payload });
     });
     return () => {
+      void unlistenPreflight.then((fn) => fn());
       void unlistenProgress.then((fn) => fn());
       void unlistenFinished.then((fn) => fn());
     };
@@ -112,6 +120,7 @@ export function useYandexSync(enabled: boolean) {
     tokenState,
     status,
     progress,
+    preflight,
     refreshHasToken,
     refreshStatus,
     saveToken,

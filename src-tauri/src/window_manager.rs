@@ -65,17 +65,6 @@ pub(crate) fn focus_main_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn toggle_main_window_visibility(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().map_err(|e| e.to_string())? {
-            window.hide().map_err(|e| e.to_string())?;
-        } else {
-            focus_main_window(app)?;
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn toggle_tray_window_visibility(
     app: &AppHandle,
     anchor: Option<PhysicalPosition<f64>>,

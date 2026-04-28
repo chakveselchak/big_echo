@@ -31,6 +31,12 @@ pub struct MacosSystemAudioPermissionStatus {
 pub struct NativeSystemAudioArtifacts {
     pub path: PathBuf,
     pub sample_rate: u32,
+    /// Set when the Swift bridge reported a non-success status during
+    /// teardown but the audio file was still written and synced (e.g.
+    /// `SCStream.stopCapture` returned an error after `defer` already
+    /// closed and flushed the file). Callers should NOT discard the
+    /// recording in this case — the data on disk is recoverable.
+    pub stop_warning: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -143,13 +149,38 @@ impl NativeSystemAudioCapture {
     pub fn stop(self) -> Result<NativeSystemAudioArtifacts, String> {
         #[cfg(target_os = "macos")]
         {
-            if !unsafe { bigecho_stop_system_audio_capture(self.handle) } {
-                return Err("Failed to stop native macOS system audio capture".to_string());
+            let stop_ok = unsafe { bigecho_stop_system_audio_capture(self.handle) };
+            // ScreenCaptureKit's `SCStream.stopCapture` can return errors during
+            // teardown (timing, content-source invalidation, etc.) AFTER the
+            // Swift bridge has already flushed and closed the output file via
+            // its `defer` block. In those cases the audio data on disk is
+            // intact; treat a non-empty file as a recoverable warning instead
+            // of a hard failure so the recording survives.
+            let bytes_on_disk = std::fs::metadata(&self.path)
+                .map(|meta| meta.len())
+                .unwrap_or(0);
+            if stop_ok {
+                Ok(NativeSystemAudioArtifacts {
+                    path: self.path,
+                    sample_rate: self.sample_rate,
+                    stop_warning: None,
+                })
+            } else if bytes_on_disk > 0 {
+                Ok(NativeSystemAudioArtifacts {
+                    path: self.path,
+                    sample_rate: self.sample_rate,
+                    stop_warning: Some(
+                        "macOS system audio finalization returned an error; \
+                         recovered captured data from the output file"
+                            .to_string(),
+                    ),
+                })
+            } else {
+                // No data on disk and Swift refused to confirm — drop the
+                // empty file so it doesn't litter the session directory.
+                let _ = std::fs::remove_file(&self.path);
+                Err("Failed to stop native macOS system audio capture".to_string())
             }
-            Ok(NativeSystemAudioArtifacts {
-                path: self.path,
-                sample_rate: self.sample_rate,
-            })
         }
 
         #[cfg(not(target_os = "macos"))]

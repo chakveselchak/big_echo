@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter};
 
 pub(crate) const TOKEN_KEY: &str = "YANDEX_DISK_OAUTH_TOKEN";
 pub(crate) const PROGRESS_EVENT: &str = "yandex-sync-progress";
+pub(crate) const PREFLIGHT_EVENT: &str = "yandex-sync-preflight";
 pub(crate) const FINISHED_EVENT: &str = "yandex-sync-finished";
 
 pub(crate) fn resolved_local_root(app_data_dir: &Path, recording_root: &str) -> PathBuf {
@@ -43,6 +44,15 @@ pub(crate) async fn execute_sync<R: tauri::Runtime>(
 
     let app_for_progress = app.clone();
     let emit = move |p: SyncProgress| match p {
+        SyncProgress::Started {
+            total_objects,
+            not_synced,
+        } => {
+            let payload = serde_json::json!({
+                "total_objects": total_objects, "not_synced": not_synced,
+            });
+            let _ = app_for_progress.emit(PREFLIGHT_EVENT, payload);
+        }
         SyncProgress::Item {
             current,
             total,
@@ -56,7 +66,6 @@ pub(crate) async fn execute_sync<R: tauri::Runtime>(
         SyncProgress::Finished(summary) => {
             let _ = app_for_progress.emit(FINISHED_EVENT, &summary);
         }
-        SyncProgress::Started { .. } => {}
     };
 
     Ok(run(&params, api, &emit).await)

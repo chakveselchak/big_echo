@@ -17,6 +17,7 @@ use app_state::StartRecordingResponse;
 use app_state::{AppDirs, AppState};
 use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
+use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
@@ -52,7 +53,7 @@ use storage::session_store::save_meta;
 use storage::sqlite_repo::{add_event, upsert_session};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Listener, Manager, RunEvent};
+use tauri::{AppHandle, Listener, Manager, RunEvent};
 
 #[cfg(test)]
 const MAX_PIPELINE_RETRY_ATTEMPTS: i64 = 4;
@@ -172,27 +173,38 @@ pub(crate) fn stop_active_recording_internal(
         .lock()
         .map_err(|_| "capture state lock poisoned".to_string())?;
     let mut finalize_error: Option<String> = None;
+    let mut finalize_warning: Option<String> = None;
     if let Some(capture) = cap_guard.take() {
         match capture.stop_and_take_artifacts() {
-            Ok(artifacts) => match audio::file_writer::write_capture_to_audio_file(
-                &audio_output_path,
-                &settings.audio_format,
-                &artifacts,
-                settings.opus_bitrate_kbps,
-            ) {
-                Ok(()) => audio::capture::cleanup_artifacts(&artifacts),
-                Err(err) => {
-                    let preserved = preserve_capture_artifacts_for_recovery(&abs_dir, &artifacts)?;
-                    let recovery_paths = preserved
-                        .iter()
-                        .map(|v| v.to_string_lossy().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    finalize_error = Some(format!(
-                        "Audio encoding failed: {err}. Raw capture preserved: {recovery_paths}"
-                    ));
+            Ok(artifacts) => {
+                // A non-fatal warning here means one channel (typically the
+                // macOS system-audio stream) failed to finalize cleanly while
+                // the other captured fine. Surface the message via events but
+                // proceed with encoding — the user's primary audio is intact.
+                if let Some(warning) = artifacts.system_finalize_warning.clone() {
+                    finalize_warning = Some(warning);
                 }
-            },
+                match audio::file_writer::write_capture_to_audio_file(
+                    &audio_output_path,
+                    &settings.audio_format,
+                    &artifacts,
+                    settings.opus_bitrate_kbps,
+                ) {
+                    Ok(()) => audio::capture::cleanup_artifacts(&artifacts),
+                    Err(err) => {
+                        let preserved =
+                            preserve_capture_artifacts_for_recovery(&abs_dir, &artifacts)?;
+                        let recovery_paths = preserved
+                            .iter()
+                            .map(|v| v.to_string_lossy().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        finalize_error = Some(format!(
+                            "Audio encoding failed: {err}. Raw capture preserved: {recovery_paths}"
+                        ));
+                    }
+                }
+            }
             Err(err) => {
                 finalize_error = Some(format!("Audio capture finalization failed: {err}"));
             }
@@ -228,6 +240,9 @@ pub(crate) fn stop_active_recording_internal(
     }
 
     meta.status = SessionStatus::Recorded;
+    if let Some(warning) = &finalize_warning {
+        meta.errors.push(warning.clone());
+    }
     save_meta(&abs_dir.join("meta.json"), &meta)?;
     upsert_session(&data_dir, &meta, &abs_dir, &abs_dir.join("meta.json"))?;
     add_event(
@@ -236,6 +251,14 @@ pub(crate) fn stop_active_recording_internal(
         "recording_stopped",
         "Audio capture stopped",
     )?;
+    if let Some(warning) = &finalize_warning {
+        add_event(
+            &data_dir,
+            &meta.session_id,
+            "recording_finalize_warning",
+            warning,
+        )?;
+    }
 
     if should_auto_run_pipeline_after_stop(&settings) {
         let dirs_for_pipeline = dirs.clone();
@@ -322,17 +345,7 @@ fn main() {
             });
         }
 
-        let open_item = MenuItem::with_id(app, "open", "Open BigEcho", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let recorder_item = MenuItem::with_id(app, "recorder", "Recorder", true, None::<&str>)
-            .map_err(|e| e.to_string())?;
-        let toggle_item =
-            MenuItem::with_id(app, "toggle", "Show/Hide BigEcho", true, None::<&str>)
-                .map_err(|e| e.to_string())?;
-        let start_item =
-            MenuItem::with_id(app, "start", "Start Recording", true, None::<&str>)
-                .map_err(|e| e.to_string())?;
-        let stop_item = MenuItem::with_id(app, "stop", "Stop Recording", true, None::<&str>)
+        let open_item = MenuItem::with_id(app, "open", "Open", true, None::<&str>)
             .map_err(|e| e.to_string())?;
         let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)
             .map_err(|e| e.to_string())?;
@@ -341,15 +354,7 @@ fn main() {
 
         let menu = Menu::with_items(
             app,
-            &[
-                &open_item,
-                &recorder_item,
-                &toggle_item,
-                &start_item,
-                &stop_item,
-                &settings_item,
-                &quit_item,
-            ],
+            &[&open_item, &settings_item, &quit_item],
         )
         .map_err(|e| e.to_string())?;
 
@@ -372,27 +377,6 @@ fn main() {
                 match event.id().as_ref() {
                     "open" => {
                         let _ = window_manager::focus_main_window(app);
-                    }
-                    "toggle" => {
-                        let _ = window_manager::toggle_main_window_visibility(app);
-                    }
-                    "recorder" => {
-                        let _ = window_manager::open_tray_window_internal(app);
-                    }
-                    "start" => {
-                        let _ = window_manager::focus_main_window(app);
-                        let _ = app.emit("tray:start", ());
-                    }
-                    "stop" => {
-                        let _ = app.emit("tray:stop", ());
-                        let state = app.state::<AppState>();
-                        let dirs = app.state::<AppDirs>();
-                        let _ = stop_active_recording_internal(
-                            dirs.inner(),
-                            state.inner(),
-                            None,
-                            Some(app),
-                        );
                     }
                     "settings" => {
                         let _ = window_manager::open_settings_window_internal(app);
@@ -485,7 +469,8 @@ fn main() {
             yandex_sync_clear_token,
             yandex_sync_has_token,
             yandex_sync_status,
-            yandex_sync_now
+            yandex_sync_now,
+            get_nexara_balance
         ])
         .build(tauri::generate_context!())
         .expect("error while building bigecho app");
@@ -570,6 +555,7 @@ mod ipc_runtime_tests {
             mic_rate: 48_000,
             system_path: Some(sys_src.clone()),
             system_rate: 48_000,
+            system_finalize_warning: None,
         };
 
         let preserved = preserve_capture_artifacts_for_recovery(&session_dir, &artifacts)

@@ -138,6 +138,13 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
     private var closedFile = false
     private var latestLevel: Float = 0
     private var isMuted = false
+    /// Tracks whether any sample buffer was successfully written to disk.
+    /// `SCStream.stopCapture` regularly returns benign teardown errors after
+    /// the audio file has already been flushed. When that happens we still
+    /// have valid data on disk; checking this flag lets the C bridge return
+    /// success in that case instead of forcing the Rust side to discard a
+    /// fully recorded file.
+    private var didWriteAnyData = false
 
     init(outputURL: URL) throws {
         self.outputURL = outputURL
@@ -253,9 +260,18 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
             stateLock.unlock()
             let dataToWrite = muted ? Data(count: pcmData.count) : pcmData
             try fileHandle.write(contentsOf: dataToWrite)
+            stateLock.lock()
+            didWriteAnyData = true
+            stateLock.unlock()
         } catch {
             recordRuntimeError(error)
         }
+    }
+
+    func hasWrittenData() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return didWriteAnyData
     }
 
     private func recordRuntimeError(_ error: Error) {
@@ -618,7 +634,12 @@ public func bigecho_stop_system_audio_capture(handle: Int64) -> Bool {
         return true
     } catch {
         logSystemAudioError("Failed to stop native ScreenCaptureKit system audio capture", error: error)
-        return false
+        // ScreenCaptureKit can throw teardown errors after the delegate has
+        // already written valid samples and `defer closeFileIfNeeded()` has
+        // flushed them to disk. Treat that as a recoverable success: the
+        // recording survives, and only "no data ever written" is a true
+        // failure for the caller.
+        return captureSession.hasWrittenData()
     }
 }
 

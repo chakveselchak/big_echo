@@ -31,11 +31,11 @@ jobs:
             })
             return data.id
 
-      - name: Attach README.md as release asset
+      - name: Attach README.txt as release asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" dmg-assets/README.md --clobber
+        run: gh release upload "$TAG" dmg-assets/README.txt --clobber
 
   build:
     needs: create-release
@@ -92,7 +92,7 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
-      - name: Repack DMG with README.md and re-upload
+      - name: Repack DMG with README.txt and re-upload
         if: startsWith(matrix.runner, 'macos-')
         continue-on-error: true
         env:
@@ -127,7 +127,7 @@ jobs:
 
           # Add README alongside the .app and an Applications symlink so the
           # DMG still offers the standard drag-to-install target.
-          cp dmg-assets/README.md "$STAGE/README.md"
+          cp dmg-assets/README.txt "$STAGE/README.txt"
           ln -s /Applications "$STAGE/Applications"
 
           # Replace the original DMG. Rebuilding (instead of mounting rw +

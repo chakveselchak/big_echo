@@ -12,6 +12,14 @@ pub struct LastRunSummary {
     pub started_at_iso: String,
     pub finished_at_iso: String,
     pub duration_ms: u64,
+    /// Total local objects considered after filtering (e.g. `.DS_Store`
+    /// excluded). Snapshot taken during pre-flight; not affected by upload
+    /// outcomes.
+    pub total_objects: u32,
+    /// Number of local objects that needed upload at sync start (missing
+    /// remotely or remote size differed). Snapshot taken during pre-flight,
+    /// before uploads run, so it stays stable for the whole report.
+    pub not_synced: u32,
     pub uploaded: u32,
     pub skipped: u32,
     pub failed: u32,
@@ -69,6 +77,8 @@ mod tests {
                 started_at_iso: "2026-04-24T10:00:00+00:00".into(),
                 finished_at_iso: "2026-04-24T10:00:10+00:00".into(),
                 duration_ms: 10_000,
+                total_objects: 5,
+                not_synced: 2,
                 uploaded: 2,
                 skipped: 3,
                 failed: 0,
