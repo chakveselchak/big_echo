@@ -6,9 +6,10 @@ import { renderHighlightedText } from "../../lib/appUtils";
 type ArtifactModalProps = {
   preview: SessionArtifactPreview | null;
   onClose: () => void;
+  onOpenInEditor?: () => void | Promise<void>;
 };
 
-export function ArtifactModal({ preview, onClose }: ArtifactModalProps) {
+export function ArtifactModal({ preview, onClose, onOpenInEditor }: ArtifactModalProps) {
   const bodyRef = useRef<HTMLPreElement | null>(null);
 
   useEffect(() => {
@@ -18,13 +19,24 @@ export function ArtifactModal({ preview, onClose }: ArtifactModalProps) {
     firstMatch.scrollIntoView({ block: "center" });
   }, [preview]);
 
+  const footer = onOpenInEditor
+    ? [
+        <Button key="open" type="primary" onClick={() => void onOpenInEditor()}>
+          Открыть
+        </Button>,
+        <Button key="close" onClick={onClose}>
+          Закрыть
+        </Button>,
+      ]
+    : [<Button key="close" onClick={onClose}>Закрыть</Button>];
+
   return (
     <Modal
       open={Boolean(preview)}
       title="Просмотр артефакта"
       closable={false}
       onCancel={onClose}
-      footer={[<Button key="close" onClick={onClose}>Закрыть</Button>]}
+      footer={footer}
       aria-label="Просмотр артефакта"
     >
       {preview && (

@@ -384,6 +384,14 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     }
   }
 
+  async function openArtifactInEditor(sessionId: string, artifactKind: "transcript" | "summary") {
+    try {
+      await tauriInvoke<string>("open_session_artifact", { sessionId, artifactKind });
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
+    }
+  }
+
   function requestDeleteSession(sessionId: string, force: boolean) {
     setDeleteTarget({ sessionId, force });
   }
@@ -666,6 +674,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     loadSessions,
     openSessionFolder,
     openSessionArtifact,
+    openArtifactInEditor,
     pipelineStateBySession,
     requestDeleteAudio,
     requestDeleteSession,

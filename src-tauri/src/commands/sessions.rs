@@ -1214,6 +1214,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: String::new(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),

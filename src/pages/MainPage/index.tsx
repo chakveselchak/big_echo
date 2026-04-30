@@ -6,6 +6,7 @@ import { initializeAnalytics } from "../../lib/analytics";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 import type { StartResponse } from "../../types";
 import { NexaraBalance } from "../../components/NexaraBalance";
+import { TranscriptionProviderSelect } from "../../components/TranscriptionProviderSelect";
 import { SessionFilters } from "../../components/sessions/SessionFilters";
 import { SessionList } from "../../components/sessions/SessionList";
 import { SettingsPage } from "../SettingsPage";
@@ -17,11 +18,10 @@ type MainTab = "sessions" | "settings" | "new-version";
 export function MainPage() {
   const [mainTab, setMainTab] = useState<MainTab>("sessions");
   // Once Settings has been opened, keep its subtree mounted and toggle with
-  // `display: none`. First click stays lazy so the "defer get_settings until
-  // Settings opens" contract is preserved; subsequent switches are a display
-  // swap and cost nothing. SettingsPage itself renders a LoadingPlaceholder
-  // until `useSettingsForm` finishes loading, so the user sees the loader
-  // immediately on first click.
+  // `display: none`. The full settings form is only constructed on first
+  // click; subsequent switches are a display swap and cost nothing.
+  // SettingsPage renders a LoadingPlaceholder until `useSettingsForm`
+  // finishes loading, so the user sees the loader immediately on first click.
   const [settingsMounted, setSettingsMounted] = useState(false);
   const handleTabSelect = useCallback((tab: MainTab) => {
     if (tab === "settings") setSettingsMounted(true);
@@ -29,6 +29,7 @@ export function MainPage() {
   }, []);
   const [topic, setTopic] = useState("");
   const [source, setSource] = useState("slack");
+  const [transcriptionProvider, setTranscriptionProvider] = useState<string | null>(null);
   const [session, setSession] = useState<StartResponse | null>(null);
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
@@ -59,6 +60,7 @@ export function MainPage() {
     loadSessions,
     openSessionFolder,
     openSessionArtifact,
+    openArtifactInEditor,
     pipelineStateBySession,
     requestDeleteAudio,
     requestDeleteSession,
@@ -177,7 +179,10 @@ export function MainPage() {
               🔥 New version
             </button>
           )}
-          <NexaraBalance />
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {transcriptionProvider === "nexara" && <NexaraBalance />}
+            <TranscriptionProviderSelect onChange={setTranscriptionProvider} />
+          </div>
         </div>
         {mainTab === "sessions" && (
           <SessionFilters
@@ -227,6 +232,7 @@ export function MainPage() {
           closeArtifactPreview={closeArtifactPreview}
           openSessionFolder={openSessionFolder}
           openSessionArtifact={openSessionArtifact}
+          openArtifactInEditor={openArtifactInEditor}
           getText={getText}
           getSummary={getSummary}
           saveSessionDetails={saveSessionDetails}

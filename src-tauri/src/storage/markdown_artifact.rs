@@ -24,8 +24,38 @@ pub fn render_frontmatter(meta: &SessionMeta) -> String {
     rendered.push_str(&render_notes(&meta.notes));
     rendered.push_str("topic: ");
     rendered.push_str(&yaml_quote(meta.topic.trim()));
-    rendered.push_str("\n---\n\n");
+    rendered.push('\n');
+    rendered.push_str(&render_date(meta));
+    rendered.push_str("---\n\n");
     rendered
+}
+
+fn render_date(meta: &SessionMeta) -> String {
+    // ISO YYYY-MM-DD (unquoted) so YAML parsers — and Obsidian Properties —
+    // recognise the field as a Date, not a string. Visual format in the UI
+    // is up to the viewer (Obsidian respects user locale preferences).
+    let iso = iso_date_from_rfc3339(&meta.started_at_iso)
+        .or_else(|| iso_date_from_rfc3339(&meta.created_at_iso));
+    match iso {
+        Some(date) => format!("date: {date}\n"),
+        None => String::new(),
+    }
+}
+
+fn iso_date_from_rfc3339(value: &str) -> Option<String> {
+    let prefix = value.get(..10)?;
+    let bytes = prefix.as_bytes();
+    if bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[..4].iter().all(|b| b.is_ascii_digit())
+        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
+    {
+        Some(prefix.to_string())
+    } else {
+        None
+    }
 }
 
 pub fn strip_frontmatter(text: &str) -> &str {
@@ -143,7 +173,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn sample_meta() -> SessionMeta {
-        SessionMeta::new(
+        let mut meta = SessionMeta::new(
             "session-md".to_string(),
             "zoom".to_string(),
             vec![
@@ -153,7 +183,10 @@ mod tests {
             ],
             "Renewal sync".to_string(),
             "Check contract renewal".to_string(),
-        )
+        );
+        meta.display_date_ru = "29.04.2026".to_string();
+        meta.started_at_iso = "2026-04-29T10:00:00+03:00".to_string();
+        meta
     }
 
     #[test]
@@ -164,7 +197,7 @@ mod tests {
 
         assert_eq!(
             frontmatter,
-            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\n---\n\n"
+            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\ndate: 2026-04-29\n---\n\n"
         );
     }
 
@@ -177,7 +210,7 @@ mod tests {
 
         assert_eq!(
             frontmatter,
-            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: |\n  Line one\n  Line two\n  \n  Line four\ntopic: \"Renewal sync\"\n---\n\n"
+            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: |\n  Line one\n  Line two\n  \n  Line four\ntopic: \"Renewal sync\"\ndate: 2026-04-29\n---\n\n"
         );
     }
 
@@ -208,7 +241,7 @@ mod tests {
 
         assert_eq!(
             artifact,
-            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\n---\n\n---\n\n# Summary\n\n---\n\nBody"
+            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\ndate: 2026-04-29\n---\n\n---\n\n# Summary\n\n---\n\nBody"
         );
     }
 
@@ -227,7 +260,7 @@ mod tests {
         let refreshed = std::fs::read_to_string(&path).expect("read markdown");
         assert_eq!(
             refreshed,
-            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\n---\n\n# Transcript\n\nOriginal body\n"
+            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\ndate: 2026-04-29\n---\n\n# Transcript\n\nOriginal body\n"
         );
     }
 
@@ -241,7 +274,7 @@ mod tests {
         let written = std::fs::read_to_string(&path).expect("read artifact");
         assert_eq!(
             written,
-            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\n---\n\n# Summary\n"
+            "---\nsource: \"zoom\"\ntags:\n  - \"project/acme\"\n  - \"call/sales\"\nnotes: \"Check contract renewal\"\ntopic: \"Renewal sync\"\ndate: 2026-04-29\n---\n\n# Summary\n"
         );
     }
 

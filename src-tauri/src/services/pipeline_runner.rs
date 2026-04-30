@@ -173,15 +173,19 @@ pub async fn run_pipeline_core(
         return Err(detail);
     }
 
-    let transcription_secret_name = if settings.transcription_provider == "salute_speech" {
-        "SALUTE_SPEECH_AUTH_KEY"
-    } else {
-        "NEXARA_API_KEY"
+    let transcription_secret_name = match settings.transcription_provider.as_str() {
+        "salute_speech" => "SALUTE_SPEECH_AUTH_KEY",
+        "apple_speech" => "",
+        _ => "NEXARA_API_KEY",
     };
     let (transcription_secret, transcription_secret_lookup_err) =
-        match get_secret(&dirs.app_data_dir, transcription_secret_name) {
-            Ok(value) => (value, None),
-            Err(err) => (String::new(), Some(err)),
+        if transcription_secret_name.is_empty() {
+            (String::new(), None)
+        } else {
+            match get_secret(&dirs.app_data_dir, transcription_secret_name) {
+                Ok(value) => (value, None),
+                Err(err) => (String::new(), Some(err)),
+            }
         };
     let openai_key = get_secret(&dirs.app_data_dir, "OPENAI_API_KEY").unwrap_or_default();
 
@@ -388,6 +392,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),

@@ -1,7 +1,7 @@
 import { PublicSettings } from "../types";
 
 const allowedAudioFormats = new Set(["opus", "mp3", "m4a", "ogg", "wav"]);
-const allowedTranscriptionProviders = new Set(["nexara", "salute_speech"]);
+const allowedTranscriptionProviders = new Set(["nexara", "salute_speech", "apple_speech"]);
 const saluteSpeechSupportedAudioFormats = new Set(["opus", "mp3", "wav"]);
 const saluteSpeechAllowedScopes = new Set([
   "SALUTE_SPEECH_PERS",

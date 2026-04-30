@@ -282,7 +282,33 @@ pub async fn transcribe_audio_logged(
     if settings.transcription_provider == "salute_speech" {
         return transcribe_audio_with_salutespeech(settings, api_key, audio_path, logger).await;
     }
+    if settings.transcription_provider == "apple_speech" {
+        return transcribe_audio_with_apple_speech(settings, audio_path).await;
+    }
     transcribe_audio_with_nexara(settings, api_key, audio_path, logger).await
+}
+
+async fn transcribe_audio_with_apple_speech(
+    settings: &PublicSettings,
+    audio_path: &Path,
+) -> Result<String, String> {
+    let availability = crate::services::apple_speech::availability();
+    if !availability.supported {
+        return Err(format!(
+            "Apple Speech is not available: {}",
+            availability.reason.unwrap_or_else(|| "unknown".into())
+        ));
+    }
+    let path_str = audio_path
+        .to_str()
+        .ok_or_else(|| "Audio path is not UTF-8".to_string())?;
+    let locale = if settings.apple_speech_locale.trim().is_empty() {
+        "ru_RU"
+    } else {
+        settings.apple_speech_locale.trim()
+    };
+    let result = crate::services::apple_speech::transcribe(path_str, locale).await?;
+    Ok(result.text)
 }
 
 async fn transcribe_audio_with_nexara(
@@ -1289,6 +1315,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1365,6 +1392,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1469,6 +1497,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1604,6 +1633,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1711,6 +1741,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -1835,6 +1866,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -2006,6 +2038,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: String::new(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -2077,6 +2110,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: format!("http://{addr}/summary"),
             summary_prompt: "Сделай саммари: решения, риски, action items".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -2131,6 +2165,7 @@ mod tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "https://example.com/summary".to_string(),
             summary_prompt: "Системный промпт".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),

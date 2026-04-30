@@ -1,3 +1,4 @@
+pub mod apple_speech;
 pub mod nexara;
 pub mod recording;
 pub mod sessions;

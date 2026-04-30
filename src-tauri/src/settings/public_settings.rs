@@ -29,6 +29,7 @@ pub struct PublicSettings {
     pub salute_speech_language: String,
     pub salute_speech_sample_rate: u32,
     pub salute_speech_channels_count: u32,
+    pub apple_speech_locale: String,
     pub summary_url: String,
     pub summary_prompt: String,
     pub openai_model: String,
@@ -60,6 +61,7 @@ impl Default for PublicSettings {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: "http://127.0.0.1:8317/v1/chat/completions".to_string(),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-5.1-codex-mini".to_string(),
@@ -116,7 +118,9 @@ impl PublicSettings {
         ) {
             return Err("Invalid audio format".to_string());
         }
-        if self.transcription_provider != "nexara" && self.transcription_provider != "salute_speech"
+        if self.transcription_provider != "nexara"
+            && self.transcription_provider != "salute_speech"
+            && self.transcription_provider != "apple_speech"
         {
             return Err("Invalid transcription provider".to_string());
         }

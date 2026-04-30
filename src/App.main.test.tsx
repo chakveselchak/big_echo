@@ -106,18 +106,12 @@ describe("App main window", () => {
     invokeMock.mockImplementation(defaultInvokeImpl);
   });
 
-  it("defers settings loading until the Settings tab opens", async () => {
-    const user = userEvent.setup();
+  it("loads sessions and settings on initial render", async () => {
     render(<App />);
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("list_sessions");
     });
-
-    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "get_settings")).toBe(false);
-
-    await user.click(screen.getByRole("tab", { name: "Settings" }));
-
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("get_settings");
     });
