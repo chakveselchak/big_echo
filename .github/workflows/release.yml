@@ -46,7 +46,7 @@ jobs:
           - runner: windows-latest
             target: ''
             args: '--config src-tauri/tauri.windows.conf.json'
-          - runner: macos-latest
+          - runner: macos-26
             target: aarch64-apple-darwin
             args: '--target aarch64-apple-darwin'
           - runner: macos-15-intel
