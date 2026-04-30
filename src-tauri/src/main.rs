@@ -822,7 +822,7 @@ mod ipc_runtime_tests {
 
     fn expected_pipeline_markdown_artifact(body: &str) -> String {
         format!(
-            "---\nsource: \"zoom\"\ntags:\n  - \"zoom\"\nnotes: \"Notes\"\ntopic: \"Weekly sync\"\ndate: 01.01.2026\n---\n\n{body}"
+            "---\nsource: \"zoom\"\ntags:\n  - \"zoom\"\nnotes: \"Notes\"\ntopic: \"Weekly sync\"\ndate: 2026-01-01\n---\n\n{body}"
         )
     }
 
@@ -881,6 +881,7 @@ mod ipc_runtime_tests {
             "Notes".to_string(),
         );
         meta.display_date_ru = "01.01.2026".to_string();
+        meta.started_at_iso = "2026-01-01T10:00:00+03:00".to_string();
         meta.artifacts.audio_file =
             crate::audio::file_writer::audio_file_name(&settings.audio_format);
         meta.artifacts.transcript_file = "transcript.txt".to_string();
@@ -941,6 +942,7 @@ mod ipc_runtime_tests {
             "Notes".to_string(),
         );
         meta.display_date_ru = "01.01.2026".to_string();
+        meta.started_at_iso = "2026-01-01T10:00:00+03:00".to_string();
         meta.artifacts.audio_file = "audio.opus".to_string();
         meta.artifacts.transcript_file = "transcript.txt".to_string();
         meta.artifacts.summary_file = "summary.md".to_string();
