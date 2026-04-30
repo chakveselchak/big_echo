@@ -6,5 +6,7 @@
   <string>BigEcho uses macOS system audio capture to record meetings.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>BigEcho uses the microphone and macOS system audio capture to record meetings.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>BigEcho uses on-device speech recognition to transcribe your recordings locally on macOS 26+ Apple Silicon.</string>
 </dict>
 </plist>

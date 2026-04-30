@@ -54,6 +54,7 @@ type SessionListProps = {
   closeArtifactPreview: () => void;
   openSessionFolder: (dir: string) => void;
   openSessionArtifact: (sessionId: string, kind: "transcript" | "summary") => void;
+  openArtifactInEditor: (sessionId: string, kind: "transcript" | "summary") => Promise<void> | void;
   getText: (sessionId: string) => void;
   getSummary: (sessionId: string) => void;
   saveSessionDetails: (sessionId: string, detail: SessionMetaView) => Promise<boolean>;
@@ -89,6 +90,7 @@ export function SessionList({
   closeArtifactPreview,
   openSessionFolder,
   openSessionArtifact,
+  openArtifactInEditor,
   getText,
   getSummary,
   saveSessionDetails,
@@ -497,6 +499,11 @@ export function SessionList({
       <ArtifactModal
         preview={artifactPreview}
         onClose={closeArtifactPreview}
+        onOpenInEditor={
+          artifactPreview
+            ? () => openArtifactInEditor(artifactPreview.sessionId, artifactPreview.artifactKind)
+            : undefined
+        }
       />
 
       <SummaryPromptModal

@@ -10,6 +10,7 @@ export type PublicSettings = {
   salute_speech_language: string;
   salute_speech_sample_rate: number;
   salute_speech_channels_count: number;
+  apple_speech_locale: string;
   summary_url: string;
   summary_prompt: string;
   openai_model: string;
@@ -103,7 +104,25 @@ export type SessionArtifactPreview = {
 };
 
 export const fixedSources = ["slack", "zoom", "telemost", "telegram", "browser", "facetime", "other"];
-export const transcriptionProviderOptions = ["nexara", "salute_speech"];
+export const transcriptionProviderOptions = ["nexara", "salute_speech", "apple_speech"];
+
+export type AppleSpeechAvailability = {
+  supported: boolean;
+  reason?: string | null;
+};
+
+export type AppleSpeechCheckResult = {
+  locale: string;
+  resolved: string;
+  supported: boolean;
+  installed: boolean;
+  assetStatus: "installed" | "supported" | "downloading" | "unsupported" | "unknown";
+};
+
+export type AppleSpeechDownloadProgress = {
+  locale: string;
+  progress: number;
+};
 export const transcriptionTaskOptions = ["transcribe", "diarize"];
 export const diarizationSettingOptions = ["general", "meeting", "telephonic"];
 export const audioFormatOptions = ["opus", "mp3", "m4a", "ogg", "wav"];

@@ -4,6 +4,8 @@ src/.DS_Store
 .superpowers/
 node_modules
 src-tauri/target
+src-tauri/binaries
+apple-speech-sidecar/.build
 dist
 .idea
 .vscode

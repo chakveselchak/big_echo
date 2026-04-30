@@ -17,6 +17,10 @@ use app_state::StartRecordingResponse;
 use app_state::{AppDirs, AppState};
 use chrono::{DateTime, Local};
 use command_core::{ensure_stop_session_matches, PipelineInvocation};
+use commands::apple_speech::{
+    apple_speech_check_locale, apple_speech_download_locale, apple_speech_open_dictation_settings,
+    apple_speech_transcribe, get_apple_speech_availability,
+};
 use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
@@ -470,7 +474,12 @@ fn main() {
             yandex_sync_has_token,
             yandex_sync_status,
             yandex_sync_now,
-            get_nexara_balance
+            get_nexara_balance,
+            get_apple_speech_availability,
+            apple_speech_check_locale,
+            apple_speech_transcribe,
+            apple_speech_download_locale,
+            apple_speech_open_dictation_settings
         ])
         .build(tauri::generate_context!())
         .expect("error while building bigecho app");
@@ -813,7 +822,7 @@ mod ipc_runtime_tests {
 
     fn expected_pipeline_markdown_artifact(body: &str) -> String {
         format!(
-            "---\nsource: \"zoom\"\ntags:\n  - \"zoom\"\nnotes: \"Notes\"\ntopic: \"Weekly sync\"\n---\n\n{body}"
+            "---\nsource: \"zoom\"\ntags:\n  - \"zoom\"\nnotes: \"Notes\"\ntopic: \"Weekly sync\"\ndate: 01.01.2026\n---\n\n{body}"
         )
     }
 
@@ -842,6 +851,7 @@ mod ipc_runtime_tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: format!("{base_url}/summary"),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -870,6 +880,7 @@ mod ipc_runtime_tests {
             "Weekly sync".to_string(),
             "Notes".to_string(),
         );
+        meta.display_date_ru = "01.01.2026".to_string();
         meta.artifacts.audio_file =
             crate::audio::file_writer::audio_file_name(&settings.audio_format);
         meta.artifacts.transcript_file = "transcript.txt".to_string();
@@ -900,6 +911,7 @@ mod ipc_runtime_tests {
             salute_speech_language: "ru-RU".to_string(),
             salute_speech_sample_rate: 48_000,
             salute_speech_channels_count: 1,
+            apple_speech_locale: "ru_RU".to_string(),
             summary_url: format!("{base_url}/summary"),
             summary_prompt: "Есть стенограмма встречи. Подготовь краткое саммари.".to_string(),
             openai_model: "gpt-4.1-mini".to_string(),
@@ -928,6 +940,7 @@ mod ipc_runtime_tests {
             "Weekly sync".to_string(),
             "Notes".to_string(),
         );
+        meta.display_date_ru = "01.01.2026".to_string();
         meta.artifacts.audio_file = "audio.opus".to_string();
         meta.artifacts.transcript_file = "transcript.txt".to_string();
         meta.artifacts.summary_file = "summary.md".to_string();

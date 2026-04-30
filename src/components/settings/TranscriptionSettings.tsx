@@ -1,5 +1,6 @@
+import { useEffect, useState } from "react";
 import { Col, Form, Input, InputNumber, Row, Select } from "antd";
-import type { PublicSettings, SecretSaveState } from "../../types";
+import type { AppleSpeechAvailability, PublicSettings, SecretSaveState } from "../../types";
 import {
   transcriptionProviderOptions,
   transcriptionTaskOptions,
@@ -8,6 +9,14 @@ import {
   saluteSpeechRecognitionModelOptions,
 } from "../../types";
 import { formatSecretSaveState } from "../../lib/appUtils";
+import { tauriInvoke } from "../../lib/tauri";
+import { AppleSpeechSection } from "./AppleSpeechSection";
+
+const PROVIDER_LABELS: Record<string, string> = {
+  nexara: "nexara",
+  salute_speech: "SalutSpeechAPI",
+  apple_speech: "Apple Speech",
+};
 
 type TranscriptionSettingsProps = {
   settings: PublicSettings;
@@ -44,7 +53,32 @@ export function TranscriptionSettings({
   openaiSecretState,
   setOpenaiSecretState,
 }: TranscriptionSettingsProps) {
-  const isNexaraProvider = settings.transcription_provider === "nexara";
+  const provider = settings.transcription_provider;
+  const isNexaraProvider = provider === "nexara";
+  const isSaluteProvider = provider === "salute_speech";
+  const isAppleProvider = provider === "apple_speech";
+
+  const [appleSpeechSupported, setAppleSpeechSupported] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await tauriInvoke<AppleSpeechAvailability>(
+          "get_apple_speech_availability"
+        );
+        if (!cancelled) setAppleSpeechSupported(result.supported);
+      } catch {
+        if (!cancelled) setAppleSpeechSupported(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const visibleProviders = transcriptionProviderOptions.filter(
+    (value) => value !== "apple_speech" || appleSpeechSupported || isAppleProvider
+  );
 
   const dirtyDot = (
     <span
@@ -79,16 +113,25 @@ export function TranscriptionSettings({
                   id="transcription_provider"
                   aria-label="Transcription provider"
                   value={settings.transcription_provider}
-                  options={transcriptionProviderOptions.map((value) => ({
+                  options={visibleProviders.map((value) => ({
                     value,
-                    label: value === "nexara" ? "nexara" : "SalutSpeechAPI",
+                    label: PROVIDER_LABELS[value] ?? value,
                   }))}
                   onChange={(value) => setSettings({ ...settings, transcription_provider: value })}
                 />
               </Form.Item>
             </Col>
 
-            {isNexaraProvider ? (
+            {isAppleProvider && (
+              <AppleSpeechSection
+                settings={settings}
+                setSettings={setSettings}
+                isDirty={isDirty}
+                dirtyDot={dirtyDot}
+              />
+            )}
+
+            {isNexaraProvider && (
               <>
                 <Col xs={24} md={12}>
                   <Form.Item
@@ -171,7 +214,9 @@ export function TranscriptionSettings({
                   </Form.Item>
                 </Col>
               </>
-            ) : (
+            )}
+
+            {isSaluteProvider && (
               <>
                 <Col xs={24} md={12}>
                   <Form.Item
