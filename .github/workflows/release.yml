@@ -76,6 +76,33 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: Select Xcode with macOS 26 SDK (Apple Silicon only)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          set -euo pipefail
+          # Apple Speech sidecar needs Swift 6.2 / macOS 26 SDK (Xcode 17+).
+          # Pick the highest installed Xcode 17.x; fall back gracefully so the
+          # rest of the app still builds (sidecar then ships as a stub).
+          CANDIDATE=""
+          for xc in $(ls -d /Applications/Xcode_17*.app /Applications/Xcode.app 2>/dev/null | sort -Vr); do
+            VER=$("$xc/Contents/Developer/usr/bin/xcodebuild" -version 2>/dev/null | head -n1 | awk '{print $2}')
+            MAJOR=$(echo "$VER" | cut -d. -f1)
+            if [ "${MAJOR:-0}" -ge 17 ]; then
+              CANDIDATE="$xc"
+              break
+            fi
+          done
+          if [ -n "$CANDIDATE" ]; then
+            echo "Selecting $CANDIDATE"
+            sudo xcode-select -s "$CANDIDATE/Contents/Developer"
+          else
+            echo "::warning::Xcode 17 not found on runner; Apple Speech sidecar will be built as a stub"
+            ls /Applications/ | grep -i Xcode || true
+          fi
+          xcodebuild -version
+          xcrun --show-sdk-version
+          swift --version
+
       - name: Install system dependencies (macOS)
         if: startsWith(matrix.runner, 'macos-')
         run: brew install opus
