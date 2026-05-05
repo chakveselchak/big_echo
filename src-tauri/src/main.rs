@@ -344,6 +344,7 @@ fn main() {
         );
         window_manager::prewarm_tray_window(&app.handle())?;
         crate::services::minitray::install_production_sinks();
+        crate::services::minitray::install_callbacks(app.handle().clone());
         tray_manager::spawn_tray_idle_release_worker(app.handle().clone());
         #[cfg(target_os = "macos")]
         {
@@ -430,6 +431,11 @@ fn main() {
             let recording = tray_manager::parse_recording_flag(event.payload());
             let _ = tray_manager::set_tray_indicator(&app_handle, recording);
         });
+        let app_handle = app.handle().clone();
+        let _minitray_open_listener =
+            app.listen("minitray:open_tray", move |_event: tauri::Event| {
+                let _ = window_manager::open_tray_window_internal(&app_handle);
+            });
         Ok(())
     });
 

@@ -10,6 +10,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+use tauri::Emitter;
 
 use crate::audio::capture::SharedLevels;
 use crate::settings::public_settings::PublicSettings;
@@ -165,6 +166,36 @@ extern "C" {
     fn bigecho_minitray_show();
     fn bigecho_minitray_hide();
     fn bigecho_minitray_update_level(level: f32);
+    fn bigecho_minitray_set_callbacks(
+        on_stop: extern "C" fn(),
+        on_icon: extern "C" fn(),
+    );
+}
+
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+extern "C" fn on_stop_clicked() {
+    if let Some(app) = APP_HANDLE.get() {
+        // Reuse the existing channel that the recording controller already
+        // listens to. This stops the recording, which in turn calls hide().
+        let _ = app.emit("tray:stop", ());
+    }
+}
+
+extern "C" fn on_icon_clicked() {
+    if let Some(app) = APP_HANDLE.get() {
+        // Emit an event; main.rs listens and opens the tray window.
+        // (window_manager is only in the binary crate, not the lib crate.)
+        let _ = app.emit("minitray:open_tray", ());
+    }
+}
+
+pub fn install_callbacks(app: tauri::AppHandle) {
+    let _ = APP_HANDLE.set(app);
+    #[cfg(target_os = "macos")]
+    unsafe {
+        bigecho_minitray_set_callbacks(on_stop_clicked, on_icon_clicked);
+    }
 }
 
 #[cfg(test)]
