@@ -51,6 +51,7 @@ const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         yandex_sync_enabled: false,
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
+        show_minitray_overlay: false,
       };
     }
     if (cmd === "check_for_update") {
@@ -369,6 +370,7 @@ describe("App main window", () => {
           custom_summary_prompt: "",
           topic: "Edited topic",
           tags: ["Alice"],
+          num_speakers: null,
         },
       });
     }, { timeout: 3000 });
@@ -455,6 +457,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -513,6 +516,7 @@ describe("App main window", () => {
           custom_summary_prompt: "Итог: решения, риски, следующие шаги",
           topic: "Prompt session",
           tags: [],
+          num_speakers: null,
         },
       });
     });
@@ -665,6 +669,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -828,6 +833,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -958,6 +964,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -1058,6 +1065,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -1163,6 +1171,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -1279,6 +1288,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -1471,6 +1481,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -1559,6 +1570,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
@@ -1626,6 +1638,7 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "list_sessions") {
