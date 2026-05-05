@@ -1,4 +1,4 @@
-use crate::app_state::AppDirs;
+use crate::app_state::{AppDirs, AppState};
 pub use crate::audio::macos_system_audio::MacosSystemAudioPermissionStatus;
 use crate::settings::public_settings::{save_settings, PublicSettings};
 use crate::window_manager::{open_settings_window_internal, open_tray_window_internal};
@@ -20,9 +20,33 @@ pub fn get_settings(dirs: tauri::State<AppDirs>) -> Result<PublicSettings, Strin
 #[tauri::command]
 pub fn save_public_settings(
     dirs: tauri::State<AppDirs>,
+    state: tauri::State<AppState>,
     payload: PublicSettings,
 ) -> Result<(), String> {
-    save_settings(&dirs.app_data_dir, &payload)
+    save_public_settings_impl(dirs.inner(), state.inner(), payload)
+}
+
+fn save_public_settings_impl(
+    dirs: &AppDirs,
+    state: &AppState,
+    payload: PublicSettings,
+) -> Result<(), String> {
+    save_settings(&dirs.app_data_dir, &payload)?;
+
+    let recording_active = state
+        .active_session
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false);
+    if recording_active {
+        if payload.show_minitray_overlay {
+            crate::services::minitray::show_if_enabled(&payload);
+        } else {
+            crate::services::minitray::hide();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -75,6 +99,116 @@ mod tests {
         let json = serde_json::to_value(payload).expect("serialize permission payload");
         assert_eq!(json["kind"], "not_determined");
         assert_eq!(json["can_request"], true);
+    }
+
+    #[test]
+    fn save_public_settings_shows_minitray_when_toggled_on_during_active_recording() {
+        use crate::domain::session::SessionMeta;
+        use crate::services::minitray;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let _guard = minitray::TEST_LOCK.lock().unwrap();
+        minitray::hide(); // baseline
+
+        let show_calls = Arc::new(AtomicUsize::new(0));
+        let show_for_sink = Arc::clone(&show_calls);
+        minitray::install_show_sink_for_test(Box::new(move || {
+            show_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+        minitray::install_hide_sink_for_test(Box::new(|| {}));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dirs = AppDirs {
+            app_data_dir: tmp.path().to_path_buf(),
+        };
+        let state = AppState::default();
+        *state.active_session.lock().unwrap() = Some(SessionMeta::new(
+            "s-1".into(),
+            "slack".into(),
+            vec![],
+            "topic".into(),
+            "".into(),
+        ));
+
+        let mut payload = PublicSettings::default();
+        payload.show_minitray_overlay = true;
+        save_public_settings_impl(&dirs, &state, payload).expect("save");
+
+        assert!(minitray::is_visible());
+        assert_eq!(show_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn save_public_settings_hides_minitray_when_toggled_off_during_active_recording() {
+        use crate::domain::session::SessionMeta;
+        use crate::services::minitray;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let _guard = minitray::TEST_LOCK.lock().unwrap();
+        minitray::hide(); // baseline
+
+        let hide_calls = Arc::new(AtomicUsize::new(0));
+        let hide_for_sink = Arc::clone(&hide_calls);
+        minitray::install_show_sink_for_test(Box::new(|| {}));
+        minitray::install_hide_sink_for_test(Box::new(move || {
+            hide_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dirs = AppDirs {
+            app_data_dir: tmp.path().to_path_buf(),
+        };
+        let state = AppState::default();
+        *state.active_session.lock().unwrap() = Some(SessionMeta::new(
+            "s-2".into(),
+            "slack".into(),
+            vec![],
+            "topic".into(),
+            "".into(),
+        ));
+
+        // Pretend it was visible before:
+        let mut on_payload = PublicSettings::default();
+        on_payload.show_minitray_overlay = true;
+        save_public_settings_impl(&dirs, &state, on_payload).expect("first save");
+
+        let mut off_payload = PublicSettings::default();
+        off_payload.show_minitray_overlay = false;
+        save_public_settings_impl(&dirs, &state, off_payload).expect("second save");
+
+        assert!(!minitray::is_visible());
+        assert_eq!(hide_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn save_public_settings_does_not_show_minitray_without_active_recording() {
+        use crate::services::minitray;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let _guard = minitray::TEST_LOCK.lock().unwrap();
+        minitray::hide(); // baseline
+
+        let show_calls = Arc::new(AtomicUsize::new(0));
+        let show_for_sink = Arc::clone(&show_calls);
+        minitray::install_show_sink_for_test(Box::new(move || {
+            show_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dirs = AppDirs {
+            app_data_dir: tmp.path().to_path_buf(),
+        };
+        let state = AppState::default();
+        // No active_session set → no recording in progress.
+
+        let mut payload = PublicSettings::default();
+        payload.show_minitray_overlay = true;
+        save_public_settings_impl(&dirs, &state, payload).expect("save");
+
+        assert_eq!(show_calls.load(Ordering::SeqCst), 0);
     }
 }
 
