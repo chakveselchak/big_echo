@@ -343,6 +343,7 @@ fn main() {
             },
         );
         window_manager::prewarm_tray_window(&app.handle())?;
+        crate::services::minitray::install_production_sinks();
         tray_manager::spawn_tray_idle_release_worker(app.handle().clone());
         #[cfg(target_os = "macos")]
         {
