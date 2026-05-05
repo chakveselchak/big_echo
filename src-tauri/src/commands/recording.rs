@@ -214,7 +214,7 @@ fn start_recording_impl(
     }
     set_tray_indicator_from_state(state, true);
     // Show floating minitray overlay if the user opted in.
-    crate::services::minitray::show_if_enabled(&settings);
+    crate::services::minitray::show_if_enabled(&settings, &state.live_levels);
     Ok(StartRecordingResponse {
         session_id,
         session_dir: abs_dir.to_string_lossy().to_string(),
@@ -649,6 +649,7 @@ mod tests {
         // Manually show the minitray (simulating what start_recording_impl does).
         crate::services::minitray::show_if_enabled(
             &crate::get_settings_from_dirs(&dirs).expect("load settings"),
+            &state.live_levels,
         );
         assert!(minitray::is_visible(), "minitray should be visible before stop");
 

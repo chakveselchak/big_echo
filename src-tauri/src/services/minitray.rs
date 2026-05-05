@@ -2,15 +2,16 @@
 //!
 //! Public API:
 //!   - `install_production_sinks()` — wire the FFI sinks at boot (no-op on non-macOS).
-//!   - `show_if_enabled(settings)` — show panel iff setting is on and not visible.
-//!   - `hide()` — hide panel if visible.
+//!   - `show_if_enabled(settings, levels)` — show panel iff setting is on and not visible; starts level poller.
+//!   - `hide()` — hide panel if visible; stops level poller.
 //!   - `update_level(level)` — push current level to panel (throttled to ~30 Hz).
 //!   - `is_visible()` — current state.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
+use crate::audio::capture::SharedLevels;
 use crate::settings::public_settings::PublicSettings;
 
 type ShowSink = Box<dyn Fn() + Send + Sync>;
@@ -21,6 +22,7 @@ static VISIBLE: AtomicBool = AtomicBool::new(false);
 /// `u64::MAX` is the "never pushed" sentinel: guarantees the first call always goes through.
 static LAST_PUSH_NANOS: AtomicU64 = AtomicU64::new(u64::MAX);
 static EPOCH: OnceLock<Instant> = OnceLock::new();
+static POLLER: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
 
 static SHOW_SINK: OnceLock<ShowSink> = OnceLock::new();
 static HIDE_SINK: OnceLock<HideSink> = OnceLock::new();
@@ -52,7 +54,7 @@ pub fn install_production_sinks() {
     }
 }
 
-pub fn show_if_enabled(settings: &PublicSettings) {
+pub fn show_if_enabled(settings: &PublicSettings, levels: &SharedLevels) {
     if !settings.show_minitray_overlay {
         return;
     }
@@ -61,11 +63,37 @@ pub fn show_if_enabled(settings: &PublicSettings) {
         return;
     }
     call_show_sink();
+
+    // Only spawn the poller if we're inside a tokio runtime.
+    // In production (Tauri command handlers) a runtime is always present.
+    // Some synchronous unit tests have no runtime — skip the poller there.
+    if let Ok(handle_rt) = tokio::runtime::Handle::try_current() {
+        let levels = levels.clone();
+        let handle = handle_rt.spawn(async move {
+            loop {
+                if !VISIBLE.load(Ordering::SeqCst) {
+                    break;
+                }
+                let snap = levels.snapshot();
+                let combined = snap.mic.max(snap.system);
+                update_level(combined);
+                tokio::time::sleep(std::time::Duration::from_millis(33)).await;
+            }
+        });
+        if let Ok(mut guard) = POLLER.lock() {
+            *guard = Some(handle);
+        }
+    }
 }
 
 pub fn hide() {
     if !VISIBLE.swap(false, Ordering::SeqCst) {
         return;
+    }
+    if let Ok(mut guard) = POLLER.lock() {
+        if let Some(handle) = guard.take() {
+            handle.abort();
+        }
     }
     call_hide_sink();
 }
@@ -178,6 +206,17 @@ mod tests {
     use std::sync::Arc;
 
     fn reset_state_for_test() {
+        // Clear any running poller handle; ignore mutex poison from a previous failed test.
+        let poller_handle = POLLER.lock().ok().and_then(|mut g| g.take());
+        // Also recover from a poisoned mutex by re-initializing it.
+        if POLLER.is_poisoned() {
+            // Safety: we're in a single-threaded test context under TEST_LOCK.
+            // Clearing the poison is the cleanest option here.
+            drop(POLLER.lock().unwrap_or_else(|e| e.into_inner()));
+        }
+        if let Some(handle) = poller_handle {
+            handle.abort();
+        }
         VISIBLE.store(false, Ordering::SeqCst);
         LAST_PUSH_NANOS.store(u64::MAX, Ordering::SeqCst);
         *test_sinks::TEST_SHOW.lock().unwrap() = None;
@@ -197,7 +236,7 @@ mod tests {
 
         let mut settings = PublicSettings::default();
         settings.show_minitray_overlay = false;
-        show_if_enabled(&settings);
+        show_if_enabled(&settings, &SharedLevels::new());
 
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(!is_visible());
@@ -215,7 +254,7 @@ mod tests {
 
         let mut settings = PublicSettings::default();
         settings.show_minitray_overlay = true;
-        show_if_enabled(&settings);
+        show_if_enabled(&settings, &SharedLevels::new());
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(is_visible());
@@ -233,9 +272,9 @@ mod tests {
 
         let mut settings = PublicSettings::default();
         settings.show_minitray_overlay = true;
-        show_if_enabled(&settings);
-        show_if_enabled(&settings);
-        show_if_enabled(&settings);
+        show_if_enabled(&settings, &SharedLevels::new());
+        show_if_enabled(&settings, &SharedLevels::new());
+        show_if_enabled(&settings, &SharedLevels::new());
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
@@ -257,7 +296,7 @@ mod tests {
 
         let mut settings = PublicSettings::default();
         settings.show_minitray_overlay = true;
-        show_if_enabled(&settings);
+        show_if_enabled(&settings, &SharedLevels::new());
         assert!(is_visible());
 
         hide();
@@ -282,7 +321,7 @@ mod tests {
 
         let mut settings = PublicSettings::default();
         settings.show_minitray_overlay = true;
-        show_if_enabled(&settings);
+        show_if_enabled(&settings, &SharedLevels::new());
 
         // Drive 1000 quick updates back-to-back.
         for _ in 0..1000 {
@@ -308,5 +347,38 @@ mod tests {
 
         update_level(0.5);
         assert_eq!(pushes.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn show_pumps_levels_until_hide() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_state_for_test();
+
+        let pushes = Arc::new(AtomicUsize::new(0));
+        let pushes_for_sink = Arc::clone(&pushes);
+        install_show_sink_for_test(Box::new(|| {}));
+        install_hide_sink_for_test(Box::new(|| {}));
+        install_level_sink_for_test(Box::new(move |_| {
+            pushes_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let levels = SharedLevels::new();
+        levels.set_mic(0.4);
+        levels.set_system(0.7);
+
+        let mut settings = PublicSettings::default();
+        settings.show_minitray_overlay = true;
+        show_if_enabled(&settings, &levels);
+
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+        let n = pushes.load(Ordering::SeqCst);
+        assert!(n >= 2, "expected at least 2 level pushes within 120ms, got {}", n);
+
+        hide();
+        let after_hide = pushes.load(Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        let final_count = pushes.load(Ordering::SeqCst);
+        assert_eq!(final_count, after_hide, "poller should stop after hide()");
     }
 }

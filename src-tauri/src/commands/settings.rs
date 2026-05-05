@@ -40,7 +40,7 @@ fn save_public_settings_impl(
         .unwrap_or(false);
     if recording_active {
         if payload.show_minitray_overlay {
-            crate::services::minitray::show_if_enabled(&payload);
+            crate::services::minitray::show_if_enabled(&payload, &state.live_levels);
         } else {
             crate::services::minitray::hide();
         }
