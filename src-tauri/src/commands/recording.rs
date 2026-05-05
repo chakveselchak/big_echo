@@ -213,6 +213,8 @@ fn start_recording_impl(
         ui.topic = topic_from_payload;
     }
     set_tray_indicator_from_state(state, true);
+    // Show floating minitray overlay if the user opted in.
+    crate::services::minitray::show_if_enabled(&settings);
     Ok(StartRecordingResponse {
         session_id,
         session_dir: abs_dir.to_string_lossy().to_string(),
@@ -232,7 +234,11 @@ pub fn stop_recording(
     state: tauri::State<AppState>,
     session_id: String,
 ) -> Result<String, String> {
-    stop_active_recording_internal(dirs.inner(), state.inner(), Some(session_id.as_str()), None)
+    stop_recording_impl(dirs.inner(), state.inner(), session_id)
+}
+
+fn stop_recording_impl(dirs: &AppDirs, state: &AppState, session_id: String) -> Result<String, String> {
+    stop_active_recording_internal(dirs, state, Some(session_id.as_str()), None)
 }
 
 #[tauri::command]
@@ -513,5 +519,97 @@ mod tests {
         assert!(!temp.path().join("recordings").exists());
         assert!(state.active_session.lock().expect("session lock").is_none());
         assert!(state.active_capture.lock().expect("capture lock").is_none());
+    }
+
+    fn make_test_app_state_with_settings(
+        mutate: impl FnOnce(&mut crate::settings::public_settings::PublicSettings),
+    ) -> (AppState, AppDirs, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dirs = AppDirs {
+            app_data_dir: tmp.path().to_path_buf(),
+        };
+        let mut settings = crate::settings::public_settings::PublicSettings::default();
+        settings.recording_root = tmp.path().join("recordings").to_string_lossy().to_string();
+        mutate(&mut settings);
+        crate::settings::public_settings::save_settings(&dirs.app_data_dir, &settings)
+            .expect("save settings");
+        let state = AppState::default();
+        (state, dirs, tmp)
+    }
+
+    #[test]
+    fn start_recording_shows_minitray_when_setting_is_on() {
+        use crate::services::minitray;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let _guard = minitray::TEST_LOCK.lock().unwrap();
+        // Reset minitray state before test.
+        minitray::hide();
+
+        let show_calls = Arc::new(AtomicUsize::new(0));
+        let show_for_sink = Arc::clone(&show_calls);
+        minitray::install_show_sink_for_test(Box::new(move || {
+            show_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let (state, dirs, _tmp) = make_test_app_state_with_settings(|s| {
+            s.show_minitray_overlay = true;
+        });
+
+        let resp = start_recording_impl(
+            &dirs,
+            &state,
+            StartRecordingRequest {
+                source: "slack".into(),
+                topic: "".into(),
+                tags: vec![],
+                notes: "".into(),
+            },
+        )
+        .expect("start_recording_impl");
+
+        assert!(!resp.session_id.is_empty());
+        assert!(minitray::is_visible());
+        assert_eq!(show_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn stop_recording_hides_minitray() {
+        use crate::services::minitray;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let _guard = minitray::TEST_LOCK.lock().unwrap();
+        // Reset minitray state before test.
+        minitray::hide();
+
+        let hide_calls = Arc::new(AtomicUsize::new(0));
+        let hide_for_sink = Arc::clone(&hide_calls);
+        minitray::install_hide_sink_for_test(Box::new(move || {
+            hide_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+        minitray::install_show_sink_for_test(Box::new(|| {}));
+
+        let (state, dirs, _tmp) = make_test_app_state_with_settings(|s| {
+            s.show_minitray_overlay = true;
+        });
+
+        let resp = start_recording_impl(
+            &dirs,
+            &state,
+            StartRecordingRequest {
+                source: "slack".into(),
+                topic: "".into(),
+                tags: vec![],
+                notes: "".into(),
+            },
+        )
+        .expect("start_recording_impl");
+
+        stop_recording_impl(&dirs, &state, resp.session_id).expect("stop_recording_impl");
+
+        assert!(!minitray::is_visible());
+        assert_eq!(hide_calls.load(Ordering::SeqCst), 1);
     }
 }

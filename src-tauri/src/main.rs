@@ -279,6 +279,9 @@ pub(crate) fn stop_active_recording_internal(
         });
     }
 
+    // Hide the minitray overlay now that recording has stopped.
+    services::minitray::hide();
+
     Ok("recorded".to_string())
 }
 
@@ -867,6 +870,7 @@ mod ipc_runtime_tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
         save_settings(app_data_dir, &settings).expect("save settings");
 
@@ -928,6 +932,7 @@ mod ipc_runtime_tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
         save_settings(app_data_dir, &settings).expect("save settings");
 

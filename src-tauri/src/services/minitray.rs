@@ -164,15 +164,18 @@ pub(crate) fn install_level_sink_for_test(sink: LevelSink) {
     *test_sinks::TEST_LEVEL.lock().unwrap() = Some(sink);
 }
 
+// Shared serialization lock for all tests that touch the minitray global state
+// (VISIBLE, LAST_PUSH_NANOS, test sinks). Exposed as pub(crate) so tests in
+// other modules (e.g. commands::recording) can acquire the same lock and avoid
+// parallel-run interference.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
-
-    // Tests share global state (VISIBLE, LAST_PUSH_NANOS, test sinks).
-    // Take this lock at the start of every test to serialize them.
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn reset_state_for_test() {
         VISIBLE.store(false, Ordering::SeqCst);
