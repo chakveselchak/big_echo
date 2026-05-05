@@ -1343,6 +1343,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1420,6 +1421,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1525,6 +1527,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1661,6 +1664,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1769,6 +1773,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1894,6 +1899,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2066,6 +2072,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2138,6 +2145,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2193,6 +2201,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         assert_eq!(

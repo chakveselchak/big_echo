@@ -1,6 +1,9 @@
+pub mod app_state;
 pub mod audio;
 pub mod command_core;
 pub mod domain;
+pub mod pipeline;
+pub mod services;
 pub mod settings;
 pub mod storage;
 pub mod text_editors;
