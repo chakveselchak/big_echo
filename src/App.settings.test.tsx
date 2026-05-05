@@ -684,12 +684,9 @@ describe("App settings window", () => {
 
   it("toggles show_minitray_overlay via checkbox in Generals", async () => {
     const user = userEvent.setup();
-    invokeMock.mockImplementation(async (cmd: string) => {
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
       if (cmd === "get_settings") {
         return { ...mockSettings(), show_minitray_overlay: false };
-      }
-      if (cmd === "save_public_settings") {
-        return "ok";
       }
       return null;
     });
