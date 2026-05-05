@@ -162,6 +162,7 @@ fn call_level_sink(level: f32) {
 }
 
 #[cfg(target_os = "macos")]
+#[link(name = "MinitrayBridge", kind = "static")]
 extern "C" {
     fn bigecho_minitray_show();
     fn bigecho_minitray_hide();
