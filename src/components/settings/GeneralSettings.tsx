@@ -187,6 +187,19 @@ export function GeneralSettings({
           Enable API call logging{isDirty("api_call_logging_enabled") && dirtyDot}
         </Checkbox>
       </Form.Item>
+
+      <Form.Item>
+        <Checkbox
+          id="show_minitray_overlay"
+          aria-label="Show minitray on top of all windows"
+          checked={Boolean(settings.show_minitray_overlay)}
+          onChange={(event) =>
+            setSettings({ ...settings, show_minitray_overlay: event.target.checked })
+          }
+        >
+          Show minitray on top of all windows{isDirty("show_minitray_overlay") && dirtyDot}
+        </Checkbox>
+      </Form.Item>
     </Form>
   );
 }
