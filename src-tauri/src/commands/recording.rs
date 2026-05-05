@@ -612,4 +612,87 @@ mod tests {
         assert!(!minitray::is_visible());
         assert_eq!(hide_calls.load(Ordering::SeqCst), 1);
     }
+
+    /// Regression test: minitray must be hidden even when audio capture
+    /// finalization fails (the `finalize_error` early-return path in
+    /// `stop_active_recording_internal`).
+    #[test]
+    fn stop_recording_hides_minitray_on_finalize_error() {
+        use crate::services::minitray;
+        use crate::stop_active_recording_internal;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let _guard = minitray::TEST_LOCK.lock().unwrap();
+        minitray::hide();
+
+        let hide_calls = Arc::new(AtomicUsize::new(0));
+        let hide_for_sink = Arc::clone(&hide_calls);
+        minitray::install_hide_sink_for_test(Box::new(move || {
+            hide_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+        minitray::install_show_sink_for_test(Box::new(|| {}));
+
+        let (state, dirs, _tmp) = make_test_app_state_with_settings(|s| {
+            s.show_minitray_overlay = true;
+        });
+
+        // Manually show the minitray (simulating what start_recording_impl does).
+        crate::services::minitray::show_if_enabled(
+            &crate::get_settings_from_dirs(&dirs).expect("load settings"),
+        );
+        assert!(minitray::is_visible(), "minitray should be visible before stop");
+
+        // Build a session meta with a known relative directory so
+        // stop_active_recording_internal can locate the session folder.
+        let started_at = chrono::Local::now();
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut meta = crate::domain::session::SessionMeta::new(
+            session_id.clone(),
+            "zoom".to_string(),
+            vec!["zoom".to_string()],
+            String::new(),
+            String::new(),
+        );
+        meta.started_at_iso = started_at.to_rfc3339();
+
+        let settings = crate::get_settings_from_dirs(&dirs).expect("load settings");
+        let rel_dir = crate::storage::fs_layout::build_session_relative_dir(
+            &meta.primary_tag,
+            started_at,
+        );
+        let abs_dir = crate::root_recordings_dir(&dirs.app_data_dir, &settings)
+            .expect("recordings dir")
+            .join(&rel_dir);
+        std::fs::create_dir_all(&abs_dir).expect("create session dir");
+        crate::storage::session_store::save_meta(&abs_dir.join("meta.json"), &meta)
+            .expect("save meta");
+        crate::storage::sqlite_repo::upsert_session(
+            &dirs.app_data_dir,
+            &meta,
+            &abs_dir,
+            &abs_dir.join("meta.json"),
+        )
+        .expect("upsert session");
+
+        // Inject active session and a test_stub capture.  The stub has
+        // join=None so stop_and_take_artifacts returns Err, triggering
+        // finalize_error in stop_active_recording_internal.
+        *state.active_session.lock().expect("session lock") = Some(meta);
+        *state.active_capture.lock().expect("capture lock") = Some(
+            crate::audio::capture::ContinuousCapture::test_stub(state.recording_control.clone()),
+        );
+
+        let result = stop_active_recording_internal(&dirs, &state, Some(&session_id), None);
+
+        // The function must return Err (finalize failed) …
+        assert!(result.is_err(), "expected Err from finalize failure");
+        // … but the minitray must be hidden regardless.
+        assert!(!minitray::is_visible(), "minitray must be hidden after stop, even on error");
+        assert_eq!(
+            hide_calls.load(Ordering::SeqCst),
+            1,
+            "hide sink must be called exactly once"
+        );
+    }
 }

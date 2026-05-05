@@ -125,6 +125,9 @@ pub(crate) fn schedule_retry_for_session(
     Ok(())
 }
 
+/// Runs after `stop_recording`, so the minitray (if shown) was already hidden
+/// by `stop_active_recording_internal`. No additional `minitray::hide()` calls
+/// needed here.
 pub async fn run_pipeline_core(
     dirs: AppDirs,
     session_id: &str,

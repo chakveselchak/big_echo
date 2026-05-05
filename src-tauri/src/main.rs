@@ -228,6 +228,9 @@ pub(crate) fn stop_active_recording_internal(
     } else {
         tray_manager::set_tray_indicator_from_state(state, false);
     }
+    // Hide the minitray overlay — recording has stopped regardless of whether
+    // audio encoding succeeds or fails.
+    services::minitray::hide();
 
     if let Some(err) = finalize_error {
         meta.status = SessionStatus::Failed;
@@ -278,9 +281,6 @@ pub(crate) fn stop_active_recording_internal(
             .await;
         });
     }
-
-    // Hide the minitray overlay now that recording has stopped.
-    services::minitray::hide();
 
     Ok("recorded".to_string())
 }
