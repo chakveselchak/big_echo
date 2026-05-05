@@ -201,6 +201,7 @@ pub async fn run_pipeline_core(
             &settings,
             &transcription_secret,
             &audio_path,
+            meta.num_speakers,
             &external_api_logger,
         )
         .await

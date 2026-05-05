@@ -47,6 +47,7 @@ type SessionListProps = {
   artifactPreview: SessionArtifactPreview | null;
   knownTags: string[];
   settings: PublicSettings | null;
+  transcriptionProvider: string | null;
   setDeleteTarget: (target: DeleteTarget | null) => void;
   setAudioDeleteTargetSessionId: (sessionId: string | null) => void;
   confirmDeleteSession: () => Promise<void>;
@@ -83,6 +84,7 @@ export function SessionList({
   artifactPreview,
   knownTags,
   settings,
+  transcriptionProvider,
   setDeleteTarget,
   setAudioDeleteTargetSessionId,
   confirmDeleteSession,
@@ -417,6 +419,7 @@ export function SessionList({
                   knownTagOptions={knownTagOptions}
                   transcriptMatch={transcriptMatch}
                   summaryMatch={summaryMatch}
+                  showNumSpeakers={transcriptionProvider === "nexara"}
                   onContextMenu={openSessionContextMenu}
                   onDetailChange={(nextDetail) =>
                     setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))

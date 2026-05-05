@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Button, Col, ConfigProvider, Form, Input, Row, Select } from "antd";
+import { Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
 import { ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
 import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
@@ -20,6 +20,7 @@ type SessionCardProps = {
   knownTagOptions: { value: string; label: string }[];
   transcriptMatch: boolean;
   summaryMatch: boolean;
+  showNumSpeakers: boolean;
   onContextMenu: (event: ReactMouseEvent<HTMLElement>, sessionId: string) => void;
   onDetailChange: (detail: SessionMetaView) => void;
   onOpenArtifact: (sessionId: string, kind: "transcript" | "summary") => void;
@@ -43,6 +44,7 @@ function SessionCardImpl({
   knownTagOptions,
   transcriptMatch,
   summaryMatch,
+  showNumSpeakers,
   onContextMenu,
   onDetailChange,
   onOpenArtifact,
@@ -76,6 +78,7 @@ function SessionCardImpl({
       detail.notes === local.notes &&
       detail.topic === local.topic &&
       (detail.custom_summary_prompt ?? "") === (local.custom_summary_prompt ?? "") &&
+      (detail.num_speakers ?? null) === (local.num_speakers ?? null) &&
       detail.tags.length === local.tags.length &&
       detail.tags.every((t, i) => t === local.tags[i])
     ) {
@@ -94,6 +97,7 @@ function SessionCardImpl({
       detail.notes === current.notes &&
       detail.topic === current.topic &&
       (detail.custom_summary_prompt ?? "") === (current.custom_summary_prompt ?? "") &&
+      (detail.num_speakers ?? null) === (current.num_speakers ?? null) &&
       detail.tags.length === current.tags.length &&
       detail.tags.every((t, i) => t === current.tags[i])
     ) {
@@ -224,7 +228,7 @@ function SessionCardImpl({
       >
         <Form component="div" layout="vertical" colon={false}>
           <Row gutter={[12, 12]} align="top" className="session-edit-grid">
-            <Col span={6}>
+            <Col span={showNumSpeakers ? 4 : 6}>
               <Form.Item
                 label="Source"
                 htmlFor="session-source"
@@ -240,7 +244,50 @@ function SessionCardImpl({
                 />
               </Form.Item>
             </Col>
-            <Col span={6}>
+            {showNumSpeakers && (
+              <Col span={3}>
+                <Form.Item label="speakers" htmlFor="session-num-speakers">
+                  <InputNumber
+                    id="session-num-speakers"
+                    aria-label="speakers"
+                    min={1}
+                    max={20}
+                    step={1}
+                    precision={0}
+                    // Ant Design's InputNumber lets users type "-", ".", "e",
+                    // and pasted text through unless we strip them in `parser`.
+                    // Returning "" tells antd "no value" → onChange fires with
+                    // null, which propagates to meta as null and the API skips
+                    // the field entirely.
+                    parser={(value) => {
+                      const digits = (value ?? "").replace(/[^0-9]/g, "");
+                      if (digits === "") return "" as unknown as number;
+                      return Math.min(Number(digits), 20);
+                    }}
+                    formatter={(value) => {
+                      if (value === undefined || value === null) return "";
+                      const n = Number(value);
+                      if (!Number.isFinite(n)) return "";
+                      return String(Math.trunc(n));
+                    }}
+                    style={{ width: "100%" }}
+                    value={working.num_speakers ?? null}
+                    onChange={(value) =>
+                      setDraftDetail((prev) => {
+                        if (typeof value !== "number" || !Number.isFinite(value)) {
+                          return { ...prev, num_speakers: null };
+                        }
+                        const n = Math.trunc(value);
+                        if (n < 1) return { ...prev, num_speakers: null };
+                        return { ...prev, num_speakers: Math.min(n, 20) };
+                      })
+                    }
+                    onBlur={handleBlur}
+                  />
+                </Form.Item>
+              </Col>
+            )}
+            <Col span={showNumSpeakers ? 5 : 6}>
               <Form.Item
                 label="Topic"
                 htmlFor="session-topic"

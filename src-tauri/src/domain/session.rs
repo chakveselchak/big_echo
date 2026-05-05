@@ -53,6 +53,8 @@ pub struct SessionMeta {
     pub topic: String,
     #[serde(default)]
     pub custom_summary_prompt: String,
+    #[serde(default)]
+    pub num_speakers: Option<u32>,
     pub status: SessionStatus,
     pub artifacts: SessionArtifacts,
     #[serde(default)]
@@ -83,6 +85,7 @@ impl SessionMeta {
             notes,
             topic,
             custom_summary_prompt: String::new(),
+            num_speakers: None,
             status: SessionStatus::Recording,
             artifacts: SessionArtifacts::default(),
             errors: vec![],
