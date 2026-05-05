@@ -616,6 +616,15 @@ mod tests {
     /// Regression test: minitray must be hidden even when audio capture
     /// finalization fails (the `finalize_error` early-return path in
     /// `stop_active_recording_internal`).
+    ///
+    /// With `hide()` now placed immediately after `ensure_stop_session_matches`
+    /// (before all subsequent `?` operators), this test also covers the earlier
+    /// failure paths: `get_settings_from_dirs`, `DateTime::parse_from_rfc3339`,
+    /// `root_recordings_dir`, `active_capture.lock()`, and
+    /// `preserve_capture_artifacts_for_recovery` (e.g. a realistic disk-full
+    /// scenario). All of those would previously have leaked the overlay; the
+    /// hoisted placement closes all those cases without requiring per-path
+    /// fault-injection scaffolding.
     #[test]
     fn stop_recording_hides_minitray_on_finalize_error() {
         use crate::services::minitray;

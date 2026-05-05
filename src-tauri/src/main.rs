@@ -161,6 +161,12 @@ pub(crate) fn stop_active_recording_internal(
 
     ensure_stop_session_matches(&meta.session_id, session_id)?;
 
+    // Hide the minitray overlay here — after confirming this stop call is for
+    // the active session (mismatch returns above, so we don't hide the panel
+    // that belongs to a still-running recording) but before any subsequent `?`
+    // operators that could early-return and leak the overlay.
+    services::minitray::hide();
+
     meta.ended_at_iso = Some(Local::now().to_rfc3339());
 
     let settings = get_settings_from_dirs(dirs)?;
@@ -228,9 +234,6 @@ pub(crate) fn stop_active_recording_internal(
     } else {
         tray_manager::set_tray_indicator_from_state(state, false);
     }
-    // Hide the minitray overlay — recording has stopped regardless of whether
-    // audio encoding succeeds or fails.
-    services::minitray::hide();
 
     if let Some(err) = finalize_error {
         meta.status = SessionStatus::Failed;
