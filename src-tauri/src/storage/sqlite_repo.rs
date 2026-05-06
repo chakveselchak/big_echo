@@ -13,6 +13,8 @@ pub struct SessionListMeta {
     pub custom_summary_prompt: String,
     pub topic: String,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub num_speakers: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,6 +294,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     custom_summary_prompt: meta.custom_summary_prompt.clone(),
                     topic: meta.topic.clone(),
                     tags: meta.tags.clone(),
+                    num_speakers: meta.num_speakers,
                 });
                 }
             }

@@ -45,6 +45,7 @@ pub struct PublicSettings {
     pub yandex_sync_enabled: bool,
     pub yandex_sync_interval: String,
     pub yandex_sync_remote_folder: String,
+    pub show_minitray_overlay: bool,
 }
 
 impl Default for PublicSettings {
@@ -77,6 +78,7 @@ impl Default for PublicSettings {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         }
     }
 }
@@ -602,5 +604,27 @@ mod tests {
             ..Default::default()
         };
         assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn show_minitray_overlay_defaults_to_false_when_field_is_absent() {
+        let json = serde_json::json!({
+            "transcription_provider": "nexara",
+            "transcription_url": "",
+            "transcription_task": "transcribe",
+            "transcription_diarization_setting": "general",
+        });
+        let parsed: PublicSettings =
+            serde_json::from_value(json).expect("legacy settings without show_minitray_overlay");
+        assert!(!parsed.show_minitray_overlay);
+    }
+
+    #[test]
+    fn show_minitray_overlay_round_trips_through_serde() {
+        let mut settings = PublicSettings::default();
+        settings.show_minitray_overlay = true;
+        let raw = serde_json::to_string(&settings).expect("serialize");
+        let restored: PublicSettings = serde_json::from_str(&raw).expect("deserialize");
+        assert!(restored.show_minitray_overlay);
     }
 }

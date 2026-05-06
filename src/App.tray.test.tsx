@@ -74,6 +74,7 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
       yandex_sync_enabled: false,
       yandex_sync_interval: "24h",
       yandex_sync_remote_folder: "BigEcho",
+      show_minitray_overlay: false,
     };
   }
   if (cmd === "list_audio_input_devices") {
@@ -253,6 +254,7 @@ describe("Tray window", () => {
             notes: "",
             topic: "Daily sync",
             tags: [],
+            num_speakers: null,
           },
         });
       },
@@ -283,6 +285,7 @@ describe("Tray window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {
@@ -325,6 +328,7 @@ describe("Tray window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {
@@ -414,6 +418,7 @@ describe("Tray window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          show_minitray_overlay: false,
         };
       }
       if (cmd === "get_macos_system_audio_permission_status") {

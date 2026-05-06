@@ -712,6 +712,7 @@ pub fn get_session_meta(
         custom_summary_prompt: meta.custom_summary_prompt,
         topic: meta.topic,
         tags: meta.tags,
+        num_speakers: meta.num_speakers,
     })
 }
 
@@ -747,6 +748,7 @@ fn update_session_details_impl(
     meta.tags = tags;
     meta.custom_summary_prompt = payload.custom_summary_prompt.trim().to_string();
     meta.topic = payload.topic.trim().to_string();
+    meta.num_speakers = payload.num_speakers.filter(|n| *n > 0);
 
     let session_dir = meta_path
         .parent()
@@ -1142,6 +1144,7 @@ mod tests {
                 custom_summary_prompt: String::new(),
                 topic: "Topic".to_string(),
                 tags: vec!["new".to_string()],
+                num_speakers: None,
             },
         )
         .expect("update details");
@@ -1183,6 +1186,7 @@ mod tests {
                 custom_summary_prompt: String::new(),
                 topic: "Fresh topic".to_string(),
                 tags: vec!["new".to_string()],
+                num_speakers: None,
             },
         )
         .expect("update details");
@@ -1230,6 +1234,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
         save_settings(&app_data_dir, &settings).expect("save settings");
 

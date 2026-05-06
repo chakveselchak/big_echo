@@ -31,6 +31,17 @@ function sameTags(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+const NUM_SPEAKERS_MIN = 1;
+const NUM_SPEAKERS_MAX = 20;
+
+function normalizeNumSpeakers(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isFinite(value)) return null;
+  const truncated = Math.trunc(value);
+  if (truncated < NUM_SPEAKERS_MIN) return null;
+  return Math.min(truncated, NUM_SPEAKERS_MAX);
+}
+
 function sameSessionMeta(left: SessionMetaView, right: SessionMetaView) {
   return (
     left.session_id === right.session_id &&
@@ -38,12 +49,13 @@ function sameSessionMeta(left: SessionMetaView, right: SessionMetaView) {
     left.notes === right.notes &&
     (left.custom_summary_prompt ?? "") === (right.custom_summary_prompt ?? "") &&
     left.topic === right.topic &&
-    sameTags(left.tags, right.tags)
+    sameTags(left.tags, right.tags) &&
+    normalizeNumSpeakers(left.num_speakers) === normalizeNumSpeakers(right.num_speakers)
   );
 }
 
 function sessionMetaSignature(meta: SessionMetaView) {
-  return `${meta.session_id}\n${meta.source}\n${meta.notes}\n${meta.custom_summary_prompt ?? ""}\n${meta.topic}\n${meta.tags.join("\u001f")}`;
+  return `${meta.session_id}\n${meta.source}\n${meta.notes}\n${meta.custom_summary_prompt ?? ""}\n${meta.topic}\n${meta.tags.join("\u001f")}\n${normalizeNumSpeakers(meta.num_speakers) ?? ""}`;
 }
 
 function normalizeSessionMeta(meta: SessionMetaView): SessionMetaView {
@@ -52,6 +64,7 @@ function normalizeSessionMeta(meta: SessionMetaView): SessionMetaView {
     notes: meta.notes ?? "",
     custom_summary_prompt: meta.custom_summary_prompt ?? "",
     tags: meta.tags ?? [],
+    num_speakers: normalizeNumSpeakers(meta.num_speakers),
   };
 }
 
@@ -63,6 +76,7 @@ function fallbackSessionMeta(item: SessionListItem): SessionMetaView {
     custom_summary_prompt: "",
     topic: item.topic,
     tags: [],
+    num_speakers: null,
   };
 }
 
@@ -274,6 +288,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         custom_summary_prompt: detail.custom_summary_prompt ?? "",
         topic: detail.topic,
         tags: detail.tags,
+        num_speakers: normalizeNumSpeakers(detail.num_speakers),
       },
     });
     setSavedSessionDetails((prev) => ({ ...prev, [sessionId]: detail }));
@@ -567,6 +582,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
             custom_summary_prompt: current.custom_summary_prompt ?? "",
             topic: current.topic,
             tags: current.tags,
+            num_speakers: normalizeNumSpeakers(current.num_speakers),
           },
         }).catch(() => undefined);
       }

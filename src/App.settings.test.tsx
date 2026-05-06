@@ -33,6 +33,7 @@ const { invokeMock } = vi.hoisted(() => ({
         yandex_sync_enabled: false,
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
+        show_minitray_overlay: false,
       };
     }
     if (cmd === "detect_system_source_device") {
@@ -152,6 +153,7 @@ function mockSettings() {
     yandex_sync_enabled: false,
     yandex_sync_interval: "24h",
     yandex_sync_remote_folder: "BigEcho",
+    show_minitray_overlay: false,
   };
 }
 
@@ -678,5 +680,33 @@ describe("App settings window", () => {
     const syncNow = await screen.findByRole("button", { name: /Sync now/i });
     expect(syncNow).toBeDisabled();
     expect(screen.getByRole("button", { name: /Save settings/i })).toBeInTheDocument();
+  });
+
+  it("toggles show_minitray_overlay via checkbox in Generals", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return { ...mockSettings(), show_minitray_overlay: false };
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Generals" }));
+
+    const checkbox = await screen.findByLabelText("Show minitray on top of all windows");
+    expect(checkbox).not.toBeChecked();
+
+    await user.click(checkbox);
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "save_public_settings",
+        expect.objectContaining({
+          payload: expect.objectContaining({ show_minitray_overlay: true }),
+        })
+      );
+    });
   });
 });

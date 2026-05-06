@@ -125,6 +125,9 @@ pub(crate) fn schedule_retry_for_session(
     Ok(())
 }
 
+/// Runs after `stop_recording`, so the minitray (if shown) was already hidden
+/// by `stop_active_recording_internal`. No additional `minitray::hide()` calls
+/// needed here.
 pub async fn run_pipeline_core(
     dirs: AppDirs,
     session_id: &str,
@@ -201,6 +204,7 @@ pub async fn run_pipeline_core(
             &settings,
             &transcription_secret,
             &audio_path,
+            meta.num_speakers,
             &external_api_logger,
         )
         .await
@@ -408,6 +412,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         }
     }
 

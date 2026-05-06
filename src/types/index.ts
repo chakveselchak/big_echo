@@ -25,6 +25,7 @@ export type PublicSettings = {
   yandex_sync_enabled: boolean;
   yandex_sync_interval: "1h" | "6h" | "24h" | "48h";
   yandex_sync_remote_folder: string;
+  show_minitray_overlay: boolean;
 };
 
 export type MacosSystemAudioPermissionStatus = {
@@ -67,6 +68,7 @@ export type SessionMetaView = {
   custom_summary_prompt?: string;
   topic: string;
   tags: string[];
+  num_speakers?: number | null;
 };
 
 export type UiSyncStateView = {

@@ -222,6 +222,7 @@ export function MainPage() {
           artifactPreview={artifactPreview}
           knownTags={knownTags}
           settings={null}
+          transcriptionProvider={transcriptionProvider}
           setDeleteTarget={setDeleteTarget}
           setAudioDeleteTargetSessionId={setAudioDeleteTargetSessionId}
           confirmDeleteSession={async () => {

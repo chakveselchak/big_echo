@@ -3,6 +3,7 @@ fn main() {
     {
         swift_rs::SwiftLinker::new("13.0")
             .with_package("SystemAudioBridge", "macos/SystemAudioBridge")
+            .with_package("MinitrayBridge", "macos/MinitrayBridge")
             .link();
         build_apple_speech_sidecar();
     }

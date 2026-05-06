@@ -268,6 +268,7 @@ pub async fn transcribe_audio(
         settings,
         api_key,
         audio_path,
+        None,
         &ExternalApiLogger::disabled(),
     )
     .await
@@ -277,6 +278,7 @@ pub async fn transcribe_audio_logged(
     settings: &PublicSettings,
     api_key: &str,
     audio_path: &Path,
+    num_speakers: Option<u32>,
     logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     if settings.transcription_provider == "salute_speech" {
@@ -285,7 +287,7 @@ pub async fn transcribe_audio_logged(
     if settings.transcription_provider == "apple_speech" {
         return transcribe_audio_with_apple_speech(settings, audio_path).await;
     }
-    transcribe_audio_with_nexara(settings, api_key, audio_path, logger).await
+    transcribe_audio_with_nexara(settings, api_key, audio_path, num_speakers, logger).await
 }
 
 async fn transcribe_audio_with_apple_speech(
@@ -315,6 +317,7 @@ async fn transcribe_audio_with_nexara(
     settings: &PublicSettings,
     api_key: &str,
     audio_path: &Path,
+    num_speakers: Option<u32>,
     logger: &ExternalApiLogger,
 ) -> Result<String, String> {
     let transcription_url = {
@@ -342,7 +345,7 @@ async fn transcribe_audio_with_nexara(
         .mime_str(mime)
         .map_err(|e| e.to_string())?;
 
-    let form = reqwest::multipart::Form::new()
+    let mut form = reqwest::multipart::Form::new()
         .part("file", part)
         .text("task", settings.transcription_task.trim().to_string())
         .text(
@@ -354,6 +357,9 @@ async fn transcribe_audio_with_nexara(
         )
         .text("model", "whisper-1")
         .text("response_format", "json");
+    if let Some(n) = num_speakers {
+        form = form.text("num_speakers", n.to_string());
+    }
 
     let mut headers = HeaderMap::new();
     let bearer = format!("Bearer {}", api_key.trim());
@@ -362,7 +368,7 @@ async fn transcribe_audio_with_nexara(
         HeaderValue::from_str(&bearer).map_err(|e| e.to_string())?,
     );
 
-    let request_body = HttpLogBody::Lines(vec![
+    let mut log_lines = vec![
         format!("content_type: multipart/form-data"),
         format!("field task: {}", settings.transcription_task.trim()),
         format!(
@@ -371,11 +377,17 @@ async fn transcribe_audio_with_nexara(
         ),
         "field model: whisper-1".to_string(),
         "field response_format: json".to_string(),
+    ];
+    if let Some(n) = num_speakers {
+        log_lines.push(format!("field num_speakers: {n}"));
+    }
+    log_lines.extend([
         format!("file field: file ({request_file_name})"),
         format!("file content_type: {mime}"),
         format!("file bytes: {data_len}"),
         format!("file sha256: {data_sha256}"),
     ]);
+    let request_body = HttpLogBody::Lines(log_lines);
     logger.log_http_request(
         "nexara",
         "transcription",
@@ -1331,6 +1343,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1408,6 +1421,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1513,6 +1527,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1649,6 +1664,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1757,6 +1773,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1882,6 +1899,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2054,6 +2072,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2126,6 +2145,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2181,6 +2201,7 @@ mod tests {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            show_minitray_overlay: false,
         };
 
         assert_eq!(

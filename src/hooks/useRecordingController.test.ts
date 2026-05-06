@@ -1056,6 +1056,7 @@ describe("useRecordingController", () => {
         notes: "",
         topic: "Daily sync",
         tags: [],
+        num_speakers: null,
       },
     });
   });

@@ -196,6 +196,7 @@ export function useRecordingController({
               notes: "",
               topic: trimmedTopic,
               tags: [],
+              num_speakers: null,
             },
           });
           trayTopicSavedSignatureRef.current = signature;
@@ -471,6 +472,7 @@ export function useRecordingController({
             notes: "",
             topic: topic.trim(),
             tags: [],
+            num_speakers: null,
           },
         });
         trayTopicSavedSignatureRef.current = signature;

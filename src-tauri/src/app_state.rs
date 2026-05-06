@@ -94,6 +94,8 @@ pub struct UpdateSessionDetailsRequest {
     pub custom_summary_prompt: String,
     pub topic: String,
     pub tags: Vec<String>,
+    #[serde(default, alias = "numSpeakers")]
+    pub num_speakers: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -104,4 +106,6 @@ pub struct SessionMetaView {
     pub custom_summary_prompt: String,
     pub topic: String,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub num_speakers: Option<u32>,
 }
