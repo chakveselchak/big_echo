@@ -57,7 +57,7 @@ use storage::session_store::save_meta;
 use storage::sqlite_repo::{add_event, upsert_session};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Listener, Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Listener, Manager, RunEvent};
 
 #[cfg(test)]
 const MAX_PIPELINE_RETRY_ATTEMPTS: i64 = 4;
@@ -435,6 +435,47 @@ fn main() {
         let _minitray_open_listener =
             app.listen("minitray:open_tray", move |_event: tauri::Event| {
                 let _ = window_manager::open_tray_window_internal(&app_handle);
+            });
+        // Rust-side stop fallback for minitray's stop button. Mirrors the
+        // STOP_HOTKEY path in hotkey_manager.rs — frontend listener for
+        // `tray:stop` flushes pending session details, but if the listener
+        // isn't subscribed yet (or fails), this guarantees the recording
+        // actually stops.
+        //
+        // After the direct stop we broadcast `ui:recording { recording:
+        // false, sessionId: null }` so every webview (main + tray popover)
+        // resets its `session`/`status` state. Without this broadcast the
+        // window that owns the session (often the tray popover, since the
+        // user usually hits Rec there) would keep showing "recording" UI
+        // indefinitely — its FE-side stop_recording invoke would error
+        // with "no active recording session" because Rust already stopped.
+        let app_handle = app.handle().clone();
+        let _minitray_stop_listener =
+            app.listen("minitray:stop_request", move |_event: tauri::Event| {
+                let state = app_handle.state::<AppState>();
+                let dirs = app_handle.state::<AppDirs>();
+                let _ = stop_active_recording_internal(
+                    dirs.inner(),
+                    state.inner(),
+                    None,
+                    Some(&app_handle),
+                );
+
+                // Sync FE state across every webview window. We dispatch to
+                // each window individually rather than relying on
+                // `app.emit` broadcast — observed during development that
+                // some webviews (notably the prewarmed tray popover with
+                // its own capability scope) didn't always pick up
+                // app-level emits. Per-window emit is reliable.
+                let ui_payload = serde_json::json!({
+                    "recording": false,
+                    "sessionId": null,
+                });
+                let status_payload = serde_json::json!({ "recording": false });
+                for (_label, window) in app_handle.webview_windows() {
+                    let _ = window.emit("ui:recording", ui_payload.clone());
+                    let _ = window.emit("recording:status", status_payload.clone());
+                }
             });
         Ok(())
     });

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions granted to every BigEcho webview window. Without this, programmatically-created windows (tray popover, settings) cannot use Tauri's event.listen / emit / window APIs.",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:webview:default",
+    "core:window:default",
+    "core:app:default",
+    "core:path:default",
+    "core:resources:default",
+    "global-shortcut:default"
+  ]
+}

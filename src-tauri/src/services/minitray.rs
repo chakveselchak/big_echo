@@ -23,7 +23,7 @@ static VISIBLE: AtomicBool = AtomicBool::new(false);
 /// `u64::MAX` is the "never pushed" sentinel: guarantees the first call always goes through.
 static LAST_PUSH_NANOS: AtomicU64 = AtomicU64::new(u64::MAX);
 static EPOCH: OnceLock<Instant> = OnceLock::new();
-static POLLER: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
+static POLLER: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
 static SHOW_SINK: OnceLock<ShowSink> = OnceLock::new();
 static HIDE_SINK: OnceLock<HideSink> = OnceLock::new();
@@ -65,25 +65,27 @@ pub fn show_if_enabled(settings: &PublicSettings, levels: &SharedLevels) {
     }
     call_show_sink();
 
-    // Only spawn the poller if we're inside a tokio runtime.
-    // In production (Tauri command handlers) a runtime is always present.
-    // Some synchronous unit tests have no runtime — skip the poller there.
-    if let Ok(handle_rt) = tokio::runtime::Handle::try_current() {
-        let levels = levels.clone();
-        let handle = handle_rt.spawn(async move {
-            loop {
-                if !VISIBLE.load(Ordering::SeqCst) {
-                    break;
-                }
+    // Dedicated OS thread polls levels every ~30 Hz while VISIBLE is true.
+    // Earlier this used `tokio::spawn`, but Tauri 2 sync commands (like
+    // `start_recording`) execute on a worker thread without a tokio runtime
+    // in scope, so `Handle::try_current()` would silently return None and
+    // the poller would never start. Plain std::thread is runtime-agnostic
+    // and works from any caller.
+    let levels = levels.clone();
+    let handle = std::thread::Builder::new()
+        .name("bigecho-minitray-poller".into())
+        .spawn(move || {
+            while VISIBLE.load(Ordering::SeqCst) {
                 let snap = levels.snapshot();
                 let combined = snap.mic.max(snap.system);
                 update_level(combined);
-                tokio::time::sleep(std::time::Duration::from_millis(33)).await;
+                std::thread::sleep(std::time::Duration::from_millis(33));
             }
         });
-        if let Ok(mut guard) = POLLER.lock() {
-            *guard = Some(handle);
-        }
+    if let Ok(mut guard) = POLLER.lock() {
+        // If spawn failed, leave guard at None — VISIBLE is already true,
+        // hide() still works correctly.
+        *guard = handle.ok();
     }
 }
 
@@ -92,9 +94,12 @@ pub fn hide() {
         return;
     }
     if let Ok(mut guard) = POLLER.lock() {
-        if let Some(handle) = guard.take() {
-            handle.abort();
-        }
+        // Detach the handle: dropping a JoinHandle does NOT terminate the
+        // thread, but the polling loop checks VISIBLE on every iteration
+        // and exits within one sleep interval (~33 ms). Joining here would
+        // block hide() up to that long, which we don't want on the click
+        // path — the panel should disappear immediately.
+        guard.take();
     }
     call_hide_sink();
 }
@@ -167,23 +172,28 @@ extern "C" {
     fn bigecho_minitray_show();
     fn bigecho_minitray_hide();
     fn bigecho_minitray_update_level(level: f32);
-    fn bigecho_minitray_set_callbacks(
-        on_stop: extern "C" fn(),
-        on_icon: extern "C" fn(),
-    );
 }
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
-extern "C" fn on_stop_clicked() {
-    if let Some(app) = APP_HANDLE.get() {
-        // Reuse the existing channel that the recording controller already
-        // listens to. This stops the recording, which in turn calls hide().
-        let _ = app.emit("tray:stop", ());
-    }
+/// Called from Swift when the user clicks the stop button in the minitray.
+/// Exposed via `#[no_mangle]` so Swift links to the symbol directly with
+/// `@_silgen_name` — no dynamic function-pointer registration involved.
+#[no_mangle]
+pub extern "C" fn bigecho_minitray_rust_on_stop() {
+    let Some(app) = APP_HANDLE.get() else { return };
+    // 1) Frontend flush channel — listener in useRecordingController flushes
+    //    pending session details before invoking stop_recording.
+    let _ = app.emit("tray:stop", ());
+    // 2) Rust-side safety net so recording stops even if the frontend
+    //    listener isn't subscribed yet (e.g. main window not yet rendered).
+    //    Routed through a separate event handled in main.rs's setup hook.
+    let _ = app.emit("minitray:stop_request", ());
 }
 
-extern "C" fn on_icon_clicked() {
+/// Called from Swift when the user clicks the BigEcho icon in the minitray.
+#[no_mangle]
+pub extern "C" fn bigecho_minitray_rust_on_icon() {
     if let Some(app) = APP_HANDLE.get() {
         // Emit an event; main.rs listens and opens the tray window.
         // (window_manager is only in the binary crate, not the lib crate.)
@@ -193,10 +203,6 @@ extern "C" fn on_icon_clicked() {
 
 pub fn install_callbacks(app: tauri::AppHandle) {
     let _ = APP_HANDLE.set(app);
-    #[cfg(target_os = "macos")]
-    unsafe {
-        bigecho_minitray_set_callbacks(on_stop_clicked, on_icon_clicked);
-    }
 }
 
 #[cfg(test)]
@@ -238,18 +244,18 @@ mod tests {
     use std::sync::Arc;
 
     fn reset_state_for_test() {
-        // Clear any running poller handle; ignore mutex poison from a previous failed test.
-        let poller_handle = POLLER.lock().ok().and_then(|mut g| g.take());
-        // Also recover from a poisoned mutex by re-initializing it.
+        // Tell any running poller thread to exit on its next iteration.
+        VISIBLE.store(false, Ordering::SeqCst);
+
+        // Drop the previous JoinHandle (detaches the thread; it will exit
+        // when it next reads VISIBLE=false).
+        if let Ok(mut guard) = POLLER.lock() {
+            guard.take();
+        }
         if POLLER.is_poisoned() {
-            // Safety: we're in a single-threaded test context under TEST_LOCK.
-            // Clearing the poison is the cleanest option here.
             drop(POLLER.lock().unwrap_or_else(|e| e.into_inner()));
         }
-        if let Some(handle) = poller_handle {
-            handle.abort();
-        }
-        VISIBLE.store(false, Ordering::SeqCst);
+
         LAST_PUSH_NANOS.store(u64::MAX, Ordering::SeqCst);
         *test_sinks::TEST_SHOW.lock().unwrap() = None;
         *test_sinks::TEST_HIDE.lock().unwrap() = None;
