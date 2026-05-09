@@ -8,7 +8,7 @@ import {
 } from "../types";
 import { captureAnalyticsEvent } from "../lib/analytics";
 import { clamp01, parseEventPayload, splitTags } from "../lib/appUtils";
-import { tauriEmit, tauriInvoke, tauriListen } from "../lib/tauri";
+import { getCurrentWindowLabel, tauriEmit, tauriInvoke, tauriListen } from "../lib/tauri";
 import { defaultRecordingMuteState, nextRecordingMuteState } from "../lib/trayAudio";
 
 const UI_SYNC_DEBOUNCE_MS = 150;
@@ -358,6 +358,12 @@ export function useRecordingController({
       });
 
       tauriListen("tray:stop", async () => {
+        // Rust is the single writer for "stop". The minitray on_stop and
+        // STOP_HOTKEY paths both call stop_active_recording_internal directly
+        // and broadcast `ui:recording { recording: false }` to every window —
+        // the listener below resets FE state. We only flush pending session
+        // details (so the in-flight topic edit lands in meta.json before the
+        // recording is finalized).
         try {
           if (!sessionRef.current) return;
           const sessionId = sessionRef.current.session_id;
@@ -369,10 +375,6 @@ export function useRecordingController({
               // Swallow — recorder must stop even if flush fails.
             }
           }
-          await tauriInvoke<string>("stop_recording", { sessionId });
-          resetMuteState();
-          setStatus("recorded");
-          setSession(null);
           await loadSessions();
         } catch (err) {
           setStatus(`error: ${formatRecordingError(err)}`);
@@ -383,8 +385,13 @@ export function useRecordingController({
     }
 
     tauriListen("ui:sync", (event) => {
-      const payload = parseEventPayload<{ source?: string; topic?: string }>(event);
+      const payload = parseEventPayload<{ source?: string; topic?: string; from?: string }>(event);
       if (!payload) return;
+      // Skip our own echoes. Tauri's global emit broadcasts to every webview
+      // including the sender, and the round-trip is async — if we apply the
+      // echoed payload after the user has typed more characters, we'd revert
+      // those characters (the topic field would lose letters / lag behind).
+      if (payload.from && payload.from === getCurrentWindowLabel()) return;
       const nextSource =
         typeof payload.source === "string" && payload.source.trim() ? payload.source.trim() : sourceRef.current;
       const nextTopic = typeof payload.topic === "string" ? payload.topic : topicRef.current;
@@ -428,14 +435,17 @@ export function useRecordingController({
   }, [enableTrayCommandListeners, loadSessions, setLastSessionId, setSession, setSource, setStatus, setTopic]);
 
   useEffect(() => {
-    if (isSettingsWindow) return;
+    // Wait for hydration from get_ui_sync_state. Otherwise a freshly mounted
+    // window broadcasts `recording: false` from its initial idle/null state
+    // and resets the other window that is actually owning a live session.
+    if (isSettingsWindow || !uiSyncReady) return;
     const recording = status === "recording";
     tauriEmit("recording:status", { recording }).catch(() => undefined);
     tauriEmit("ui:recording", {
       recording,
       sessionId: recording ? (session?.session_id ?? null) : null,
     }).catch(() => undefined);
-  }, [isSettingsWindow, session, status]);
+  }, [isSettingsWindow, session, status, uiSyncReady]);
 
   useEffect(() => {
     if (isSettingsWindow || !uiSyncReady) return;
@@ -449,7 +459,9 @@ export function useRecordingController({
       }
       lastUiSyncPayloadRef.current = { source, topic };
       tauriInvoke("set_ui_sync_state", { source, topic }).catch(() => undefined);
-      tauriEmit("ui:sync", { source, topic }).catch(() => undefined);
+      // Tag the emit with our window label so peers can ignore the echo
+      // we'll receive ourselves (Tauri broadcasts to the sender too).
+      tauriEmit("ui:sync", { source, topic, from: getCurrentWindowLabel() }).catch(() => undefined);
     }, UI_SYNC_DEBOUNCE_MS);
     return () => {
       if (uiSyncTimerRef.current) clearTimeout(uiSyncTimerRef.current);

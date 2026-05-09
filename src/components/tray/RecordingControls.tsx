@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { ConfigProvider, Flex, Input } from "antd";
 import { fixedSources } from "../../types";
 
@@ -12,6 +13,15 @@ type RecordingControlsProps = {
 // Shared control height for tray Source select + Topic input — must match.
 const TRAY_CONTROL_HEIGHT = 28;
 
+// Hoisted to module scope so this object keeps a stable reference across
+// renders. Inlining `{ token: { controlHeightSM: ... } }` was creating a new
+// object on every parent render, defeating ConfigProvider memoization and
+// forcing every Antd descendant to re-derive styles even when the tray was
+// just re-rendering for an audio-level tick.
+const trayThemeConfig = {
+  token: { controlHeightSM: TRAY_CONTROL_HEIGHT },
+};
+
 const nativeSelectStyle: React.CSSProperties = {
   height: TRAY_CONTROL_HEIGHT,
   fontSize: 12,
@@ -23,7 +33,11 @@ const nativeSelectStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-export function RecordingControls({
+const sourceColumnStyle: React.CSSProperties = { flex: "0 0 auto", minWidth: 100 };
+const topicColumnStyle: React.CSSProperties = { flex: 1 };
+const labelStyle: React.CSSProperties = { fontSize: 12 };
+
+function RecordingControlsImpl({
   source,
   topic,
   isRecording,
@@ -31,10 +45,10 @@ export function RecordingControls({
   onTopicChange,
 }: RecordingControlsProps) {
   return (
-    <ConfigProvider theme={{ token: { controlHeightSM: TRAY_CONTROL_HEIGHT } }}>
+    <ConfigProvider theme={trayThemeConfig}>
       <Flex gap={8}>
-        <Flex vertical gap={2} style={{ flex: "0 0 auto", minWidth: 100 }}>
-          <label htmlFor="tray-source" style={{ fontSize: 12 }}>Source</label>
+        <Flex vertical gap={2} style={sourceColumnStyle}>
+          <label htmlFor="tray-source" style={labelStyle}>Source</label>
           <select
             id="tray-source"
             aria-label="Source"
@@ -50,8 +64,8 @@ export function RecordingControls({
             ))}
           </select>
         </Flex>
-        <Flex vertical gap={2} style={{ flex: 1 }}>
-          <label htmlFor="tray-topic" style={{ fontSize: 12 }}>Topic (optional)</label>
+        <Flex vertical gap={2} style={topicColumnStyle}>
+          <label htmlFor="tray-topic" style={labelStyle}>Topic (optional)</label>
           <Input
             id="tray-topic"
             aria-label="Topic (optional)"
@@ -64,3 +78,9 @@ export function RecordingControls({
     </ConfigProvider>
   );
 }
+
+// Memoize so the tray's frequent live-level re-renders don't reach down into
+// the Antd Input. With React.memo and stable callbacks (setTopic/setSource
+// from useState are reference-stable), this component only re-renders when
+// source/topic/isRecording actually change.
+export const RecordingControls = memo(RecordingControlsImpl);

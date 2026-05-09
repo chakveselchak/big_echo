@@ -214,15 +214,19 @@ describe("App main window", () => {
       expect(invokeMock).toHaveBeenCalledWith("start_recording", expect.any(Object));
     });
 
+    // tray:stop is FE flush + UI signal only. The actual stop is performed
+    // by Rust (minitray on_stop / STOP_HOTKEY both call
+    // stop_active_recording_internal directly and then broadcast
+    // ui:recording). The FE listener for tray:stop must NOT invoke
+    // stop_recording — that would race with Rust's authoritative stop.
+    invokeMock.mockClear();
     await act(async () => {
       await listeners.get("tray:stop")?.();
     });
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("stop_recording", expect.any(Object));
-    });
+    expect(invokeMock).not.toHaveBeenCalledWith("stop_recording", expect.any(Object));
   });
 
-  it("flushes pending session details before stopping via tray:stop", async () => {
+  it("flushes pending session details on tray:stop", async () => {
     const callOrder: string[] = [];
     invokeMock.mockImplementation(async (cmd: string, _args?: unknown) => {
       if (cmd === "update_session_details") {
@@ -263,25 +267,16 @@ describe("App main window", () => {
       await listeners.get("tray:start")?.();
     });
 
-    // Simulate a pending debounced edit: an in-progress change to session
-    // details that hasn't yet flushed. The main-window stop path must
-    // call update_session_details before stop_recording regardless of
-    // whether anything is dirty — flushSessionDetails handles the no-op
-    // case internally.
+    // tray:stop is now FE flush only — the actual stop is owned by Rust
+    // (minitray / STOP_HOTKEY → stop_active_recording_internal). The FE
+    // listener still flushes pending metadata so the in-flight topic edit
+    // lands before finalization, but it MUST NOT call stop_recording —
+    // that would race with Rust's authoritative writer.
     await act(async () => {
       await listeners.get("tray:stop")?.();
     });
 
-    // At minimum: if there are pending edits, update_session_details
-    // must precede stop_recording. When nothing is pending,
-    // stop_recording still runs. The defining assertion is the order
-    // when both are called.
-    const stopIndex = callOrder.indexOf("stop_recording");
-    const flushIndex = callOrder.indexOf("update_session_details");
-    expect(stopIndex).toBeGreaterThanOrEqual(0);
-    if (flushIndex >= 0) {
-      expect(flushIndex).toBeLessThan(stopIndex);
-    }
+    expect(callOrder).not.toContain("stop_recording");
   });
 
   it("starts recording from tray start event with default source", async () => {

@@ -19,6 +19,9 @@ pub(crate) fn build_global_shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri
             if shortcut_text == REC_HOTKEY {
                 let _ = app.emit("tray:start", ());
             } else if shortcut_text == STOP_HOTKEY {
+                // FE listener for tray:stop flushes pending session details;
+                // Rust is the single writer of "stop". Broadcast the result
+                // so every webview clears its FE state.
                 let _ = app.emit("tray:stop", ());
                 let state = app.state::<AppState>();
                 let dirs = app.state::<AppDirs>();
@@ -28,6 +31,7 @@ pub(crate) fn build_global_shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri
                     None,
                     Some(app),
                 );
+                crate::broadcast_recording_stopped(app);
             }
         })
         .build()

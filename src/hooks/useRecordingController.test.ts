@@ -46,6 +46,9 @@ vi.mock("../lib/tauri", () => ({
   tauriEmit: emitMock,
   tauriInvoke: invokeMock,
   tauriListen: listenMock,
+  // The controller tags ui:sync emits with the originating window so peers
+  // can drop their own echoes; the test harness defaults to "main".
+  getCurrentWindowLabel: () => "main",
 }));
 
 vi.mock("../lib/analytics", () => ({
@@ -884,8 +887,92 @@ describe("useRecordingController", () => {
     expect(emitMock).toHaveBeenCalledWith("ui:sync", {
       source: "telegram",
       topic: "Q1 planning",
+      from: "main",
     });
     expect(result.current.controller.uiSyncReady).toBe(true);
+  });
+
+  it("ignores own ui:sync echoes so a delayed self-broadcast doesn't revert just-typed characters", async () => {
+    // Regression for the tray topic-typing glitch: Tauri broadcasts emits to
+    // every webview including the sender, and the IPC round-trip is async.
+    // If the user keeps typing during the round-trip, applying our own echo
+    // would overwrite the freshly-typed characters with the older snapshot.
+    vi.useFakeTimers();
+    const loadSessions = vi.fn(async () => undefined);
+
+    const { result } = renderHook(() => {
+      const [topic, setTopic] = useState("");
+      const [tagsInput] = useState("");
+      const [source, setSource] = useState("slack");
+      const [customTag] = useState("");
+      const [session, setSession] = useState<StartResponse | null>(null);
+      const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+      const [status, setStatus] = useState("idle");
+
+      return {
+        setTopic,
+        controller: useRecordingController({
+          isSettingsWindow: false,
+          isTrayWindow: true,
+          topic,
+          setTopic,
+          tagsInput,
+          source,
+          setSource,
+          notesInput: customTag,
+          session,
+          setSession,
+          lastSessionId,
+          setLastSessionId,
+          status,
+          setStatus,
+          loadSessions,
+        }),
+        topic,
+      };
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // User types "he" then "hel" before the debounced emit fires.
+    act(() => {
+      result.current.setTopic("he");
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    // The debounced emit went out tagged with our own window label.
+    const ownEmit = emitMock.mock.calls.find(([event]) => event === "ui:sync");
+    expect(ownEmit?.[1]).toMatchObject({ topic: "he", from: "main" });
+
+    // While the emit is "in flight" the user keeps typing.
+    act(() => {
+      result.current.setTopic("hel");
+    });
+    expect(result.current.topic).toBe("hel");
+
+    // Now Tauri delivers our own echo back. The listener must drop it —
+    // otherwise the user's "l" gets clobbered by the older "he" snapshot.
+    const uiSyncListener = listeners.get("ui:sync");
+    expect(uiSyncListener).toBeDefined();
+    await act(async () => {
+      await uiSyncListener?.({
+        payload: { source: "slack", topic: "he", from: "main" },
+      });
+    });
+    expect(result.current.topic).toBe("hel");
+
+    // Foreign emits (different window label) still apply normally.
+    await act(async () => {
+      await uiSyncListener?.({
+        payload: { source: "slack", topic: "from-other-window", from: "tray" },
+      });
+    });
+    expect(result.current.topic).toBe("from-other-window");
   });
 
   it("reduces idle tray live-level polling frequency", async () => {
@@ -1120,7 +1207,7 @@ describe("useRecordingController", () => {
     expect(result.current.topic).toBe("Daily sync");
   });
 
-  it("flushes pending session details when tray:stop fires in the main window", async () => {
+  it("flushes pending session details on tray:stop without invoking stop_recording", async () => {
     const callOrder: string[] = [];
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "stop_recording") {
@@ -1148,8 +1235,12 @@ describe("useRecordingController", () => {
       await listeners.get("tray:stop")?.();
     });
 
+    // Rust is the single writer for "stop" on the tray:stop path. FE only
+    // flushes pending metadata; the actual stop is invoked by Rust
+    // (minitray:stop_request listener / STOP_HOTKEY) and the resulting
+    // ui:recording broadcast resets FE state.
     expect(flushPendingSessionDetails).toHaveBeenCalledWith("active-session");
-    expect(callOrder).toEqual(["flush", "stop_recording"]);
+    expect(callOrder).toEqual(["flush"]);
   });
 
   it("does not schedule a tray topic autosave while a stop is in flight", async () => {

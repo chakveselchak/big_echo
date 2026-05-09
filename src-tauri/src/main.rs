@@ -142,6 +142,26 @@ fn preserve_capture_artifacts_for_recovery(
     Ok(preserved)
 }
 
+// ── Recording-stopped broadcast ──────────────────────────────────────────────
+
+/// Notify every webview that recording has stopped from a Rust-driven path
+/// (minitray button, STOP_HOTKEY). FE listens to `ui:recording` and
+/// `recording:status` to clear `session`/`status` and update tray icon.
+///
+/// Uses per-window emit instead of `app.emit` because, during development,
+/// some prewarmed webviews didn't always pick up app-level broadcasts.
+pub(crate) fn broadcast_recording_stopped(app: &AppHandle) {
+    let ui_payload = serde_json::json!({
+        "recording": false,
+        "sessionId": null,
+    });
+    let status_payload = serde_json::json!({ "recording": false });
+    for (_label, window) in app.webview_windows() {
+        let _ = window.emit("ui:recording", ui_payload.clone());
+        let _ = window.emit("recording:status", status_payload.clone());
+    }
+}
+
 // ── Core stop implementation ─────────────────────────────────────────────────
 
 pub(crate) fn stop_active_recording_internal(
@@ -150,41 +170,57 @@ pub(crate) fn stop_active_recording_internal(
     session_id: Option<&str>,
     app: Option<&AppHandle>,
 ) -> Result<String, String> {
-    let mut guard = state
+    let mut session_guard = state
         .active_session
         .lock()
         .map_err(|_| "state lock poisoned".to_string())?;
 
-    let mut meta = guard
-        .take()
-        .ok_or_else(|| "No active recording session".to_string())?;
+    // Validate everything that may fail BEFORE taking ownership of `meta`.
+    // Earlier this used `guard.take()` first and validated afterwards, which
+    // meant any subsequent `?` (session mismatch, settings load, datetime
+    // parse, recordings dir resolve, capture lock poison) would drop the meta
+    // on the floor while leaving `active_capture` still recording — the
+    // process would silently leak audio to disk with no way to stop it.
+    let (settings, abs_dir, audio_output_path) = {
+        let active = session_guard
+            .as_ref()
+            .ok_or_else(|| "No active recording session".to_string())?;
+        ensure_stop_session_matches(&active.session_id, session_id)?;
 
-    ensure_stop_session_matches(&meta.session_id, session_id)?;
-
-    // Hide the minitray overlay here — after confirming this stop call is for
-    // the active session (mismatch returns above, so we don't hide the panel
-    // that belongs to a still-running recording) but before any subsequent `?`
-    // operators that could early-return and leak the overlay.
-    services::minitray::hide();
-
-    meta.ended_at_iso = Some(Local::now().to_rfc3339());
-
-    let settings = get_settings_from_dirs(dirs)?;
-    let started_at: DateTime<Local> = DateTime::parse_from_rfc3339(&meta.started_at_iso)
-        .map_err(|e| e.to_string())?
-        .with_timezone(&Local);
-    let rel_dir = build_session_relative_dir(&meta.primary_tag, started_at);
-    let abs_dir = root_recordings_dir(&dirs.app_data_dir, &settings)?.join(&rel_dir);
-    let data_dir = dirs.app_data_dir.clone();
-    let audio_output_path = abs_dir.join(&meta.artifacts.audio_file);
+        let settings = get_settings_from_dirs(dirs)?;
+        let started_at: DateTime<Local> = DateTime::parse_from_rfc3339(&active.started_at_iso)
+            .map_err(|e| e.to_string())?
+            .with_timezone(&Local);
+        let rel_dir = build_session_relative_dir(&active.primary_tag, started_at);
+        let abs_dir = root_recordings_dir(&dirs.app_data_dir, &settings)?.join(&rel_dir);
+        let audio_output_path = abs_dir.join(&active.artifacts.audio_file);
+        (settings, abs_dir, audio_output_path)
+    };
 
     let mut cap_guard = state
         .active_capture
         .lock()
         .map_err(|_| "capture state lock poisoned".to_string())?;
+
+    // All fallible setup is done. Take meta + capture together so the two
+    // never desync.
+    let mut meta = session_guard
+        .take()
+        .expect("session presence verified above");
+    let captured = cap_guard.take();
+    drop(session_guard);
+    drop(cap_guard);
+
+    // Hide the minitray overlay here — after we've committed to stopping but
+    // before any subsequent `?` operator. Earlier failure paths return above
+    // without disturbing the panel state.
+    services::minitray::hide();
+
+    meta.ended_at_iso = Some(Local::now().to_rfc3339());
+    let data_dir = dirs.app_data_dir.clone();
     let mut finalize_error: Option<String> = None;
     let mut finalize_warning: Option<String> = None;
-    if let Some(capture) = cap_guard.take() {
+    if let Some(capture) = captured {
         match capture.stop_and_take_artifacts() {
             Ok(artifacts) => {
                 // A non-fatal warning here means one channel (typically the
@@ -436,19 +472,11 @@ fn main() {
             app.listen("minitray:open_tray", move |_event: tauri::Event| {
                 let _ = window_manager::open_tray_window_internal(&app_handle);
             });
-        // Rust-side stop fallback for minitray's stop button. Mirrors the
-        // STOP_HOTKEY path in hotkey_manager.rs — frontend listener for
-        // `tray:stop` flushes pending session details, but if the listener
-        // isn't subscribed yet (or fails), this guarantees the recording
-        // actually stops.
-        //
-        // After the direct stop we broadcast `ui:recording { recording:
-        // false, sessionId: null }` so every webview (main + tray popover)
-        // resets its `session`/`status` state. Without this broadcast the
-        // window that owns the session (often the tray popover, since the
-        // user usually hits Rec there) would keep showing "recording" UI
-        // indefinitely — its FE-side stop_recording invoke would error
-        // with "no active recording session" because Rust already stopped.
+        // Rust is the single writer for "stop" from the minitray. The FE
+        // listener for `tray:stop` only flushes pending session details;
+        // this listener is what actually stops the recording and then
+        // broadcasts `ui:recording { recording: false }` so every webview
+        // resets its session/status.
         let app_handle = app.handle().clone();
         let _minitray_stop_listener =
             app.listen("minitray:stop_request", move |_event: tauri::Event| {
@@ -460,22 +488,7 @@ fn main() {
                     None,
                     Some(&app_handle),
                 );
-
-                // Sync FE state across every webview window. We dispatch to
-                // each window individually rather than relying on
-                // `app.emit` broadcast — observed during development that
-                // some webviews (notably the prewarmed tray popover with
-                // its own capability scope) didn't always pick up
-                // app-level emits. Per-window emit is reliable.
-                let ui_payload = serde_json::json!({
-                    "recording": false,
-                    "sessionId": null,
-                });
-                let status_payload = serde_json::json!({ "recording": false });
-                for (_label, window) in app_handle.webview_windows() {
-                    let _ = window.emit("ui:recording", ui_payload.clone());
-                    let _ = window.emit("recording:status", status_payload.clone());
-                }
+                broadcast_recording_stopped(&app_handle);
             });
         Ok(())
     });
