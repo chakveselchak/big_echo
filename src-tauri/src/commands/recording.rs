@@ -705,4 +705,65 @@ mod tests {
             "hide sink must be called exactly once"
         );
     }
+
+    /// Regression test: stop_active_recording_internal must NOT drop the
+    /// active session or capture when validation (e.g. session_id mismatch
+    /// against a stale FE caller) fails. Earlier this code took the meta
+    /// out of the guard *before* `ensure_stop_session_matches`, so a stale
+    /// stop_recording invoke would leave `active_session = None` while
+    /// `active_capture` kept recording — silently leaking audio with no
+    /// user-visible way to stop. The hoisted validation now ensures this
+    /// case preserves both halves of the recording state.
+    #[test]
+    fn stop_with_stale_session_id_preserves_meta_and_capture() {
+        use crate::services::minitray;
+        use crate::stop_active_recording_internal;
+
+        let _guard = minitray::TEST_LOCK.lock().unwrap();
+        minitray::hide();
+        minitray::install_show_sink_for_test(Box::new(|| {}));
+        minitray::install_hide_sink_for_test(Box::new(|| {}));
+
+        let (state, dirs, _tmp) = make_test_app_state_with_settings(|s| {
+            s.show_minitray_overlay = false;
+        });
+
+        let started_at = chrono::Local::now();
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut meta = crate::domain::session::SessionMeta::new(
+            session_id.clone(),
+            "zoom".to_string(),
+            vec!["zoom".to_string()],
+            String::new(),
+            String::new(),
+        );
+        meta.started_at_iso = started_at.to_rfc3339();
+
+        *state.active_session.lock().expect("session lock") = Some(meta);
+        *state.active_capture.lock().expect("capture lock") = Some(
+            crate::audio::capture::ContinuousCapture::test_stub(state.recording_control.clone()),
+        );
+
+        // FE caller passes an unrelated session_id (typical for a desync
+        // where FE state lagged behind a previous stop/start cycle).
+        let result =
+            stop_active_recording_internal(&dirs, &state, Some("not-the-active-id"), None);
+
+        assert!(matches!(result, Err(ref err) if err == "Session id mismatch"));
+
+        // The original session and its capture must still be intact — a
+        // subsequent stop with the correct id (or via Rust's
+        // minitray:stop_request, which passes None) must remain capable of
+        // finalizing the recording.
+        assert!(
+            state.active_session.lock().expect("session lock").is_some(),
+            "active_session must survive a stale-id stop attempt",
+        );
+        assert!(
+            state.active_capture.lock().expect("capture lock").is_some(),
+            "active_capture must survive a stale-id stop attempt",
+        );
+        // Minitray must NOT be hidden either — the session is still live.
+        assert!(!minitray::is_visible(), "minitray was never shown for this test");
+    }
 }
