@@ -181,7 +181,7 @@ describe("Tray window", () => {
     expect(sourceField).toBeInTheDocument();
     expect(topicField).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rec" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
 
     await user.type(topicField, "Daily sync");
     await user.click(screen.getByRole("button", { name: "Rec" }));
@@ -219,7 +219,7 @@ describe("Tray window", () => {
       expect(topicField).toBeInTheDocument();
 
       expect(screen.getByRole("button", { name: "Rec" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
       expect(screen.getByText("Grant Screen & System Audio Recording permission in System Settings.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Open System Settings" })).toBeInTheDocument();
       expect(screen.queryByLabelText("System activity")).not.toBeInTheDocument();
@@ -589,7 +589,7 @@ describe("Tray window", () => {
     });
 
     expect(screen.getByText("Status: идет запись")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Rec" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Rec" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Mute microphone" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Mute microphone" })).toHaveAttribute("aria-pressed", "false");

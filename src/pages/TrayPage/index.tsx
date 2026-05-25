@@ -10,6 +10,15 @@ import { RecordingControls } from "../../components/tray/RecordingControls";
 import { initializeAnalytics } from "../../lib/analytics";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 
+function formatElapsed(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 export function TrayPage() {
   const [status, setStatus] = useState("idle");
   const [topic, setTopic] = useState("");
@@ -85,6 +94,20 @@ export function TrayPage() {
     isMacosSystemAudioPermissionPendingReview || isMacosSystemAudioLookupFailed;
 
   const isRecording = status === "recording";
+
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (!isRecording) {
+      setElapsedSec(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedSec(0);
+    const id = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isRecording]);
 
   async function handleToggleMuted(channel: "mic" | "system") {
     setTrayMuteError(null);
@@ -238,46 +261,46 @@ export function TrayPage() {
         }
       />
 
-      {/* Rec / Stop */}
-      <Flex gap={8} style={{ marginTop: "auto" }} /* pushes buttons to bottom in compact tray */>
-        <Button
-          type="primary"
-          onClick={() => void startFromTray()}
-          disabled={isRecording}
-          style={{ flex: 1 }}
-        >
-          <span
-            style={{
-              display: "inline-block",
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              background: "currentColor",
-              marginRight: 6,
-              opacity: 1,
-              backgroundColor: "rgb(224, 55, 55)",
-            }}
-          />
-          Rec
-        </Button>
-        <Button
-          onClick={() => void stop()}
-          disabled={!isRecording}
-          style={{ flex: 1 }}
-        >
-          <span
-            style={{
-              display: "inline-block",
-              width: 8,
-              height: 8,
-              background: "currentColor",
-              marginRight: 6,
-              opacity: !isRecording ? 0.4 : 1,
-            }}
-          />
-          Stop
-        </Button>
-      </Flex>
+      {/* Rec / Stop toggle — single full-width button */}
+      <Button
+        block
+        type="primary"
+        danger={isRecording}
+        aria-label={isRecording ? "Stop" : "Rec"}
+        onClick={() => void (isRecording ? stop() : startFromTray())}
+        style={{ marginTop: "auto" }}
+      >
+        {isRecording ? (
+          <>
+            <span
+              style={{
+                display: "inline-block",
+                width: 8,
+                height: 8,
+                background: "currentColor",
+                marginRight: 6,
+              }}
+              aria-hidden
+            />
+            Stop ({formatElapsed(elapsedSec)})
+          </>
+        ) : (
+          <>
+            <span
+              style={{
+                display: "inline-block",
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                backgroundColor: "rgb(224, 55, 55)",
+                marginRight: 6,
+              }}
+              aria-hidden
+            />
+            Rec
+          </>
+        )}
+      </Button>
     </Flex>
   );
 }
