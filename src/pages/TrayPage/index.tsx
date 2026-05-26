@@ -10,6 +10,9 @@ import { RecordingControls } from "../../components/tray/RecordingControls";
 import { initializeAnalytics } from "../../lib/analytics";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 
+const monoFontStack =
+  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+
 function formatElapsed(totalSec: number): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
@@ -271,21 +274,22 @@ export function TrayPage() {
         style={{ marginTop: "auto" }}
       >
         {isRecording ? (
-          <>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span
               style={{
                 display: "inline-block",
                 width: 8,
                 height: 8,
                 background: "currentColor",
-                marginRight: 6,
               }}
               aria-hidden
             />
-            Stop ({formatElapsed(elapsedSec)})
-          </>
+            <span>
+              Stop (<span style={{ fontFamily: monoFontStack }}>{formatElapsed(elapsedSec)}</span>)
+            </span>
+          </span>
         ) : (
-          <>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span
               style={{
                 display: "inline-block",
@@ -293,12 +297,11 @@ export function TrayPage() {
                 height: 10,
                 borderRadius: "50%",
                 backgroundColor: "rgb(224, 55, 55)",
-                marginRight: 6,
               }}
               aria-hidden
             />
             Rec
-          </>
+          </span>
         )}
       </Button>
     </Flex>
