@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useState } from "react";
 import { Alert, Button, Flex, Typography } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
@@ -107,7 +107,11 @@ export function TrayPage() {
     const startedAt = Date.now();
     setElapsedSec(0);
     const id = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+      // Non-urgent: never preempt a keystroke happening at the same instant
+      // in the Topic input.
+      startTransition(() => {
+        setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+      });
     }, 1000);
     return () => clearInterval(id);
   }, [isRecording]);
