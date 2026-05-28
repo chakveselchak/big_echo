@@ -34,18 +34,24 @@ pub struct BrainUploadResponse {
 
 #[derive(Debug, Error)]
 pub enum BrainUploadError {
-    #[error("unauthorized (401): {body}")]
-    Unauthorized { body: String },
-    #[error("forbidden (403): {body}")]
-    Forbidden { body: String },
-    #[error("payload too large (413): {body}")]
-    PayloadTooLarge { body: String },
-    #[error("unsupported media type (415): {body}")]
-    UnsupportedMediaType { body: String },
-    #[error("server error ({status}): {body}")]
-    Server { status: u16, body: String },
-    #[error("http error ({status}): {body}")]
-    Http { status: u16, body: String },
+    #[error("unauthorized (401): {body_preview}")]
+    Unauthorized { body_preview: String },
+    #[error("forbidden (403): {body_preview}")]
+    Forbidden { body_preview: String },
+    #[error("payload too large (413): {body_preview}")]
+    PayloadTooLarge { body_preview: String },
+    #[error("unsupported media type (415): {body_preview}")]
+    UnsupportedMediaType { body_preview: String },
+    #[error("server error ({status}): {body_preview}")]
+    Server {
+        status: u16,
+        body_preview: String,
+    },
+    #[error("http error ({status}): {body_preview}")]
+    Http {
+        status: u16,
+        body_preview: String,
+    },
     #[error("network error: {0}")]
     Network(String),
     #[error("io error: {0}")]
@@ -54,6 +60,52 @@ pub enum BrainUploadError {
     Json(String),
     #[error("api error: {0}")]
     Api(String),
+}
+
+fn content_type_for_audio_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("opus") => "audio/ogg",
+        Some("mp3") => "audio/mpeg",
+        Some("m4a") => "audio/mp4",
+        Some("ogg") => "audio/ogg",
+        Some("wav") => "audio/wav",
+        _ => "application/octet-stream",
+    }
+}
+
+fn body_preview(raw: &str) -> String {
+    const MAX_PREVIEW_CHARS: usize = 200;
+
+    let normalized = raw
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>();
+    let mut sanitized = Vec::new();
+    for part in normalized.split_whitespace() {
+        let lowered = part.to_ascii_lowercase();
+        if lowered.contains("token")
+            || lowered.contains("secret")
+            || lowered.contains("authorization")
+            || lowered.contains("bearer")
+            || part.contains('@')
+        {
+            sanitized.push("[redacted]");
+        } else {
+            sanitized.push(part);
+        }
+    }
+
+    let collapsed = sanitized.join(" ");
+    let mut preview = collapsed.chars().take(MAX_PREVIEW_CHARS).collect::<String>();
+    if collapsed.chars().count() > MAX_PREVIEW_CHARS {
+        preview.push_str("...");
+    }
+    preview
 }
 
 pub struct BrainServerClient {
@@ -83,10 +135,16 @@ impl BrainServerClient {
         let metadata_json =
             serde_json::to_string(metadata).map_err(|e| BrainUploadError::Json(e.to_string()))?;
 
-        let file_part = reqwest::multipart::Part::bytes(data).file_name(file_name);
+        let file_part = reqwest::multipart::Part::bytes(data)
+            .file_name(file_name)
+            .mime_str(content_type_for_audio_path(audio_path))
+            .map_err(|e| BrainUploadError::Io(e.to_string()))?;
+        let metadata_part = reqwest::multipart::Part::text(metadata_json)
+            .mime_str("application/json")
+            .map_err(|e| BrainUploadError::Json(e.to_string()))?;
         let form = reqwest::multipart::Form::new()
             .part("file", file_part)
-            .text("metadata", metadata_json);
+            .part("metadata", metadata_part);
 
         let response = self
             .http
@@ -116,17 +174,25 @@ impl BrainServerClient {
                     ))
                 }
             }
-            401 => Err(BrainUploadError::Unauthorized { body }),
-            403 => Err(BrainUploadError::Forbidden { body }),
-            413 => Err(BrainUploadError::PayloadTooLarge { body }),
-            415 => Err(BrainUploadError::UnsupportedMediaType { body }),
+            401 => Err(BrainUploadError::Unauthorized {
+                body_preview: body_preview(&body),
+            }),
+            403 => Err(BrainUploadError::Forbidden {
+                body_preview: body_preview(&body),
+            }),
+            413 => Err(BrainUploadError::PayloadTooLarge {
+                body_preview: body_preview(&body),
+            }),
+            415 => Err(BrainUploadError::UnsupportedMediaType {
+                body_preview: body_preview(&body),
+            }),
             500..=599 => Err(BrainUploadError::Server {
                 status: status_u16,
-                body,
+                body_preview: body_preview(&body),
             }),
             _ => Err(BrainUploadError::Http {
                 status: status_u16,
-                body,
+                body_preview: body_preview(&body),
             }),
         }
     }
@@ -165,6 +231,16 @@ mod tests {
     fn audio_file() -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempdir().expect("tempdir");
         let path = tmp.path().join("audio.opus");
+        std::fs::File::create(&path)
+            .expect("create audio")
+            .write_all(b"audio-bytes")
+            .expect("write audio");
+        (tmp, path)
+    }
+
+    fn audio_file_with_name(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join(name);
         std::fs::File::create(&path)
             .expect("create audio")
             .write_all(b"audio-bytes")
@@ -241,6 +317,41 @@ mod tests {
         assert!(response.ok);
         assert_eq!(response.job_id, Some(42));
         assert_eq!(response.status.as_deref(), Some("queued"));
+    }
+
+    #[tokio::test]
+    async fn upload_audio_sets_multipart_part_content_types() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file_with_name("audio.mp3");
+
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .and(MultipartBodyContains {
+                needles: vec![
+                    "name=\"file\"",
+                    "filename=\"audio.mp3\"",
+                    "Content-Type: audio/mpeg",
+                    "name=\"metadata\"",
+                    "Content-Type: application/json",
+                ],
+                forbidden: vec![],
+            })
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "ok": true
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect("upload should succeed");
     }
 
     #[tokio::test]
@@ -373,8 +484,41 @@ mod tests {
 
         assert!(matches!(
             err,
-            BrainUploadError::PayloadTooLarge { ref body } if body == "too large"
+            BrainUploadError::PayloadTooLarge { ref body_preview } if body_preview == "too large"
         ));
+    }
+
+    #[tokio::test]
+    async fn upload_audio_error_display_uses_sanitized_truncated_body_preview() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+        let raw_body = format!(
+            "token=SECRET-123\nemail=user@example.com\n{}",
+            "x".repeat(260)
+        );
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(ResponseTemplate::new(413).set_body_string(raw_body.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect_err("413 should fail");
+
+        let display = err.to_string();
+        assert!(!display.contains("SECRET-123"));
+        assert!(!display.contains("user@example.com"));
+        assert!(!display.contains('\n'));
+        assert!(display.contains("[redacted]"));
+        assert!(display.len() < raw_body.len());
     }
 
     #[tokio::test]
@@ -400,7 +544,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            BrainUploadError::UnsupportedMediaType { ref body } if body == "unsupported"
+            BrainUploadError::UnsupportedMediaType { ref body_preview } if body_preview == "unsupported"
         ));
     }
 
@@ -429,8 +573,8 @@ mod tests {
             err,
             BrainUploadError::Server {
                 status: 503,
-                ref body
-            } if body == "try later"
+                ref body_preview
+            } if body_preview == "try later"
         ));
     }
 
