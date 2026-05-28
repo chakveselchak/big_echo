@@ -935,6 +935,7 @@ mod ipc_runtime_tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
+            ..Default::default()
         };
         save_settings(app_data_dir, &settings).expect("save settings");
 
@@ -997,6 +998,7 @@ mod ipc_runtime_tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
+            ..Default::default()
         };
         save_settings(app_data_dir, &settings).expect("save settings");
 
