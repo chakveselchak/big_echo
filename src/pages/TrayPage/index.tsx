@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { startTransition, useCallback, useEffect, useState } from "react";
 import { Alert, Button, Flex, Typography } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
@@ -9,6 +9,18 @@ import { AudioRow } from "../../components/tray/AudioRow";
 import { RecordingControls } from "../../components/tray/RecordingControls";
 import { initializeAnalytics } from "../../lib/analytics";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
+
+const monoFontStack =
+  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+
+function formatElapsed(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 
 export function TrayPage() {
   const [status, setStatus] = useState("idle");
@@ -85,6 +97,24 @@ export function TrayPage() {
     isMacosSystemAudioPermissionPendingReview || isMacosSystemAudioLookupFailed;
 
   const isRecording = status === "recording";
+
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (!isRecording) {
+      setElapsedSec(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedSec(0);
+    const id = setInterval(() => {
+      // Non-urgent: never preempt a keystroke happening at the same instant
+      // in the Topic input.
+      startTransition(() => {
+        setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isRecording]);
 
   async function handleToggleMuted(channel: "mic" | "system") {
     setTrayMuteError(null);
@@ -238,46 +268,46 @@ export function TrayPage() {
         }
       />
 
-      {/* Rec / Stop */}
-      <Flex gap={8} style={{ marginTop: "auto" }} /* pushes buttons to bottom in compact tray */>
-        <Button
-          type="primary"
-          onClick={() => void startFromTray()}
-          disabled={isRecording}
-          style={{ flex: 1 }}
-        >
-          <span
-            style={{
-              display: "inline-block",
-              width: 10,
-              height: 10,
-              borderRadius: "50%",
-              background: "currentColor",
-              marginRight: 6,
-              opacity: 1,
-              backgroundColor: "rgb(224, 55, 55)",
-            }}
-          />
-          Rec
-        </Button>
-        <Button
-          onClick={() => void stop()}
-          disabled={!isRecording}
-          style={{ flex: 1 }}
-        >
-          <span
-            style={{
-              display: "inline-block",
-              width: 8,
-              height: 8,
-              background: "currentColor",
-              marginRight: 6,
-              opacity: !isRecording ? 0.4 : 1,
-            }}
-          />
-          Stop
-        </Button>
-      </Flex>
+      {/* Rec / Stop toggle — single full-width button */}
+      <Button
+        block
+        type="primary"
+        danger={isRecording}
+        aria-label={isRecording ? "Stop" : "Rec"}
+        onClick={() => void (isRecording ? stop() : startFromTray())}
+        style={{ marginTop: "auto" }}
+      >
+        {isRecording ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 8,
+                height: 8,
+                background: "currentColor",
+              }}
+              aria-hidden
+            />
+            <span>
+              Stop (<span style={{ fontFamily: monoFontStack }}>{formatElapsed(elapsedSec)}</span>)
+            </span>
+          </span>
+        ) : (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                backgroundColor: "rgb(224, 55, 55)",
+              }}
+              aria-hidden
+            />
+            Rec
+          </span>
+        )}
+      </Button>
     </Flex>
   );
 }
