@@ -21,6 +21,9 @@ use commands::apple_speech::{
     apple_speech_check_locale, apple_speech_download_locale, apple_speech_open_dictation_settings,
     apple_speech_transcribe, get_apple_speech_availability,
 };
+use commands::brain_sync::{
+    brain_sync_clear_token, brain_sync_has_token, brain_sync_set_token,
+};
 use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
@@ -541,6 +544,9 @@ fn main() {
             yandex_sync_has_token,
             yandex_sync_status,
             yandex_sync_now,
+            brain_sync_set_token,
+            brain_sync_clear_token,
+            brain_sync_has_token,
             get_nexara_balance,
             get_apple_speech_availability,
             apple_speech_check_locale,
@@ -738,7 +744,10 @@ mod ipc_runtime_tests {
                 yandex_sync_clear_token,
                 yandex_sync_has_token,
                 yandex_sync_status,
-                yandex_sync_now
+                yandex_sync_now,
+                brain_sync_set_token,
+                brain_sync_clear_token,
+                brain_sync_has_token
             ])
             .build(ctx)
             .expect("failed to build test app");
@@ -1794,5 +1803,68 @@ mod ipc_runtime_tests {
         .expect("has_token must succeed");
         let value = extract_ok_json(response);
         assert_eq!(value, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn invoke_brain_sync_has_token_returns_false_when_unset() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("brain_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token must succeed");
+        let value = extract_ok_json(response);
+        assert_eq!(value, serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn invoke_brain_sync_set_then_clear_token() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+
+        let set = get_ipc_response(
+            &webview,
+            invoke_request("brain_sync_set_token", serde_json::json!({ "token": "abc" })),
+        );
+        assert!(set.is_ok());
+
+        let has_after_set = get_ipc_response(
+            &webview,
+            invoke_request("brain_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token after set must succeed");
+        assert_eq!(extract_ok_json(has_after_set), serde_json::Value::Bool(true));
+
+        let clear = get_ipc_response(
+            &webview,
+            invoke_request("brain_sync_clear_token", serde_json::json!({})),
+        );
+        assert!(clear.is_ok());
+
+        let has_after_clear = get_ipc_response(
+            &webview,
+            invoke_request("brain_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token after clear must succeed");
+        assert_eq!(extract_ok_json(has_after_clear), serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn invoke_brain_sync_set_token_rejects_whitespace() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("brain_sync_set_token", serde_json::json!({ "token": "   " })),
+        );
+        let err = response.expect_err("whitespace token should fail");
+        assert_eq!(extract_err_string(err), "Token must not be empty");
     }
 }
