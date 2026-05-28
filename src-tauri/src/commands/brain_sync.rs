@@ -193,10 +193,15 @@ fn local_audio_file_path(session_dir: &Path, audio_file: &str) -> Option<PathBuf
 
     let audio_path = session_dir.join(relative_path);
     let file_type = std::fs::symlink_metadata(&audio_path).ok()?.file_type();
-    if !file_type.is_symlink() && file_type.is_file() {
-        Some(audio_path)
-    } else {
+    if file_type.is_symlink() || !file_type.is_file() {
         None
+    } else {
+        let canonical_audio_path = std::fs::canonicalize(&audio_path).ok()?;
+        if canonical_audio_path.starts_with(session_dir) {
+            Some(canonical_audio_path)
+        } else {
+            None
+        }
     }
 }
 
@@ -676,6 +681,46 @@ mod tests {
                 .join("audio.opus"),
         )
         .expect("create audio symlink");
+        let (client, calls) = archive_client(vec![]);
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            |_| Ok(()),
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn archive_upload_skips_symlinked_parent_audio_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_with_audio_file(
+            &app_data_dir,
+            "symlink-parent-audio",
+            "2026-05-28T10:00:00+03:00",
+            "linkdir/audio.opus".to_string(),
+            false,
+        );
+        let outside_dir = tmp.path().join("outside-dir");
+        std::fs::create_dir_all(&outside_dir).expect("create outside dir");
+        std::fs::write(outside_dir.join("audio.opus"), b"OggS").expect("write outside audio");
+        std::os::unix::fs::symlink(
+            &outside_dir,
+            app_data_dir
+                .join("recordings")
+                .join("symlink-parent-audio")
+                .join("linkdir"),
+        )
+        .expect("create parent dir symlink");
         let (client, calls) = archive_client(vec![]);
 
         let summary = upload_archive_with_client(
