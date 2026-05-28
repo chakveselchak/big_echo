@@ -22,7 +22,7 @@ use commands::apple_speech::{
     apple_speech_transcribe, get_apple_speech_availability,
 };
 use commands::brain_sync::{
-    brain_sync_clear_token, brain_sync_has_token, brain_sync_set_token,
+    brain_sync_clear_token, brain_sync_has_token, brain_sync_set_token, brain_sync_upload_session,
 };
 use commands::nexara::get_nexara_balance;
 use commands::recording::{
@@ -547,6 +547,7 @@ fn main() {
             brain_sync_set_token,
             brain_sync_clear_token,
             brain_sync_has_token,
+            brain_sync_upload_session,
             get_nexara_balance,
             get_apple_speech_availability,
             apple_speech_check_locale,
@@ -747,7 +748,8 @@ mod ipc_runtime_tests {
                 yandex_sync_now,
                 brain_sync_set_token,
                 brain_sync_clear_token,
-                brain_sync_has_token
+                brain_sync_has_token,
+                brain_sync_upload_session
             ])
             .build(ctx)
             .expect("failed to build test app");
@@ -818,6 +820,26 @@ mod ipc_runtime_tests {
             );
         });
         (format!("http://{addr}"), requests)
+    }
+
+    fn spawn_mock_brain_upload_server() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind brain upload server");
+        let addr = listener.local_addr().expect("local addr");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured_requests = Arc::clone(&requests);
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let request = read_http_request(&mut stream);
+            captured_requests
+                .lock()
+                .expect("lock requests")
+                .push(request);
+            write_http_json_response(
+                &mut stream,
+                r#"{"ok":true,"job_id":91,"status":"queued"}"#,
+            );
+        });
+        (format!("http://{addr}/upload"), requests)
     }
 
     fn read_http_request_line(stream: &mut TcpStream) -> String {
@@ -1866,5 +1888,86 @@ mod ipc_runtime_tests {
         );
         let err = response.expect_err("whitespace token should fail");
         assert_eq!(extract_err_string(err), "Token must not be empty");
+    }
+
+    #[test]
+    fn invoke_brain_sync_upload_session_allows_disabled_auto_sync() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (upload_url, requests) = spawn_mock_brain_upload_server();
+        seed_pipeline_ready_session(&app_data_dir, "brain-manual-success", "http://127.0.0.1:9");
+        let mut settings = load_settings(&app_data_dir).expect("load settings");
+        settings.brain_sync_enabled = false;
+        settings.brain_sync_url = upload_url;
+        save_settings(&app_data_dir, &settings).expect("save settings");
+
+        let set = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_set_token",
+                serde_json::json!({ "token": "manual-token" }),
+            ),
+        );
+        assert!(set.is_ok());
+
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_upload_session",
+                serde_json::json!({ "sessionId": "brain-manual-success" }),
+            ),
+        )
+        .expect("manual upload succeeds when auto sync is disabled");
+        let out = extract_ok_json(response);
+        assert_eq!(out["job_id"], 91);
+
+        let captured = requests.lock().expect("lock requests");
+        assert_eq!(captured.len(), 1);
+        assert!(captured[0].starts_with("POST /upload "));
+        assert!(captured[0]
+            .to_ascii_lowercase()
+            .contains("authorization: bearer manual-token"));
+        assert!(captured[0].contains("\"session_id\":\"brain-manual-success\""));
+    }
+
+    #[test]
+    fn invoke_brain_sync_upload_session_returns_friendly_missing_audio_error() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        seed_pipeline_missing_audio_session(
+            &app_data_dir,
+            "brain-manual-missing-audio",
+            "http://127.0.0.1:9",
+        );
+        let mut settings = load_settings(&app_data_dir).expect("load settings");
+        settings.brain_sync_enabled = false;
+        settings.brain_sync_url = "https://example.com/upload".to_string();
+        save_settings(&app_data_dir, &settings).expect("save settings");
+
+        let set = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_set_token",
+                serde_json::json!({ "token": "manual-token" }),
+            ),
+        );
+        assert!(set.is_ok());
+
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_upload_session",
+                serde_json::json!({ "sessionId": "brain-manual-missing-audio" }),
+            ),
+        );
+        let err = response.expect_err("manual upload should fail without audio");
+        assert_eq!(
+            extract_err_string(err),
+            "Audio file is missing for this session"
+        );
     }
 }

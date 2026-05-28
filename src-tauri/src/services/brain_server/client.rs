@@ -18,7 +18,7 @@ pub struct BrainUploadMetadata {
     pub client_device_label: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BrainUploadResponse {
     pub ok: bool,
     pub job_id: Option<i64>,
@@ -32,7 +32,7 @@ pub struct BrainUploadResponse {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum BrainUploadError {
     #[error("unauthorized (401): {body_preview}")]
     Unauthorized { body_preview: String },
