@@ -148,13 +148,17 @@ fn canonical_recording_root(
     }
 }
 
-fn local_session_dir(recording_root: &Path, raw_session_dir: &str) -> Option<PathBuf> {
+fn local_session_dir_path(recording_root: &Path, raw_session_dir: &Path) -> Option<PathBuf> {
     let session_dir = std::fs::canonicalize(raw_session_dir).ok()?;
     if session_dir.starts_with(recording_root) {
         Some(session_dir)
     } else {
         None
     }
+}
+
+fn local_session_dir(recording_root: &Path, raw_session_dir: &str) -> Option<PathBuf> {
+    local_session_dir_path(recording_root, Path::new(raw_session_dir))
 }
 
 fn local_audio_file_path(session_dir: &Path, audio_file: &str) -> Option<PathBuf> {
@@ -184,6 +188,21 @@ fn local_audio_file_path(session_dir: &Path, audio_file: &str) -> Option<PathBuf
             None
         }
     }
+}
+
+fn manual_upload_paths(
+    app_data_dir: &Path,
+    settings: &PublicSettings,
+    session_dir: &Path,
+    audio_file: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    let recording_root = canonical_recording_root(app_data_dir, settings)?
+        .ok_or_else(|| "Audio file is missing for this session".to_string())?;
+    let session_dir = local_session_dir_path(&recording_root, session_dir)
+        .ok_or_else(|| "Audio file is missing for this session".to_string())?;
+    let audio_path = local_audio_file_path(&session_dir, audio_file)
+        .ok_or_else(|| "Audio file is missing for this session".to_string())?;
+    Ok((session_dir, audio_path))
 }
 
 #[tauri::command]
@@ -219,10 +238,12 @@ pub async fn brain_sync_upload_session(
     let meta_path = get_meta_path(&dirs.app_data_dir, &session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
     let meta = load_meta(&meta_path)?;
-    let audio_path = session_dir.join(&meta.artifacts.audio_file);
-    if !audio_path.exists() {
-        return Err("Audio file is missing for this session".to_string());
-    }
+    let (session_dir, audio_path) = manual_upload_paths(
+        &dirs.app_data_dir,
+        &settings,
+        &session_dir,
+        &meta.artifacts.audio_file,
+    )?;
 
     upload_session_after_record_even_when_disabled(
         dirs.app_data_dir.clone(),
@@ -362,6 +383,46 @@ mod tests {
     #[test]
     fn token_key_matches_brain_server_secret_name() {
         assert_eq!(TOKEN_KEY, "BRAIN_SERVER_API_TOKEN");
+    }
+
+    #[test]
+    fn manual_upload_paths_reject_absolute_audio_file_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let recording_root = app_data_dir.join("recordings");
+        let session_dir = recording_root.join("manual-absolute");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let outside_audio = tmp.path().join("outside.opus");
+        std::fs::write(&outside_audio, b"OggS").expect("write outside audio");
+        let outside_audio = outside_audio.to_string_lossy().to_string();
+        let mut settings = archive_settings();
+        settings.recording_root = recording_root.to_string_lossy().to_string();
+
+        let err = manual_upload_paths(&app_data_dir, &settings, &session_dir, &outside_audio)
+            .expect_err("absolute audio path should be rejected");
+
+        assert_eq!(err, "Audio file is missing for this session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manual_upload_paths_reject_symlink_audio_file_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let recording_root = app_data_dir.join("recordings");
+        let session_dir = recording_root.join("manual-symlink");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let outside_audio = tmp.path().join("outside.opus");
+        std::fs::write(&outside_audio, b"OggS").expect("write outside audio");
+        std::os::unix::fs::symlink(&outside_audio, session_dir.join("audio.opus"))
+            .expect("create audio symlink");
+        let mut settings = archive_settings();
+        settings.recording_root = recording_root.to_string_lossy().to_string();
+
+        let err = manual_upload_paths(&app_data_dir, &settings, &session_dir, "audio.opus")
+            .expect_err("symlink audio path should be rejected");
+
+        assert_eq!(err, "Audio file is missing for this session");
     }
 
     #[derive(Clone)]

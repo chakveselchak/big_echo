@@ -228,7 +228,7 @@ mod tests {
     use crate::commands::brain_sync::TOKEN_KEY;
     use crate::domain::session::{SessionMeta, SessionStatus};
     use crate::services::brain_server::client::{
-        BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
+        BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
     };
     use crate::settings::public_settings::PublicSettings;
     use crate::settings::secret_store::set_secret;
@@ -237,6 +237,8 @@ mod tests {
     use std::path::Path;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[derive(Default)]
     struct RecordingUploadClient {
@@ -389,6 +391,52 @@ mod tests {
             .find(|event| event.event_type == "brain_upload_failed")
             .expect("failed event");
         assert!(!failed.detail.contains("secret-token"));
+    }
+
+    #[tokio::test]
+    async fn upload_orchestration_redacts_long_token_before_failed_event_persistence() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("session");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let audio_path = session_dir.join("audio.opus");
+        std::fs::write(&audio_path, b"OggS").expect("write audio");
+        let token = format!("raw-auth-{}", "A".repeat(260));
+        set_secret(&app_data_dir, TOKEN_KEY, &token).expect("set token");
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_string(format!("server echoed {token} after auth failure")),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = super::upload_session_after_record_with_client(
+            app_data_dir.clone(),
+            session_dir,
+            sample_meta(),
+            audio_path,
+            enabled_settings(format!("{}/upload", server.uri())),
+            &BrainServerClient::new(),
+            true,
+        )
+        .await
+        .expect_err("upload fails");
+
+        assert!(!err.contains(&token));
+        assert!(!err.contains(&token[..80]));
+        let events =
+            list_session_events(&app_data_dir, "session-upload").expect("load session events");
+        let failed = events
+            .iter()
+            .find(|event| event.event_type == "brain_upload_failed")
+            .expect("failed event");
+        assert!(!failed.detail.contains(&token));
+        assert!(!failed.detail.contains(&token[..80]));
     }
 
     #[tokio::test]

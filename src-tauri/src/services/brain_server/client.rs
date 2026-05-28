@@ -78,10 +78,15 @@ fn content_type_for_audio_path(path: &Path) -> &'static str {
     }
 }
 
-fn body_preview(raw: &str) -> String {
+fn body_preview(raw: &str, token: &str) -> String {
     const MAX_PREVIEW_CHARS: usize = 200;
 
-    let normalized = raw
+    let exact_redacted = if token.is_empty() {
+        raw.to_string()
+    } else {
+        raw.replace(token, "[redacted]")
+    };
+    let normalized = exact_redacted
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect::<String>();
@@ -175,24 +180,24 @@ impl BrainServerClient {
                 }
             }
             401 => Err(BrainUploadError::Unauthorized {
-                body_preview: body_preview(&body),
+                body_preview: body_preview(&body, token),
             }),
             403 => Err(BrainUploadError::Forbidden {
-                body_preview: body_preview(&body),
+                body_preview: body_preview(&body, token),
             }),
             413 => Err(BrainUploadError::PayloadTooLarge {
-                body_preview: body_preview(&body),
+                body_preview: body_preview(&body, token),
             }),
             415 => Err(BrainUploadError::UnsupportedMediaType {
-                body_preview: body_preview(&body),
+                body_preview: body_preview(&body, token),
             }),
             500..=599 => Err(BrainUploadError::Server {
                 status: status_u16,
-                body_preview: body_preview(&body),
+                body_preview: body_preview(&body, token),
             }),
             _ => Err(BrainUploadError::Http {
                 status: status_u16,
-                body_preview: body_preview(&body),
+                body_preview: body_preview(&body, token),
             }),
         }
     }
@@ -519,6 +524,35 @@ mod tests {
         assert!(!display.contains('\n'));
         assert!(display.contains("[redacted]"));
         assert!(display.len() < raw_body.len());
+    }
+
+    #[tokio::test]
+    async fn upload_audio_redacts_exact_long_token_before_truncating_body_preview() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+        let token = format!("raw-auth-{}", "A".repeat(260));
+        let raw_body = format!("server echoed {token} after auth failure");
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(ResponseTemplate::new(500).set_body_string(raw_body))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                &token,
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect_err("5xx should fail");
+
+        let display = err.to_string();
+        assert!(!display.contains(&token));
+        assert!(!display.contains(&token[..80]));
+        assert!(display.contains("[redacted]"));
     }
 
     #[tokio::test]

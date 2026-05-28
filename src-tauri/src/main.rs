@@ -1940,6 +1940,7 @@ mod ipc_runtime_tests {
         let mut settings = load_settings(&app_data_dir).expect("load settings");
         settings.brain_sync_enabled = false;
         settings.brain_sync_url = upload_url;
+        settings.recording_root = app_data_dir.join("sessions").to_string_lossy().to_string();
         save_settings(&app_data_dir, &settings).expect("save settings");
 
         let set = get_ipc_response(
@@ -1969,6 +1970,47 @@ mod ipc_runtime_tests {
             .to_ascii_lowercase()
             .contains("authorization: bearer manual-token"));
         assert!(captured[0].contains("\"session_id\":\"brain-manual-success\""));
+    }
+
+    #[test]
+    fn invoke_brain_sync_upload_session_rejects_session_outside_recording_root() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (upload_url, _requests) = spawn_mock_brain_upload_server();
+        seed_pipeline_ready_session(
+            &app_data_dir,
+            "brain-manual-forged-root",
+            "http://127.0.0.1:9",
+        );
+        let mut settings = load_settings(&app_data_dir).expect("load settings");
+        settings.brain_sync_enabled = false;
+        settings.brain_sync_url = upload_url;
+        settings.recording_root = app_data_dir.join("recordings").to_string_lossy().to_string();
+        save_settings(&app_data_dir, &settings).expect("save settings");
+
+        let set = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_set_token",
+                serde_json::json!({ "token": "manual-token" }),
+            ),
+        );
+        assert!(set.is_ok());
+
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_upload_session",
+                serde_json::json!({ "sessionId": "brain-manual-forged-root" }),
+            ),
+        );
+        let err = response.expect_err("manual upload should reject forged session path");
+        assert_eq!(
+            extract_err_string(err),
+            "Audio file is missing for this session"
+        );
     }
 
     #[test]
