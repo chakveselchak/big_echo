@@ -48,7 +48,7 @@ fn skipped_response() -> BrainUploadResponse {
     }
 }
 
-fn validate_upload_url(raw: &str) -> Result<String, String> {
+pub(crate) fn validate_upload_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("Invalid Brain sync URL".to_string());
@@ -93,7 +93,7 @@ fn upload_metadata(
     }
 }
 
-fn sanitize_error(raw: String, token: &str) -> String {
+pub(crate) fn sanitize_error(raw: String, token: &str) -> String {
     if token.is_empty() {
         raw
     } else {

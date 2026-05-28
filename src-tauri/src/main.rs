@@ -22,7 +22,8 @@ use commands::apple_speech::{
     apple_speech_transcribe, get_apple_speech_availability,
 };
 use commands::brain_sync::{
-    brain_sync_clear_token, brain_sync_has_token, brain_sync_set_token, brain_sync_upload_session,
+    brain_sync_clear_token, brain_sync_has_token, brain_sync_set_token, brain_sync_upload_archive,
+    brain_sync_upload_session,
 };
 use commands::nexara::get_nexara_balance;
 use commands::recording::{
@@ -570,6 +571,7 @@ fn main() {
             brain_sync_set_token,
             brain_sync_clear_token,
             brain_sync_has_token,
+            brain_sync_upload_archive,
             brain_sync_upload_session,
             get_nexara_balance,
             get_apple_speech_availability,
@@ -785,6 +787,7 @@ mod ipc_runtime_tests {
                 brain_sync_set_token,
                 brain_sync_clear_token,
                 brain_sync_has_token,
+                brain_sync_upload_archive,
                 brain_sync_upload_session
             ])
             .build(ctx)

@@ -42,7 +42,6 @@ pub struct RetryJob {
     pub last_error: String,
 }
 
-#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEvent {
     pub id: i64,
@@ -188,7 +187,6 @@ pub fn add_event(
     Ok(())
 }
 
-#[cfg(test)]
 pub fn list_session_events(
     app_data_dir: &Path,
     session_id: &str,
