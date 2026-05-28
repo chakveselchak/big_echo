@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionCard } from "./SessionCard";
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 
@@ -71,6 +71,10 @@ function renderCard(item: SessionListItem, onUploadToBrain = vi.fn()) {
 }
 
 describe("SessionCard Brain upload status", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it.each([
     ["uploaded", "Brain: загружено"],
     ["uploading", "Brain: загрузка"],
@@ -89,6 +93,18 @@ describe("SessionCard Brain upload status", () => {
     expect(screen.getByText("Network unavailable")).toHaveClass("visually-hidden");
   });
 
+  it("redacts token-like values from failed Brain upload details", () => {
+    renderCard(makeItem("failed", {
+      brain_upload_last_error: "Bearer eyJhbGciOiJIUzI1NiJ9.shortpayload.signature== was rejected",
+    }));
+
+    expect(screen.getByText("Brain: ошибка")).toHaveAttribute(
+      "title",
+      "Bearer [redacted] was rejected",
+    );
+    expect(screen.queryByText(/eyJhbGci/)).not.toBeInTheDocument();
+  });
+
   it("shows upload button for not uploaded sessions with audio and calls callback", async () => {
     const user = userEvent.setup();
     const { onUploadToBrain } = renderCard(makeItem("not_uploaded"));
@@ -105,6 +121,36 @@ describe("SessionCard Brain upload status", () => {
 
   it("disables upload button while uploading", () => {
     renderCard(makeItem("uploading"));
+    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
+  });
+
+  it("enables retry for stale uploading sessions", () => {
+    const staleUpdatedAt = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+    renderCard(makeItem("uploading", { brain_upload_updated_at_iso: staleUpdatedAt }));
+
+    expect(screen.getByText("Brain: ошибка")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeEnabled();
+  });
+
+  it("enables retry when an uploading session ages past the stale cutoff", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-28T10:00:00Z"));
+    const almostStaleUpdatedAt = new Date(Date.now() - (30 * 60 * 1000 - 1000)).toISOString();
+    renderCard(makeItem("uploading", { brain_upload_updated_at_iso: almostStaleUpdatedAt }));
+
+    expect(screen.getByText("Brain: загрузка")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
+
+    act(() => {
+      vi.advanceTimersByTime(1100);
+    });
+
+    expect(screen.getByText("Brain: ошибка")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeEnabled();
+  });
+
+  it("disables upload button for sessions that are still recording", () => {
+    renderCard(makeItem("not_uploaded", { status: "recording" }));
     expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
   });
 

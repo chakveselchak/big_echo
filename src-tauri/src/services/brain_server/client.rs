@@ -1,7 +1,11 @@
 use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Duration;
 use thiserror::Error;
+
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BrainUploadMetadata {
@@ -69,7 +73,7 @@ fn content_type_for_audio_path(path: &Path) -> &'static str {
         .map(|ext| ext.to_ascii_lowercase())
         .as_deref()
     {
-        Some("opus") => "audio/ogg",
+        Some("opus") => "audio/opus",
         Some("mp3") => "audio/mpeg",
         Some("m4a") => "audio/mp4",
         Some("ogg") => "audio/ogg",
@@ -119,8 +123,17 @@ pub struct BrainServerClient {
 
 impl BrainServerClient {
     pub fn new() -> Self {
+        Self::with_timeouts(DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_timeouts(connect_timeout: Duration, request_timeout: Duration) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .connect_timeout(connect_timeout)
+                .timeout(request_timeout)
+                .build()
+                .expect("Brain upload HTTP client should build"),
         }
     }
 
@@ -357,6 +370,71 @@ mod tests {
             )
             .await
             .expect("upload should succeed");
+    }
+
+    #[tokio::test]
+    async fn upload_audio_uses_opus_multipart_content_type_for_opus_files() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file_with_name("audio.opus");
+
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .and(MultipartBodyContains {
+                needles: vec![
+                    "name=\"file\"",
+                    "filename=\"audio.opus\"",
+                    "Content-Type: audio/opus",
+                ],
+                forbidden: vec!["Content-Type: audio/ogg"],
+            })
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "ok": true
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect("upload should succeed");
+    }
+
+    #[tokio::test]
+    async fn upload_audio_returns_network_error_when_request_times_out() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_delay(Duration::from_millis(200))
+                    .set_body_json(serde_json::json!({ "ok": true })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = BrainServerClient::with_timeouts(
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+        )
+        .upload_audio(
+            &format!("{}/upload", server.uri()),
+            "secret-token",
+            &audio_path,
+            &sample_metadata(),
+        )
+        .await
+        .expect_err("slow response should time out");
+
+        assert!(matches!(err, BrainUploadError::Network(_)));
     }
 
     #[tokio::test]

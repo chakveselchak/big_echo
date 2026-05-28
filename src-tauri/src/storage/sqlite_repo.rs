@@ -5,6 +5,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration as StdDuration;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,19 +80,27 @@ pub fn derive_brain_upload_state(events: &[SessionEvent]) -> BrainUploadState {
         last_error: None,
         updated_at_iso: None,
     };
+    let mut has_success = false;
     for event in events {
         match event.event_type.as_str() {
             "brain_upload_started" => {
+                if has_success {
+                    continue;
+                }
                 state.status = BrainUploadStatus::Uploading;
                 state.last_error = None;
                 state.updated_at_iso = Some(event.at_iso.clone());
             }
             "brain_upload_succeeded" => {
+                has_success = true;
                 state.status = BrainUploadStatus::Uploaded;
                 state.last_error = None;
                 state.updated_at_iso = Some(event.at_iso.clone());
             }
             "brain_upload_failed" => {
+                if has_success {
+                    continue;
+                }
                 state.status = BrainUploadStatus::Failed;
                 state.last_error = Some(event.detail.clone());
                 state.updated_at_iso = Some(event.at_iso.clone());
@@ -150,8 +159,11 @@ pub(crate) fn audio_duration_hms(meta: &SessionMeta) -> String {
 fn open(app_data_dir: &Path) -> Result<Connection, String> {
     let path = db_path(app_data_dir);
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    conn.busy_timeout(StdDuration::from_secs(5))
+        .map_err(|e| e.to_string())?;
     conn.execute_batch(
         "
+        PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS sessions (
             session_id TEXT PRIMARY KEY,
             status TEXT NOT NULL,
@@ -277,18 +289,14 @@ fn list_brain_upload_states(conn: &Connection) -> Result<HashMap<String, BrainUp
     let mut stmt = conn
         .prepare(
             "
-            SELECT e.session_id, e.at_iso, e.event_type, e.detail
-            FROM session_events e
-            INNER JOIN (
-                SELECT session_id, MAX(id) AS latest_id
-                FROM session_events
-                WHERE event_type IN (
-                    'brain_upload_started',
-                    'brain_upload_succeeded',
-                    'brain_upload_failed'
-                )
-                GROUP BY session_id
-            ) latest ON latest.latest_id = e.id
+            SELECT id, session_id, at_iso, event_type, detail
+            FROM session_events
+            WHERE event_type IN (
+                'brain_upload_started',
+                'brain_upload_succeeded',
+                'brain_upload_failed'
+            )
+            ORDER BY session_id ASC, id ASC
             ",
         )
         .map_err(|e| e.to_string())?;
@@ -296,24 +304,24 @@ fn list_brain_upload_states(conn: &Connection) -> Result<HashMap<String, BrainUp
     let rows = stmt
         .query_map([], |row| {
             Ok(SessionEvent {
-                id: 0,
-                session_id: row.get(0)?,
-                at_iso: row.get(1)?,
-                event_type: row.get(2)?,
-                detail: row.get(3)?,
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                at_iso: row.get(2)?,
+                event_type: row.get(3)?,
+                detail: row.get(4)?,
             })
         })
         .map_err(|e| e.to_string())?;
 
-    let mut out = HashMap::new();
+    let mut grouped: HashMap<String, Vec<SessionEvent>> = HashMap::new();
     for row in rows {
         let event = row.map_err(|e| e.to_string())?;
-        out.insert(
-            event.session_id.clone(),
-            derive_brain_upload_state(std::slice::from_ref(&event)),
-        );
+        grouped.entry(event.session_id.clone()).or_default().push(event);
     }
-    Ok(out)
+    Ok(grouped
+        .into_iter()
+        .map(|(session_id, events)| (session_id, derive_brain_upload_state(&events)))
+        .collect())
 }
 
 pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String> {
@@ -644,6 +652,8 @@ mod tests {
             .expect("add old failed event");
         add_event(dir.path(), "s-uploaded", "brain_upload_succeeded", "ok")
             .expect("add success event");
+        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "retry failed")
+            .expect("add retry failure event");
         add_event(dir.path(), "s-failed", "brain_upload_started", "started")
             .expect("add started event");
         add_event(dir.path(), "s-failed", "brain_upload_failed", "network down")
@@ -669,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn list_brain_upload_states_returns_latest_status_event_per_session() {
+    fn list_brain_upload_states_keeps_uploaded_sessions_uploaded_after_failed_retry() {
         let dir = temp_dir();
         let conn = open(dir.path()).expect("open db");
 
@@ -677,6 +687,8 @@ mod tests {
             .expect("add old failure");
         add_event(dir.path(), "s-uploaded", "brain_upload_succeeded", "ok")
             .expect("add success");
+        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "retry failed")
+            .expect("add retry failure");
         add_event(dir.path(), "s-failed", "brain_upload_started", "started")
             .expect("add started");
         add_event(dir.path(), "s-failed", "brain_upload_failed", "latest failure")
@@ -703,6 +715,17 @@ mod tests {
             Some("latest failure")
         );
         assert!(!states.contains_key("s-ignored"));
+    }
+
+    #[test]
+    fn open_configures_wal_journal_mode() {
+        let dir = temp_dir();
+        let conn = open(dir.path()).expect("open db");
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("journal mode");
+
+        assert_eq!(mode.to_ascii_lowercase(), "wal");
     }
 
     #[test]

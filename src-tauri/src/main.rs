@@ -51,6 +51,7 @@ use commands::yandex_sync::{
 use domain::session::SessionMeta;
 use domain::session::SessionStatus;
 use services::brain_server::upload::upload_session_after_record;
+use services::brain_server::state::try_begin_session_upload;
 use services::pipeline_runner::{run_pipeline_core, spawn_retry_worker, PipelineMode};
 #[cfg(test)]
 use settings::public_settings::save_settings;
@@ -105,7 +106,7 @@ fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
 }
 
 fn should_upload_brain_after_stop(settings: &PublicSettings) -> bool {
-    settings.brain_sync_enabled
+    settings.brain_sync_enabled && !settings.brain_sync_url.trim().is_empty()
 }
 
 // ── Capture artifact recovery ────────────────────────────────────────────────
@@ -321,7 +322,13 @@ pub(crate) fn stop_active_recording_internal(
         let upload_meta = meta.clone();
         let upload_audio_path = audio_output_path.clone();
         let upload_settings = settings.clone();
+        let brain_upload_state = state.brain_upload.clone();
         tauri::async_runtime::spawn(async move {
+            let Ok(_session_guard) =
+                try_begin_session_upload(&brain_upload_state, &upload_meta.session_id)
+            else {
+                return;
+            };
             let _ = upload_session_after_record(
                 app_data_dir,
                 session_dir,
@@ -651,6 +658,13 @@ mod ipc_runtime_tests {
     fn brain_upload_after_stop_requires_enabled_setting() {
         let disabled = PublicSettings::default();
         assert!(!should_upload_brain_after_stop(&disabled));
+
+        let missing_url = PublicSettings {
+            brain_sync_enabled: true,
+            brain_sync_url: String::new(),
+            ..Default::default()
+        };
+        assert!(!should_upload_brain_after_stop(&missing_url));
 
         let enabled = PublicSettings {
             brain_sync_enabled: true,
@@ -1927,6 +1941,26 @@ mod ipc_runtime_tests {
         );
         let err = response.expect_err("whitespace token should fail");
         assert_eq!(extract_err_string(err), "Token must not be empty");
+    }
+
+    #[test]
+    fn invoke_brain_sync_set_token_rejects_control_characters() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_set_token",
+                serde_json::json!({ "token": "abc\ndef" }),
+            ),
+        );
+        let err = response.expect_err("token with newline should fail");
+        assert_eq!(
+            extract_err_string(err),
+            "Token must not contain control characters"
+        );
     }
 
     #[test]

@@ -1,6 +1,9 @@
-use crate::app_state::AppDirs;
+use crate::app_state::{AppDirs, AppState};
 use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{BrainServerClient, BrainUploadResponse};
+use crate::services::brain_server::state::{
+    try_begin_archive_upload, try_begin_session_upload, SharedBrainUploadState,
+};
 use crate::services::brain_server::upload::{
     sanitize_error, upload_session_after_record_even_when_disabled,
     upload_session_after_record_with_client, validate_upload_url, UploadAudioClient,
@@ -45,10 +48,13 @@ pub struct BrainArchiveUploadSummary {
 }
 
 struct ArchiveCandidate {
-    session_dir: PathBuf,
-    meta: SessionMeta,
-    audio_path: PathBuf,
+    session_id: String,
+    title: String,
+    session_dir: Option<PathBuf>,
+    meta: Option<SessionMeta>,
+    audio_path: Option<PathBuf>,
     sort_at_iso: String,
+    skip_error: Option<String>,
 }
 
 fn fresh_uploading(state: &BrainUploadState, now: DateTime<Local>) -> bool {
@@ -60,7 +66,8 @@ fn fresh_uploading(state: &BrainUploadState, now: DateTime<Local>) -> bool {
     };
     DateTime::parse_from_rfc3339(at_iso)
         .map(|started| {
-            now.signed_duration_since(started.with_timezone(&Local)) < Duration::minutes(30)
+            let age = now.signed_duration_since(started.with_timezone(&Local));
+            age >= Duration::zero() && age < Duration::minutes(30)
         })
         .unwrap_or(false)
 }
@@ -103,7 +110,21 @@ fn archive_candidates(
         let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? else {
             continue;
         };
-        let meta = load_meta(&meta_path)?;
+        let meta = match load_meta(&meta_path) {
+            Ok(meta) => meta,
+            Err(err) => {
+                candidates.push(ArchiveCandidate {
+                    session_id: item.session_id.clone(),
+                    title: item.topic.clone(),
+                    session_dir: None,
+                    meta: None,
+                    audio_path: None,
+                    sort_at_iso: item.started_at_iso.clone(),
+                    skip_error: Some(format!("{}: invalid meta: {err}", item.session_id)),
+                });
+                continue;
+            }
+        };
         let Some(session_dir) = local_session_dir(&recording_root, &item.session_dir) else {
             continue;
         };
@@ -112,7 +133,21 @@ fn archive_candidates(
             continue;
         };
 
-        let events = list_session_events(app_data_dir, &item.session_id)?;
+        let events = match list_session_events(app_data_dir, &item.session_id) {
+            Ok(events) => events,
+            Err(err) => {
+                candidates.push(ArchiveCandidate {
+                    session_id: item.session_id.clone(),
+                    title: meta.topic.clone(),
+                    session_dir: None,
+                    meta: None,
+                    audio_path: None,
+                    sort_at_iso: meta.started_at_iso.clone(),
+                    skip_error: Some(format!("{}: events unavailable: {err}", item.session_id)),
+                });
+                continue;
+            }
+        };
         let brain_upload_state = derive_brain_upload_state(&events);
         if brain_upload_state.status == BrainUploadStatus::Uploaded
             || fresh_uploading(&brain_upload_state, now)
@@ -126,10 +161,13 @@ fn archive_candidates(
             meta.started_at_iso.clone()
         };
         candidates.push(ArchiveCandidate {
-            session_dir,
-            meta,
-            audio_path,
+            session_id: meta.session_id.clone(),
+            title: meta.topic.clone(),
+            session_dir: Some(session_dir),
+            meta: Some(meta),
+            audio_path: Some(audio_path),
             sort_at_iso,
+            skip_error: None,
         });
     }
     candidates.sort_by(|left, right| left.sort_at_iso.cmp(&right.sort_at_iso));
@@ -211,6 +249,9 @@ pub fn brain_sync_set_token(dirs: State<'_, AppDirs>, token: String) -> Result<(
     if trimmed.is_empty() {
         return Err("Token must not be empty".to_string());
     }
+    if trimmed.chars().any(char::is_control) {
+        return Err("Token must not contain control characters".to_string());
+    }
     set_secret(&dirs.app_data_dir, TOKEN_KEY, trimmed)
 }
 
@@ -230,8 +271,10 @@ pub fn brain_sync_has_token(dirs: State<'_, AppDirs>) -> Result<bool, String> {
 #[tauri::command]
 pub async fn brain_sync_upload_session(
     dirs: State<'_, AppDirs>,
+    state: State<'_, AppState>,
     session_id: String,
 ) -> Result<BrainUploadResponse, String> {
+    let _session_guard = try_begin_session_upload(&state.brain_upload, &session_id)?;
     let settings = load_settings(&dirs.app_data_dir)?;
     let session_dir = get_session_dir(&dirs.app_data_dir, &session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
@@ -258,6 +301,20 @@ pub async fn brain_sync_upload_session(
 pub(crate) async fn upload_archive_with_client<C, E>(
     app_data_dir: PathBuf,
     settings: PublicSettings,
+    client: &C,
+    emit_progress: E,
+) -> Result<BrainArchiveUploadSummary, String>
+where
+    C: UploadAudioClient + Sync,
+    E: Fn(BrainArchiveUploadProgress) -> Result<(), String>,
+{
+    upload_archive_with_client_inner(app_data_dir, settings, None, client, emit_progress).await
+}
+
+async fn upload_archive_with_client_inner<C, E>(
+    app_data_dir: PathBuf,
+    settings: PublicSettings,
+    runtime_state: Option<SharedBrainUploadState>,
     client: &C,
     emit_progress: E,
 ) -> Result<BrainArchiveUploadSummary, String>
@@ -294,18 +351,70 @@ where
 
     for candidate in candidates {
         let processed = summary.uploaded + summary.skipped + summary.failed + 1;
-        let session_id = candidate.meta.session_id.clone();
-        let title = if candidate.meta.topic.trim().is_empty() {
+        let session_id = candidate.session_id.clone();
+        let title = if candidate.title.trim().is_empty() {
             session_id.clone()
         } else {
-            candidate.meta.topic.clone()
+            candidate.title.clone()
+        };
+
+        if let Some(err) = candidate.skip_error {
+            summary.failed += 1;
+            archive_error(&mut summary.errors, err);
+            emit_progress(progress_from_summary(
+                total,
+                processed,
+                &summary,
+                Some(session_id),
+                Some(title),
+            ))?;
+            continue;
+        }
+
+        if get_session_dir(&app_data_dir, &session_id)?.is_none() {
+            summary.skipped += 1;
+            archive_error(&mut summary.errors, format!("{session_id}: session no longer exists"));
+            emit_progress(progress_from_summary(
+                total,
+                processed,
+                &summary,
+                Some(session_id),
+                Some(title),
+            ))?;
+            continue;
+        }
+
+        let _session_guard = if let Some(state) = runtime_state.as_ref() {
+            match try_begin_session_upload(state, &session_id) {
+                Ok(guard) => Some(guard),
+                Err(err) => {
+                    summary.skipped += 1;
+                    archive_error(&mut summary.errors, format!("{session_id}: {err}"));
+                    emit_progress(progress_from_summary(
+                        total,
+                        processed,
+                        &summary,
+                        Some(session_id),
+                        Some(title),
+                    ))?;
+                    continue;
+                }
+            }
+        } else {
+            None
         };
 
         match upload_session_after_record_with_client(
             app_data_dir.clone(),
-            candidate.session_dir,
-            candidate.meta,
-            candidate.audio_path,
+            candidate
+                .session_dir
+                .ok_or_else(|| format!("{session_id}: missing session directory"))?,
+            candidate
+                .meta
+                .ok_or_else(|| format!("{session_id}: missing metadata"))?,
+            candidate
+                .audio_path
+                .ok_or_else(|| format!("{session_id}: missing audio path"))?,
             settings.clone(),
             client,
             false,
@@ -346,16 +455,40 @@ where
     Ok(summary)
 }
 
+pub(crate) async fn upload_archive_with_client_locked<C, E>(
+    app_data_dir: PathBuf,
+    settings: PublicSettings,
+    runtime_state: SharedBrainUploadState,
+    client: &C,
+    emit_progress: E,
+) -> Result<BrainArchiveUploadSummary, String>
+where
+    C: UploadAudioClient + Sync,
+    E: Fn(BrainArchiveUploadProgress) -> Result<(), String>,
+{
+    let _archive_guard = try_begin_archive_upload(&runtime_state)?;
+    upload_archive_with_client_inner(
+        app_data_dir,
+        settings,
+        Some(runtime_state),
+        client,
+        emit_progress,
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn brain_sync_upload_archive(
     app: AppHandle,
     dirs: State<'_, AppDirs>,
+    state: State<'_, AppState>,
 ) -> Result<BrainArchiveUploadSummary, String> {
     let settings = load_settings(&dirs.app_data_dir)?;
     let client = BrainServerClient::new();
-    upload_archive_with_client(
+    upload_archive_with_client_locked(
         dirs.app_data_dir.clone(),
         settings,
+        state.brain_upload.clone(),
         &client,
         |progress| app.emit(ARCHIVE_PROGRESS_EVENT, progress).map_err(|e| e.to_string()),
     )
@@ -373,7 +506,7 @@ mod tests {
     use crate::settings::public_settings::{save_settings, PublicSettings};
     use crate::settings::secret_store::set_secret;
     use crate::storage::session_store::save_meta;
-    use crate::storage::sqlite_repo::{add_event, upsert_session};
+    use crate::storage::sqlite_repo::{add_event, delete_session, upsert_session};
     use async_trait::async_trait;
     use rusqlite::{params, Connection};
     use std::path::Path;
@@ -981,6 +1114,108 @@ mod tests {
             calls.lock().expect("calls lock").as_slice(),
             &["stale-uploading".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn archive_upload_includes_uploading_session_with_future_started_event() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "future-uploading", "2026-05-28T09:00:00+03:00", true);
+        add_event(
+            &app_data_dir,
+            "future-uploading",
+            "brain_upload_started",
+            "Uploading audio to Brain",
+        )
+        .expect("add event");
+        let future_at = (Local::now() + Duration::hours(2)).to_rfc3339();
+        mark_last_event_at(&app_data_dir, "future-uploading", &future_at);
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            |_| Ok(()),
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["future-uploading".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_upload_reports_corrupt_meta_and_continues_with_valid_sessions() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "bad-meta", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(&app_data_dir, "good-meta", "2026-05-28T10:00:00+03:00", true);
+        std::fs::write(
+            app_data_dir
+                .join("recordings")
+                .join("bad-meta")
+                .join("meta.json"),
+            "{not-json",
+        )
+        .expect("corrupt meta");
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            |_| Ok(()),
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 2);
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(summary.failed, 1);
+        assert!(summary.errors.iter().any(|err| err.contains("bad-meta: invalid meta")));
+        assert_eq!(calls.lock().expect("calls lock").as_slice(), &["good-meta".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_session_deleted_after_candidate_snapshot() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "delete-me", "2026-05-28T09:00:00+03:00", true);
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+        let deleted = Arc::new(Mutex::new(false));
+        let deleted_for_progress = Arc::clone(&deleted);
+        let app_data_for_progress = app_data_dir.clone();
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            move |progress| {
+                if progress.processed == 0 && !*deleted_for_progress.lock().expect("delete lock") {
+                    *deleted_for_progress.lock().expect("delete lock") = true;
+                    delete_session(&app_data_for_progress, "delete-me").expect("delete session");
+                }
+                Ok(())
+            },
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.skipped, 1);
+        assert!(summary.errors.iter().any(|err| err.contains("delete-me: session no longer exists")));
+        assert!(calls.lock().expect("calls lock").is_empty());
     }
 
     #[tokio::test]

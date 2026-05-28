@@ -5,10 +5,19 @@ import { ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } fr
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
-import { extractStartTimeHm, resolveSessionAudioPath } from "../../lib/appUtils";
+import { extractStartTimeHm, redactSensitiveText, resolveSessionAudioPath } from "../../lib/appUtils";
 import { AudioPlayer } from "./AudioPlayer";
 
 const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
+const BRAIN_UPLOAD_FRESH_MS = 30 * 60 * 1000;
+
+function isFreshBrainUploading(updatedAtIso: string | null | undefined): boolean {
+  if (!updatedAtIso) return true;
+  const updatedAtMs = Date.parse(updatedAtIso);
+  if (!Number.isFinite(updatedAtMs)) return false;
+  const ageMs = Date.now() - updatedAtMs;
+  return ageMs >= 0 && ageMs < BRAIN_UPLOAD_FRESH_MS;
+}
 
 type SessionCardProps = {
   item: SessionListItem;
@@ -121,6 +130,7 @@ function SessionCardImpl({
   // Reading draft* throughout the render below so the UI reflects typing
   // immediately even though the parent doesn't know about each keystroke.
   const working = draftDetail;
+  const [, setBrainUploadStaleTick] = useState(0);
   const query = searchQuery.trim().toLowerCase();
   const sourceMatch = query !== "" && detail.source.toLowerCase().includes(query);
   const notesMatch = query !== "" && detail.notes.toLowerCase().includes(query);
@@ -139,14 +149,38 @@ function SessionCardImpl({
     failed: "Brain: ошибка",
     not_uploaded: "Brain: не загружено",
   } satisfies Record<BrainUploadStatus, string>;
-  const brainUploadStatus = brainUploadPending
+  const rawBrainUploadStatus = brainUploadPending
     ? "uploading"
     : (item.brain_upload_status ?? "not_uploaded");
-  const brainUploadError = brainUploadStatus === "failed" ? item.brain_upload_last_error?.trim() : "";
+  const staleBrainUploading =
+    rawBrainUploadStatus === "uploading"
+    && !brainUploadPending
+    && !isFreshBrainUploading(item.brain_upload_updated_at_iso);
+  const brainUploadStatus = staleBrainUploading ? "failed" : rawBrainUploadStatus;
+  const brainUploadError =
+    staleBrainUploading
+      ? "Предыдущая загрузка Brain не завершилась. Можно повторить."
+      : brainUploadStatus === "failed"
+      ? redactSensitiveText(item.brain_upload_last_error?.trim() ?? "")
+      : "";
+
+  useEffect(() => {
+    if (brainUploadPending || rawBrainUploadStatus !== "uploading") return;
+    const updatedAtMs = Date.parse(item.brain_upload_updated_at_iso ?? "");
+    if (!Number.isFinite(updatedAtMs)) return;
+    const delayMs = updatedAtMs + BRAIN_UPLOAD_FRESH_MS - Date.now();
+    if (delayMs <= 0) return;
+    const timer = window.setTimeout(() => {
+      setBrainUploadStaleTick((value) => value + 1);
+    }, delayMs + 50);
+    return () => window.clearTimeout(timer);
+  }, [brainUploadPending, item.brain_upload_updated_at_iso, rawBrainUploadStatus]);
+
   const brainUploadErrorId = `brain-upload-error-${item.session_id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
   const showBrainUploadButton =
     hasAudio && brainUploadStatus !== "uploaded";
-  const brainUploadDisabled = brainUploadPending || brainUploadStatus === "uploading";
+  const brainUploadDisabled =
+    brainUploadPending || brainUploadStatus === "uploading" || item.status === "recording";
 
   return (
     <article

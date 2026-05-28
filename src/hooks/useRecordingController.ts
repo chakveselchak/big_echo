@@ -446,13 +446,13 @@ export function useRecordingController({
     // window broadcasts `recording: false` from its initial idle/null state
     // and resets the other window that is actually owning a live session.
     if (isSettingsWindow || !uiSyncReady) return;
-    const recording = status === "recording";
+    const recording = session?.status === "recording";
     tauriEmit("recording:status", { recording }).catch(() => undefined);
     tauriEmit("ui:recording", {
       recording,
       sessionId: recording ? (session?.session_id ?? null) : null,
     }).catch(() => undefined);
-  }, [isSettingsWindow, session, status, uiSyncReady]);
+  }, [isSettingsWindow, session, uiSyncReady]);
 
   useEffect(() => {
     if (isSettingsWindow || !uiSyncReady) return;
