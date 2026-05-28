@@ -272,6 +272,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upload_audio_treats_ordinary_200_ok_as_success() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "job_id": 7,
+                "status": "queued"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let response = BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect("ordinary 200 ok response is success");
+
+        assert!(response.ok);
+        assert_eq!(response.job_id, Some(7));
+        assert_eq!(response.status.as_deref(), Some("queued"));
+        assert_eq!(response.duplicate, None);
+    }
+
+    #[tokio::test]
     async fn upload_audio_maps_401_to_unauthorized_error() {
         let server = MockServer::start().await;
         let (_tmp, audio_path) = audio_file();
@@ -317,6 +348,134 @@ mod tests {
             .expect_err("403 should fail");
 
         assert!(matches!(err, BrainUploadError::Forbidden { .. }));
+    }
+
+    #[tokio::test]
+    async fn upload_audio_maps_413_to_payload_too_large_error() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(ResponseTemplate::new(413).set_body_string("too large"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect_err("413 should fail");
+
+        assert!(matches!(
+            err,
+            BrainUploadError::PayloadTooLarge { ref body } if body == "too large"
+        ));
+    }
+
+    #[tokio::test]
+    async fn upload_audio_maps_415_to_unsupported_media_type_error() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(ResponseTemplate::new(415).set_body_string("unsupported"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect_err("415 should fail");
+
+        assert!(matches!(
+            err,
+            BrainUploadError::UnsupportedMediaType { ref body } if body == "unsupported"
+        ));
+    }
+
+    #[tokio::test]
+    async fn upload_audio_maps_5xx_to_server_error() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("try later"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect_err("5xx should fail");
+
+        assert!(matches!(
+            err,
+            BrainUploadError::Server {
+                status: 503,
+                ref body
+            } if body == "try later"
+        ));
+    }
+
+    #[tokio::test]
+    async fn upload_audio_maps_invalid_success_json_to_json_error() {
+        let server = MockServer::start().await;
+        let (_tmp, audio_path) = audio_file();
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not-json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let err = BrainServerClient::new()
+            .upload_audio(
+                &format!("{}/upload", server.uri()),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect_err("invalid json should fail");
+
+        assert!(matches!(err, BrainUploadError::Json(_)));
+    }
+
+    #[tokio::test]
+    async fn upload_audio_maps_connect_failure_to_network_error() {
+        let (_tmp, audio_path) = audio_file();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind local port");
+        let addr = listener.local_addr().expect("local addr");
+        drop(listener);
+
+        let err = BrainServerClient::new()
+            .upload_audio(
+                &format!("http://{addr}/upload"),
+                "secret-token",
+                &audio_path,
+                &sample_metadata(),
+            )
+            .await
+            .expect_err("closed local port should fail");
+
+        assert!(matches!(err, BrainUploadError::Network(_)));
     }
 
     #[tokio::test]
