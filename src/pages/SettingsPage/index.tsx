@@ -9,6 +9,7 @@ import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
 import { YandexSyncSettings } from "../../components/settings/YandexSyncSettings";
+import { BrainSyncSettings } from "../../components/settings/BrainSyncSettings";
 import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
 
 type SyncSessionsResult = {
@@ -110,6 +111,9 @@ export function SettingsPage() {
       isDirty("yandex_sync_enabled") ||
       isDirty("yandex_sync_interval") ||
       isDirty("yandex_sync_remote_folder"),
+    brain:
+      isDirty("brain_sync_enabled") ||
+      isDirty("brain_sync_url"),
   };
 
   const dirtyDot = (
@@ -207,6 +211,21 @@ export function SettingsPage() {
           setSettings={setSettings}
           isDirty={isDirty}
           yandexSync={yandexSync}
+        />
+      ),
+    },
+    {
+      key: "brain" as SettingsTab,
+      label: (
+        <>
+          Brain sync{dirtyByTab.brain && dirtyDot}
+        </>
+      ),
+      children: (
+        <BrainSyncSettings
+          settings={settings}
+          setSettings={setSettings}
+          isDirty={isDirty}
         />
       ),
     },

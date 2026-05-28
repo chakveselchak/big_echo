@@ -70,6 +70,10 @@ const { invokeMock } = vi.hoisted(() => ({
         failed: 0,
         errors: [],
       });
+    if (cmd === "brain_sync_has_token") return Promise.resolve(false);
+    if (cmd === "brain_sync_upload_archive") {
+      return Promise.resolve({ total: 0, uploaded: 0, skipped: 0, failed: 0, errors: [] });
+    }
     return null;
   }),
 }));
@@ -684,6 +688,33 @@ describe("App settings window", () => {
     const syncNow = await screen.findByRole("button", { name: /Sync now/i });
     expect(syncNow).toBeDisabled();
     expect(screen.getByRole("button", { name: /Save settings/i })).toBeInTheDocument();
+  });
+
+  it("renders the Brain sync tab and saves Brain sync fields", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: /Brain sync/i }));
+
+    const enabled = await screen.findByRole("checkbox", {
+      name: "Автоматически загружать новые записи в Brain",
+    });
+    await user.click(enabled);
+
+    const url = screen.getByLabelText("URL загрузки в Brain");
+    await user.clear(url);
+    await user.type(url, "https://brain.example.test/upload");
+
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
+        payload: expect.objectContaining({
+          brain_sync_enabled: true,
+          brain_sync_url: "https://brain.example.test/upload",
+        }),
+      });
+    });
   });
 
   it("toggles show_minitray_overlay via checkbox in Generals", async () => {

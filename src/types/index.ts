@@ -89,7 +89,7 @@ export type UiSyncStateView = {
 export type SecretSaveState = "unknown" | "updated" | "unchanged" | "error";
 export type PipelineUiState = { kind: "success" | "error"; text: string };
 export type LiveInputLevels = { mic: number; system: number };
-export type SettingsTab = "audiototext" | "generals" | "audio" | "yandex";
+export type SettingsTab = "audiototext" | "generals" | "audio" | "yandex" | "brain";
 export type DeleteTarget = { sessionId: string; force: boolean };
 
 export type TextEditorAppOption = {
