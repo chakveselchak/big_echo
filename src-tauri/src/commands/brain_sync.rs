@@ -113,15 +113,21 @@ fn progress_from_summary(
 
 fn archive_candidates(
     app_data_dir: &std::path::Path,
+    settings: &PublicSettings,
     now: DateTime<Local>,
 ) -> Result<Vec<ArchiveCandidate>, String> {
     let mut candidates = Vec::new();
+    let Some(recording_root) = canonical_recording_root(app_data_dir, settings)? else {
+        return Ok(candidates);
+    };
     for item in list_sessions(app_data_dir)? {
         let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? else {
             continue;
         };
         let meta = load_meta(&meta_path)?;
-        let session_dir = PathBuf::from(&item.session_dir);
+        let Some(session_dir) = local_session_dir(&recording_root, &item.session_dir) else {
+            continue;
+        };
         let Some(audio_path) = local_audio_file_path(&session_dir, &meta.artifacts.audio_file)
         else {
             continue;
@@ -149,6 +155,27 @@ fn archive_candidates(
     Ok(candidates)
 }
 
+fn canonical_recording_root(
+    app_data_dir: &std::path::Path,
+    settings: &PublicSettings,
+) -> Result<Option<PathBuf>, String> {
+    let root = crate::root_recordings_dir(app_data_dir, settings)?;
+    match std::fs::canonicalize(root) {
+        Ok(path) => Ok(Some(path)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn local_session_dir(recording_root: &Path, raw_session_dir: &str) -> Option<PathBuf> {
+    let session_dir = std::fs::canonicalize(raw_session_dir).ok()?;
+    if session_dir.starts_with(recording_root) {
+        Some(session_dir)
+    } else {
+        None
+    }
+}
+
 fn local_audio_file_path(session_dir: &Path, audio_file: &str) -> Option<PathBuf> {
     let trimmed = audio_file.trim();
     if trimmed.is_empty() {
@@ -165,7 +192,8 @@ fn local_audio_file_path(session_dir: &Path, audio_file: &str) -> Option<PathBuf
     }
 
     let audio_path = session_dir.join(relative_path);
-    if audio_path.is_file() {
+    let file_type = std::fs::symlink_metadata(&audio_path).ok()?.file_type();
+    if !file_type.is_symlink() && file_type.is_file() {
         Some(audio_path)
     } else {
         None
@@ -238,7 +266,7 @@ where
         return Err("Brain sync token is not configured".to_string());
     }
 
-    let candidates = archive_candidates(&app_data_dir, Local::now())?;
+    let candidates = archive_candidates(&app_data_dir, &settings, Local::now())?;
     let total = candidates.len();
     let _ = add_event(
         &app_data_dir,
@@ -441,6 +469,24 @@ mod tests {
         write_audio: bool,
     ) {
         let session_dir = app_data_dir.join("recordings").join(session_id);
+        seed_archive_session_at_dir(
+            app_data_dir,
+            &session_dir,
+            session_id,
+            started_at_iso,
+            audio_file,
+            write_audio,
+        );
+    }
+
+    fn seed_archive_session_at_dir(
+        app_data_dir: &Path,
+        session_dir: &Path,
+        session_id: &str,
+        started_at_iso: &str,
+        audio_file: String,
+        write_audio: bool,
+    ) {
         std::fs::create_dir_all(&session_dir).expect("create session dir");
         let meta_path = session_dir.join("meta.json");
         let mut meta = SessionMeta::new(
@@ -459,7 +505,7 @@ mod tests {
             std::fs::write(session_dir.join(&meta.artifacts.audio_file), b"OggS")
                 .expect("write audio");
         }
-        upsert_session(app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
+        upsert_session(app_data_dir, &meta, session_dir, &meta_path).expect("upsert session");
     }
 
     fn mark_last_event_at(app_data_dir: &Path, session_id: &str, at_iso: &str) {
@@ -596,6 +642,78 @@ mod tests {
         let summary = upload_archive_with_client(
             app_data_dir,
             archive_settings(),
+            &client,
+            |_| Ok(()),
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn archive_upload_skips_symlink_audio_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_with_audio_file(
+            &app_data_dir,
+            "symlink-audio",
+            "2026-05-28T10:00:00+03:00",
+            "audio.opus".to_string(),
+            false,
+        );
+        let outside_audio = tmp.path().join("outside.opus");
+        std::fs::write(&outside_audio, b"OggS").expect("write outside audio");
+        std::os::unix::fs::symlink(
+            &outside_audio,
+            app_data_dir
+                .join("recordings")
+                .join("symlink-audio")
+                .join("audio.opus"),
+        )
+        .expect("create audio symlink");
+        let (client, calls) = archive_client(vec![]);
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            |_| Ok(()),
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_session_dir_outside_recording_root() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let recording_root = app_data_dir.join("recordings");
+        let outside_session_dir = tmp.path().join("forged-session");
+        let mut settings = archive_settings();
+        settings.recording_root = recording_root.to_string_lossy().to_string();
+        save_settings(&app_data_dir, &settings).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_at_dir(
+            &app_data_dir,
+            &outside_session_dir,
+            "forged-session",
+            "2026-05-28T10:00:00+03:00",
+            "audio.opus".to_string(),
+            true,
+        );
+        let (client, calls) = archive_client(vec![]);
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            settings,
             &client,
             |_| Ok(()),
         )
