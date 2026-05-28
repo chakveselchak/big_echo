@@ -101,6 +101,22 @@ fn sanitize_error(raw: String, token: &str) -> String {
     }
 }
 
+fn record_failed_event(
+    app_data_dir: &Path,
+    session_id: &str,
+    error: String,
+    token: &str,
+) -> String {
+    let safe_error = sanitize_error(error, token);
+    let _ = add_event(
+        app_data_dir,
+        session_id,
+        "brain_upload_failed",
+        &safe_error,
+    );
+    safe_error
+}
+
 pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient + Sync>(
     app_data_dir: PathBuf,
     _session_dir: PathBuf,
@@ -114,11 +130,24 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
         return Ok(skipped_response());
     }
 
-    let url = validate_upload_url(&settings.brain_sync_url)?;
-    let token = get_secret(&app_data_dir, TOKEN_KEY)
-        .map_err(|_| "Brain sync token is not configured".to_string())?;
+    let url = validate_upload_url(&settings.brain_sync_url).map_err(|err| {
+        record_failed_event(&app_data_dir, &meta.session_id, err, "")
+    })?;
+    let token = get_secret(&app_data_dir, TOKEN_KEY).map_err(|_| {
+        record_failed_event(
+            &app_data_dir,
+            &meta.session_id,
+            "Brain sync token is not configured".to_string(),
+            "",
+        )
+    })?;
     if token.trim().is_empty() {
-        return Err("Brain sync token is not configured".to_string());
+        return Err(record_failed_event(
+            &app_data_dir,
+            &meta.session_id,
+            "Brain sync token is not configured".to_string(),
+            "",
+        ));
     }
 
     let metadata = upload_metadata(&meta, &audio_path, &settings);
@@ -143,12 +172,11 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
             Ok(response)
         }
         Err(err) => {
-            let safe_error = sanitize_error(err.to_string(), token.trim());
-            let _ = add_event(
+            let safe_error = record_failed_event(
                 &app_data_dir,
                 &meta.session_id,
-                "brain_upload_failed",
-                &safe_error,
+                err.to_string(),
+                token.trim(),
             );
             Err(safe_error)
         }
@@ -361,5 +389,105 @@ mod tests {
             .find(|event| event.event_type == "brain_upload_failed")
             .expect("failed event");
         assert!(!failed.detail.contains("secret-token"));
+    }
+
+    #[tokio::test]
+    async fn upload_orchestration_records_failed_event_for_invalid_url() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("session");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let audio_path = session_dir.join("audio.opus");
+        std::fs::write(&audio_path, b"OggS").expect("write audio");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingUploadClient {
+            calls: Arc::clone(&calls),
+            result: Some(Ok(BrainUploadResponse {
+                ok: true,
+                job_id: None,
+                status: None,
+                principal_id: None,
+                workspace_id: None,
+                workspace_slug: None,
+                inbox_path: None,
+                meta_path: None,
+                duplicate: None,
+                error: None,
+            })),
+        };
+
+        let err = super::upload_session_after_record_with_client(
+            app_data_dir.clone(),
+            session_dir,
+            sample_meta(),
+            audio_path,
+            enabled_settings("not-a-url".to_string()),
+            &client,
+            true,
+        )
+        .await
+        .expect_err("invalid url should fail");
+
+        assert_eq!(err, "Invalid Brain sync URL");
+        assert!(calls.lock().expect("calls lock").is_empty());
+        let events =
+            list_session_events(&app_data_dir, "session-upload").expect("load session events");
+        let event_types = events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(event_types, vec!["brain_upload_failed"]);
+        assert_eq!(events[0].detail, "Invalid Brain sync URL");
+        assert!(!events[0].detail.contains("secret-token"));
+    }
+
+    #[tokio::test]
+    async fn upload_orchestration_records_failed_event_for_missing_token() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("session");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let audio_path = session_dir.join("audio.opus");
+        std::fs::write(&audio_path, b"OggS").expect("write audio");
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingUploadClient {
+            calls: Arc::clone(&calls),
+            result: Some(Ok(BrainUploadResponse {
+                ok: true,
+                job_id: None,
+                status: None,
+                principal_id: None,
+                workspace_id: None,
+                workspace_slug: None,
+                inbox_path: None,
+                meta_path: None,
+                duplicate: None,
+                error: None,
+            })),
+        };
+
+        let err = super::upload_session_after_record_with_client(
+            app_data_dir.clone(),
+            session_dir,
+            sample_meta(),
+            audio_path,
+            enabled_settings("https://brain.example/upload".to_string()),
+            &client,
+            true,
+        )
+        .await
+        .expect_err("missing token should fail");
+
+        assert_eq!(err, "Brain sync token is not configured");
+        assert!(calls.lock().expect("calls lock").is_empty());
+        let events =
+            list_session_events(&app_data_dir, "session-upload").expect("load session events");
+        let event_types = events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(event_types, vec!["brain_upload_failed"]);
+        assert_eq!(events[0].detail, "Brain sync token is not configured");
     }
 }
