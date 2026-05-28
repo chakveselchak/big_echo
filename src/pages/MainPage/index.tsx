@@ -3,6 +3,7 @@ import type { InputRef } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSessions } from "../../hooks/useSessions";
 import { initializeAnalytics } from "../../lib/analytics";
+import { getErrorMessage } from "../../lib/appUtils";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 import type { StartResponse } from "../../types";
 import { NexaraBalance } from "../../components/NexaraBalance";
@@ -134,6 +135,22 @@ export function MainPage() {
     loadSessionsRef.current?.().catch((err) => setStatus(`error: ${String(err)}`));
   }, [mainTab]);
 
+  const uploadSessionToBrain = useCallback(
+    async (sessionId: string) => {
+      try {
+        setStatus("brain_uploading");
+        await tauriInvoke<string>("brain_sync_upload_session", { sessionId });
+        setStatus("brain_uploaded");
+        await loadSessions();
+      } catch (err) {
+        const message = getErrorMessage(err).replace(/[A-Za-z0-9_-]{20,}/g, "[redacted]");
+        setStatus(`error: Brain upload failed: ${message}`);
+        await loadSessions().catch(() => undefined);
+      }
+    },
+    [loadSessions],
+  );
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== "f") return;
@@ -240,6 +257,7 @@ export function MainPage() {
           flushSessionDetails={flushSessionDetails}
           requestDeleteSession={requestDeleteSession}
           requestDeleteAudio={requestDeleteAudio}
+          onUploadToBrain={(sessionId) => void uploadSessionToBrain(sessionId)}
           setStatus={setStatus}
         />
       </section>

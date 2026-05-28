@@ -62,6 +62,7 @@ type SessionListProps = {
   flushSessionDetails: (sessionId: string, detail?: SessionMetaView) => void;
   requestDeleteSession: (sessionId: string, isRecording: boolean) => void;
   requestDeleteAudio: (sessionId: string) => void;
+  onUploadToBrain: (sessionId: string) => void;
   setStatus: (status: string) => void;
 };
 
@@ -99,6 +100,7 @@ export function SessionList({
   flushSessionDetails,
   requestDeleteSession,
   requestDeleteAudio,
+  onUploadToBrain,
   setStatus,
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
@@ -432,6 +434,7 @@ export function SessionList({
                   onDeleteAudio={requestDeleteAudio}
                   onFieldBlur={flushSessionDetails}
                   onOpenFolder={openSessionFolder}
+                  onUploadToBrain={onUploadToBrain}
                   setStatus={setStatus}
                 />
               );

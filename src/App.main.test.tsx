@@ -2011,6 +2011,64 @@ describe("App main window", () => {
     });
   });
 
+  it("uploads a session to Brain and refreshes the session list", async () => {
+    const user = userEvent.setup();
+    let uploadDone = false;
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-brain-upload",
+            status: "done",
+            primary_tag: "slack",
+            topic: "Brain upload",
+            display_date_ru: "28.05.2026",
+            started_at_iso: "2026-05-28T13:00:00+03:00",
+            session_dir: "/tmp/s-brain-upload",
+            audio_file: "audio.mp3",
+            audio_format: "mp3",
+            audio_duration_hms: "00:03:00",
+            has_transcript_text: true,
+            has_summary_text: true,
+            brain_upload_status: uploadDone ? "uploaded" : "not_uploaded",
+            meta: {
+              session_id: "s-brain-upload",
+              source: "slack",
+              notes: "",
+              topic: "Brain upload",
+              tags: [],
+            },
+          },
+        ];
+      }
+      if (cmd === "brain_sync_upload_session") {
+        uploadDone = true;
+        return "uploaded";
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await screen.findByText("Brain: не загружено");
+
+    await user.click(screen.getByRole("button", { name: "Загрузить в Brain" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("brain_sync_upload_session", {
+        sessionId: "s-brain-upload",
+      });
+      expect(screen.getByText("Brain: загружено")).toBeInTheDocument();
+    });
+  });
+
   it("shows the New version tab when check_for_update reports a newer release", async () => {
     const user = userEvent.setup();
     invokeMock.mockImplementation(async (cmd: string) => {

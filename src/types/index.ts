@@ -41,6 +41,8 @@ export type StartResponse = {
   status: string;
 };
 
+export type BrainUploadStatus = "not_uploaded" | "uploading" | "uploaded" | "failed";
+
 export type RecordingInputChannel = "mic" | "system";
 export type RecordingMuteState = {
   micMuted: boolean;
@@ -60,6 +62,9 @@ export type SessionListItem = {
   audio_duration_hms: string;
   has_transcript_text: boolean;
   has_summary_text: boolean;
+  brain_upload_status: BrainUploadStatus;
+  brain_upload_last_error?: string;
+  brain_upload_updated_at_iso?: string;
   meta?: SessionMetaView;
 };
 

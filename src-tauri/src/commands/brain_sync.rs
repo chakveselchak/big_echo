@@ -10,7 +10,8 @@ use crate::settings::public_settings::PublicSettings;
 use crate::settings::secret_store::{clear_secret, get_secret, set_secret};
 use crate::storage::session_store::load_meta;
 use crate::storage::sqlite_repo::{
-    add_event, get_meta_path, get_session_dir, list_session_events, list_sessions, SessionEvent,
+    add_event, derive_brain_upload_state, get_meta_path, get_session_dir, list_session_events,
+    list_sessions, BrainUploadState, BrainUploadStatus,
 };
 use chrono::{DateTime, Duration, Local};
 use serde::Serialize;
@@ -43,14 +44,6 @@ pub struct BrainArchiveUploadSummary {
     pub errors: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BrainUploadStatus {
-    NotUploaded,
-    Uploaded,
-    Failed,
-    Uploading { at_iso: String },
-}
-
 struct ArchiveCandidate {
     session_dir: PathBuf,
     meta: SessionMeta,
@@ -58,25 +51,11 @@ struct ArchiveCandidate {
     sort_at_iso: String,
 }
 
-pub(crate) fn derive_brain_upload_status(events: &[SessionEvent]) -> BrainUploadStatus {
-    let mut status = BrainUploadStatus::NotUploaded;
-    for event in events {
-        match event.event_type.as_str() {
-            "brain_upload_succeeded" => status = BrainUploadStatus::Uploaded,
-            "brain_upload_failed" => status = BrainUploadStatus::Failed,
-            "brain_upload_started" => {
-                status = BrainUploadStatus::Uploading {
-                    at_iso: event.at_iso.clone(),
-                }
-            }
-            _ => {}
-        }
+fn fresh_uploading(state: &BrainUploadState, now: DateTime<Local>) -> bool {
+    if state.status != BrainUploadStatus::Uploading {
+        return false;
     }
-    status
-}
-
-fn fresh_uploading(status: &BrainUploadStatus, now: DateTime<Local>) -> bool {
-    let BrainUploadStatus::Uploading { at_iso } = status else {
+    let Some(at_iso) = state.updated_at_iso.as_deref() else {
         return false;
     };
     DateTime::parse_from_rfc3339(at_iso)
@@ -134,8 +113,10 @@ fn archive_candidates(
         };
 
         let events = list_session_events(app_data_dir, &item.session_id)?;
-        let status = derive_brain_upload_status(&events);
-        if status == BrainUploadStatus::Uploaded || fresh_uploading(&status, now) {
+        let brain_upload_state = derive_brain_upload_state(&events);
+        if brain_upload_state.status == BrainUploadStatus::Uploaded
+            || fresh_uploading(&brain_upload_state, now)
+        {
             continue;
         }
 

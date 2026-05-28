@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
 import { ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
-import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
+import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
 import { extractStartTimeHm, resolveSessionAudioPath } from "../../lib/appUtils";
@@ -31,6 +31,7 @@ type SessionCardProps = {
   onDeleteAudio: (sessionId: string) => void;
   onFieldBlur: (sessionId: string, detail?: SessionMetaView) => void;
   onOpenFolder: (sessionDir: string) => void;
+  onUploadToBrain: (sessionId: string) => void;
   setStatus: (status: string) => void;
 };
 
@@ -55,6 +56,7 @@ function SessionCardImpl({
   onDeleteAudio,
   onFieldBlur,
   onOpenFolder,
+  onUploadToBrain,
   setStatus,
 }: SessionCardProps) {
   const hasAudio = resolveSessionAudioPath(item) !== null;
@@ -129,6 +131,16 @@ function SessionCardImpl({
   const sessionTitleMeta = startTimeHm
     ? `(${item.audio_format}) - ${item.display_date_ru} ${startTimeHm}`
     : `(${item.audio_format}) - ${item.display_date_ru}`;
+  const brainLabelByStatus = {
+    uploaded: "Brain: загружено",
+    uploading: "Brain: загрузка",
+    failed: "Brain: ошибка",
+    not_uploaded: "Brain: не загружено",
+  } satisfies Record<BrainUploadStatus, string>;
+  const brainUploadStatus = item.brain_upload_status ?? "not_uploaded";
+  const showBrainUploadButton =
+    hasAudio && brainUploadStatus !== "uploaded";
+  const brainUploadDisabled = brainUploadStatus === "uploading";
 
   return (
     <article
@@ -165,6 +177,27 @@ function SessionCardImpl({
                 onClick={() => onOpenArtifact(item.session_id, "summary")}
               >
                 саммари
+              </Button>
+            )}
+            <span
+              className={`session-label session-label-brain session-label-brain-${brainUploadStatus}`}
+              title={
+                brainUploadStatus === "failed"
+                  ? item.brain_upload_last_error
+                  : undefined
+              }
+            >
+              {brainLabelByStatus[brainUploadStatus]}
+            </span>
+            {showBrainUploadButton && (
+              <Button
+                htmlType="button"
+                size="small"
+                className="session-brain-upload-button"
+                disabled={brainUploadDisabled}
+                onClick={() => onUploadToBrain(item.session_id)}
+              >
+                Загрузить в Brain
               </Button>
             )}
           </div>

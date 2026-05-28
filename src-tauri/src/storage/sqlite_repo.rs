@@ -5,6 +5,22 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainUploadStatus {
+    NotUploaded,
+    Uploading,
+    Uploaded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrainUploadState {
+    pub status: BrainUploadStatus,
+    pub last_error: Option<String>,
+    pub updated_at_iso: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionListMeta {
     pub session_id: String,
@@ -31,6 +47,11 @@ pub struct SessionListItem {
     pub audio_duration_hms: String,
     pub has_transcript_text: bool,
     pub has_summary_text: bool,
+    pub brain_upload_status: BrainUploadStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain_upload_last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brain_upload_updated_at_iso: Option<String>,
     pub meta: Option<SessionListMeta>,
 }
 
@@ -49,6 +70,35 @@ pub struct SessionEvent {
     pub at_iso: String,
     pub event_type: String,
     pub detail: String,
+}
+
+pub fn derive_brain_upload_state(events: &[SessionEvent]) -> BrainUploadState {
+    let mut state = BrainUploadState {
+        status: BrainUploadStatus::NotUploaded,
+        last_error: None,
+        updated_at_iso: None,
+    };
+    for event in events {
+        match event.event_type.as_str() {
+            "brain_upload_started" => {
+                state.status = BrainUploadStatus::Uploading;
+                state.last_error = None;
+                state.updated_at_iso = Some(event.at_iso.clone());
+            }
+            "brain_upload_succeeded" => {
+                state.status = BrainUploadStatus::Uploaded;
+                state.last_error = None;
+                state.updated_at_iso = Some(event.at_iso.clone());
+            }
+            "brain_upload_failed" => {
+                state.status = BrainUploadStatus::Failed;
+                state.last_error = Some(event.detail.clone());
+                state.updated_at_iso = Some(event.at_iso.clone());
+            }
+            _ => {}
+        }
+    }
+    state
 }
 
 fn db_path(app_data_dir: &Path) -> PathBuf {
@@ -249,6 +299,9 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                 audio_duration_hms: "00:00:00".to_string(),
                 has_transcript_text: false,
                 has_summary_text: false,
+                brain_upload_status: BrainUploadStatus::NotUploaded,
+                brain_upload_last_error: None,
+                brain_upload_updated_at_iso: None,
                 meta: None,
             })
         })
@@ -257,6 +310,13 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
     let mut out = Vec::new();
     for row in rows {
         let mut item = row.map_err(|e| e.to_string())?;
+        let brain_upload_state = derive_brain_upload_state(&list_session_events(
+            app_data_dir,
+            &item.session_id,
+        )?);
+        item.brain_upload_status = brain_upload_state.status;
+        item.brain_upload_last_error = brain_upload_state.last_error;
+        item.brain_upload_updated_at_iso = brain_upload_state.updated_at_iso;
         if let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? {
             match load_meta(&meta_path) {
                 Err(err) => {
@@ -511,6 +571,58 @@ mod tests {
         assert_eq!(sessions[0].audio_duration_hms, "00:01:30");
         assert!(sessions[0].has_transcript_text);
         assert!(sessions[0].has_summary_text);
+    }
+
+    #[test]
+    fn list_sessions_derives_brain_upload_status_from_latest_event() {
+        let dir = temp_dir();
+        for (session_id, started_at) in [
+            ("s-not-uploaded", "2026-05-28T10:00:00+03:00"),
+            ("s-uploaded", "2026-05-28T11:00:00+03:00"),
+            ("s-failed", "2026-05-28T12:00:00+03:00"),
+        ] {
+            let session_dir = dir.path().join("sessions").join(session_id);
+            std::fs::create_dir_all(&session_dir).expect("create session dir");
+            let meta_path = session_dir.join("meta.json");
+            let mut meta = SessionMeta::new(
+                session_id.to_string(),
+                "slack".to_string(),
+                vec!["slack".to_string()],
+                session_id.to_string(),
+                "".to_string(),
+            );
+            meta.started_at_iso = started_at.to_string();
+            meta.status = SessionStatus::Done;
+            save_meta(&meta_path, &meta).expect("save meta");
+            upsert_session(dir.path(), &meta, &session_dir, &meta_path).expect("upsert session");
+        }
+
+        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "old failure")
+            .expect("add old failed event");
+        add_event(dir.path(), "s-uploaded", "brain_upload_succeeded", "ok")
+            .expect("add success event");
+        add_event(dir.path(), "s-failed", "brain_upload_started", "started")
+            .expect("add started event");
+        add_event(dir.path(), "s-failed", "brain_upload_failed", "network down")
+            .expect("add failed event");
+
+        let sessions = list_sessions(dir.path()).expect("list sessions");
+        let by_id = |id: &str| {
+            sessions
+                .iter()
+                .find(|session| session.session_id == id)
+                .expect("session exists")
+        };
+
+        assert_eq!(by_id("s-not-uploaded").brain_upload_status, BrainUploadStatus::NotUploaded);
+        assert_eq!(by_id("s-uploaded").brain_upload_status, BrainUploadStatus::Uploaded);
+        assert_eq!(by_id("s-uploaded").brain_upload_last_error, None);
+        assert_eq!(by_id("s-failed").brain_upload_status, BrainUploadStatus::Failed);
+        assert_eq!(
+            by_id("s-failed").brain_upload_last_error.as_deref(),
+            Some("network down")
+        );
+        assert!(by_id("s-failed").brain_upload_updated_at_iso.is_some());
     }
 
     #[test]
