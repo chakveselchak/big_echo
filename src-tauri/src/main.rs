@@ -49,6 +49,7 @@ use commands::yandex_sync::{
 #[cfg(test)]
 use domain::session::SessionMeta;
 use domain::session::SessionStatus;
+use services::brain_server::upload::upload_session_after_record;
 use services::pipeline_runner::{run_pipeline_core, spawn_retry_worker, PipelineMode};
 #[cfg(test)]
 use settings::public_settings::save_settings;
@@ -100,6 +101,10 @@ fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
     settings.auto_run_pipeline_on_stop
         && transcription_ready
         && !settings.summary_url.trim().is_empty()
+}
+
+fn should_upload_brain_after_stop(settings: &PublicSettings) -> bool {
+    settings.brain_sync_enabled
 }
 
 // ── Capture artifact recovery ────────────────────────────────────────────────
@@ -307,6 +312,24 @@ pub(crate) fn stop_active_recording_internal(
             "recording_finalize_warning",
             warning,
         )?;
+    }
+
+    if should_upload_brain_after_stop(&settings) {
+        let app_data_dir = dirs.app_data_dir.clone();
+        let session_dir = abs_dir.clone();
+        let upload_meta = meta.clone();
+        let upload_audio_path = audio_output_path.clone();
+        let upload_settings = settings.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = upload_session_after_record(
+                app_data_dir,
+                session_dir,
+                upload_meta,
+                upload_audio_path,
+                upload_settings,
+            )
+            .await;
+        });
     }
 
     if should_auto_run_pipeline_after_stop(&settings) {
@@ -620,6 +643,19 @@ mod ipc_runtime_tests {
             ..Default::default()
         };
         assert!(should_auto_run_pipeline_after_stop(&ready));
+    }
+
+    #[test]
+    fn brain_upload_after_stop_requires_enabled_setting() {
+        let disabled = PublicSettings::default();
+        assert!(!should_upload_brain_after_stop(&disabled));
+
+        let enabled = PublicSettings {
+            brain_sync_enabled: true,
+            brain_sync_url: "https://example.com/upload".to_string(),
+            ..Default::default()
+        };
+        assert!(should_upload_brain_after_stop(&enabled));
     }
 
     #[test]
