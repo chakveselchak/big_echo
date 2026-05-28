@@ -69,7 +69,6 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
 
   const trimmedUrl = settings.brain_sync_url.trim();
   const urlIsValid = trimmedUrl.length > 0 && isValidHttpUrl(trimmedUrl);
-  const fieldsDisabled = !settings.brain_sync_enabled;
   const canUploadArchive = hasToken && urlIsValid && !archiveRunning;
 
   const tokenBadge = useMemo(() => {
@@ -170,7 +169,6 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
         <Input
           id="brain_sync_url"
           value={settings.brain_sync_url}
-          disabled={fieldsDisabled}
           onChange={(e) => setSettings({ ...settings, brain_sync_url: e.target.value })}
         />
       </Form.Item>
@@ -180,18 +178,17 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
           <Input.Password
             id="brain_sync_token"
             value={tokenInput}
-            disabled={fieldsDisabled}
             onChange={(e) => setTokenInput(e.target.value)}
             style={{ flex: "1 1 260px" }}
           />
           <Button
             type="primary"
-            disabled={fieldsDisabled || !tokenInput.trim()}
+            disabled={!tokenInput.trim()}
             onClick={() => void handleSaveToken()}
           >
             Сохранить токен
           </Button>
-          <Button disabled={fieldsDisabled || !hasToken} onClick={() => void handleClearToken()}>
+          <Button disabled={!hasToken} onClick={() => void handleClearToken()}>
             Очистить токен
           </Button>
           {tokenBadge}

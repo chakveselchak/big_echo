@@ -89,11 +89,11 @@ describe("BrainSyncSettings", () => {
     progressHandler = null;
   });
 
-  it("renders disabled URL and token controls when master checkbox is off", async () => {
+  it("keeps URL and token controls enabled when auto-upload checkbox is off", async () => {
     renderComponent(baseSettings({ brain_sync_enabled: false }));
 
-    expect(screen.getByLabelText("URL загрузки в Brain")).toBeDisabled();
-    expect(screen.getByLabelText("Персональный токен Brain")).toBeDisabled();
+    expect(screen.getByLabelText("URL загрузки в Brain")).toBeEnabled();
+    expect(screen.getByLabelText("Персональный токен Brain")).toBeEnabled();
     expect(await screen.findByText("Токен не сохранён")).toBeInTheDocument();
   });
 
@@ -153,6 +153,26 @@ describe("BrainSyncSettings", () => {
       expect(invokeMock).toHaveBeenCalledWith("brain_sync_upload_archive");
     });
     expect(await screen.findByText(/Готово: всего 3, загружено 2, пропущено 1, ошибок 0/)).toBeInTheDocument();
+  });
+
+  it("disables archive button when token is not saved", async () => {
+    renderComponent(baseSettings({ brain_sync_url: "https://brain.example.test/upload" }));
+
+    const button = await screen.findByRole("button", { name: "Загрузить архивные записи" });
+
+    expect(button).toBeDisabled();
+  });
+
+  it("disables archive button when URL is invalid", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "brain_sync_has_token") return true;
+      return undefined;
+    });
+    renderComponent(baseSettings({ brain_sync_url: "not-a-url" }));
+
+    const button = await screen.findByRole("button", { name: "Загрузить архивные записи" });
+
+    expect(button).toBeDisabled();
   });
 
   it("updates archive progress from progress events", async () => {
