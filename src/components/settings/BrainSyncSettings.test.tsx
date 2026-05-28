@@ -17,18 +17,12 @@ type BrainArchiveProgress = {
 };
 
 const invokeMock = vi.fn();
+const listenMock = vi.fn();
 let progressHandler: ((event: TauriEvent<BrainArchiveProgress>) => void) | null = null;
 
 vi.mock("../../lib/tauri", () => ({
   tauriInvoke: (...args: unknown[]) => invokeMock(...args),
-  tauriListen: vi.fn(async (event: string, handler: (event: TauriEvent<BrainArchiveProgress>) => void) => {
-    if (event === "brain-archive-upload-progress") {
-      progressHandler = handler;
-    }
-    return () => {
-      progressHandler = null;
-    };
-  }),
+  tauriListen: (...args: unknown[]) => listenMock(...args),
 }));
 
 function baseSettings(overrides: Partial<PublicSettings> = {}): PublicSettings {
@@ -66,12 +60,16 @@ function baseSettings(overrides: Partial<PublicSettings> = {}): PublicSettings {
   };
 }
 
-function renderComponent(settings = baseSettings(), setSettings = vi.fn()) {
+function renderComponent(
+  settings = baseSettings(),
+  setSettings = vi.fn(),
+  isDirty: (field: keyof PublicSettings) => boolean = () => false,
+) {
   return render(
     <BrainSyncSettings
       settings={settings}
       setSettings={setSettings}
-      isDirty={() => false}
+      isDirty={isDirty}
     />,
   );
 }
@@ -87,6 +85,15 @@ describe("BrainSyncSettings", () => {
       return undefined;
     });
     progressHandler = null;
+    listenMock.mockReset();
+    listenMock.mockImplementation(async (event: string, handler: (event: TauriEvent<BrainArchiveProgress>) => void) => {
+      if (event === "brain-archive-upload-progress") {
+        progressHandler = handler;
+      }
+      return () => {
+        progressHandler = null;
+      };
+    });
   });
 
   it("keeps URL and token controls enabled when auto-upload checkbox is off", async () => {
@@ -173,6 +180,71 @@ describe("BrainSyncSettings", () => {
     const button = await screen.findByRole("button", { name: "Загрузить архивные записи" });
 
     expect(button).toBeDisabled();
+  });
+
+  it("disables archive button and asks to save when Brain URL is dirty", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "brain_sync_has_token") return true;
+      return undefined;
+    });
+    renderComponent(
+      baseSettings({ brain_sync_url: "https://brain.example.test/changed" }),
+      vi.fn(),
+      (field) => field === "brain_sync_url",
+    );
+
+    const button = await screen.findByRole("button", { name: "Загрузить архивные записи" });
+
+    expect(button).toBeDisabled();
+    expect(screen.getByText("Сначала сохраните URL загрузки в Brain")).toBeInTheDocument();
+  });
+
+  it("unlistens archive progress if listener resolves after unmount", async () => {
+    let resolveListen: (unlisten: () => void) => void = () => undefined;
+    const unlisten = vi.fn();
+    listenMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveListen = resolve as (unlisten: () => void) => void;
+        }),
+    );
+
+    const { unmount } = renderComponent();
+    unmount();
+    resolveListen(unlisten);
+
+    await waitFor(() => expect(unlisten).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows safe error when saving token fails", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "brain_sync_has_token") return false;
+      if (cmd === "brain_sync_set_token") throw new Error("backend leaked brain-token");
+      return undefined;
+    });
+    renderComponent();
+
+    const tokenInput = screen.getByLabelText("Персональный токен Brain");
+    fireEvent.change(tokenInput, { target: { value: "brain-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить токен" }));
+
+    expect(await screen.findByText("Не удалось сохранить токен Brain")).toBeInTheDocument();
+    expect(screen.queryByText(/brain-token/)).not.toBeInTheDocument();
+  });
+
+  it("shows safe error when clearing token fails", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "brain_sync_has_token") return true;
+      if (cmd === "brain_sync_clear_token") throw new Error("backend leaked old-token");
+      return undefined;
+    });
+    renderComponent();
+    expect(await screen.findByText("Токен сохранён")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Очистить токен" }));
+
+    expect(await screen.findByText("Не удалось очистить токен Brain")).toBeInTheDocument();
+    expect(screen.queryByText(/old-token/)).not.toBeInTheDocument();
   });
 
   it("updates archive progress from progress events", async () => {

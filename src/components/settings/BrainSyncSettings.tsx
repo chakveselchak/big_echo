@@ -69,7 +69,8 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
 
   const trimmedUrl = settings.brain_sync_url.trim();
   const urlIsValid = trimmedUrl.length > 0 && isValidHttpUrl(trimmedUrl);
-  const canUploadArchive = hasToken && urlIsValid && !archiveRunning;
+  const isBrainUrlDirty = isDirty("brain_sync_url");
+  const canUploadArchive = hasToken && urlIsValid && !isBrainUrlDirty && !archiveRunning;
 
   const tokenBadge = useMemo(() => {
     if (tokenState === "loading") return <Tag>Проверка токена…</Tag>;
@@ -96,13 +97,25 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    void (async () => {
-      unlisten = await tauriListen("brain-archive-upload-progress", (event) => {
+    let cancelled = false;
+    void tauriListen("brain-archive-upload-progress", (event) => {
+      if (!cancelled) {
         const payload = (event as TauriPayloadEvent<BrainArchiveUploadProgress>).payload;
         setArchiveProgress(payload);
+      }
+    })
+      .then((nextUnlisten) => {
+        if (cancelled) {
+          nextUnlisten();
+          return;
+        }
+        unlisten = nextUnlisten;
+      })
+      .catch(() => {
+        if (!cancelled) setError("Не удалось подписаться на прогресс архивной загрузки Brain");
       });
-    })();
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
   }, []);
@@ -111,17 +124,27 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
     const token = tokenInput.trim();
     if (!token) return;
     setError(null);
-    await tauriInvoke("brain_sync_set_token", { token });
-    setTokenInput("");
-    setHasToken(true);
-    setTokenState("ready");
+    try {
+      await tauriInvoke("brain_sync_set_token", { token });
+      setTokenInput("");
+      setHasToken(true);
+      setTokenState("ready");
+    } catch {
+      setTokenState("error");
+      setError("Не удалось сохранить токен Brain");
+    }
   }
 
   async function handleClearToken() {
     setError(null);
-    await tauriInvoke("brain_sync_clear_token");
-    setHasToken(false);
-    setTokenState("ready");
+    try {
+      await tauriInvoke("brain_sync_clear_token");
+      setHasToken(false);
+      setTokenState("ready");
+    } catch {
+      setTokenState("error");
+      setError("Не удалось очистить токен Brain");
+    }
   }
 
   async function handleArchiveUpload() {
@@ -133,6 +156,10 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
     }
     if (!hasToken) {
       setError("Сохраните персональный токен Brain перед архивной загрузкой.");
+      return;
+    }
+    if (isBrainUrlDirty) {
+      setError("Сначала сохраните URL загрузки в Brain");
       return;
     }
 
@@ -205,15 +232,17 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
         </Typography.Text>
       </Space>
 
-      {(!hasToken || !urlIsValid) && (
+      {(!hasToken || !urlIsValid || isBrainUrlDirty) && (
         <Alert
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
           message={
-            !hasToken
-              ? "Для архивной загрузки Brain сохраните персональный токен."
-              : "Для архивной загрузки Brain укажите корректный URL."
+            isBrainUrlDirty
+              ? "Сначала сохраните URL загрузки в Brain"
+              : !hasToken
+                ? "Для архивной загрузки Brain сохраните персональный токен."
+                : "Для архивной загрузки Brain укажите корректный URL."
           }
         />
       )}
