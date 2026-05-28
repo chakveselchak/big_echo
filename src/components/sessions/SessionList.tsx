@@ -37,6 +37,7 @@ type SessionListProps = {
   sessionArtifactSearchHits: Record<string, { transcript_match?: boolean; summary_match?: boolean }>;
   textPendingBySession: Record<string, boolean>;
   summaryPendingBySession: Record<string, boolean>;
+  brainUploadPendingBySession: Record<string, boolean>;
   pipelineStateBySession: Record<string, PipelineUiState>;
   deleteTarget: DeleteTarget | null;
   deletePendingSessionId: string | null;
@@ -75,6 +76,7 @@ export function SessionList({
   sessionArtifactSearchHits,
   textPendingBySession,
   summaryPendingBySession,
+  brainUploadPendingBySession,
   pipelineStateBySession,
   deleteTarget,
   deletePendingSessionId,
@@ -403,6 +405,7 @@ export function SessionList({
               const detail = getSessionDetail(item);
               const textPending = Boolean(textPendingBySession[item.session_id]);
               const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
+              const brainUploadPending = Boolean(brainUploadPendingBySession[item.session_id]);
               const pipelineState = pipelineStateBySession[item.session_id];
               const query = sessionSearchQuery.trim().toLowerCase();
               const artifactHit = sessionArtifactSearchHits[item.session_id];
@@ -422,6 +425,7 @@ export function SessionList({
                   transcriptMatch={transcriptMatch}
                   summaryMatch={summaryMatch}
                   showNumSpeakers={transcriptionProvider === "nexara"}
+                  brainUploadPending={brainUploadPending}
                   onContextMenu={openSessionContextMenu}
                   onDetailChange={(nextDetail) =>
                     setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))

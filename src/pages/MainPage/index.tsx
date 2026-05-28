@@ -35,11 +35,13 @@ export function MainPage() {
   const [lastSessionId, setLastSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [brainUploadPendingBySession, setBrainUploadPendingBySession] = useState<Record<string, boolean>>({});
   const { updateInfo } = useVersionCheck();
   const showNewVersionTab = updateInfo?.is_newer === true;
   const sessionSearchInputRef = useRef<InputRef | null>(null);
   const loadSessionsRef = useRef<(() => Promise<void>) | null>(null);
   const appMainRef = useRef<HTMLElement | null>(null);
+  const brainUploadPendingRef = useRef<Record<string, boolean>>({});
 
   const {
     artifactPreview,
@@ -137,6 +139,9 @@ export function MainPage() {
 
   const uploadSessionToBrain = useCallback(
     async (sessionId: string) => {
+      if (brainUploadPendingRef.current[sessionId]) return;
+      brainUploadPendingRef.current = { ...brainUploadPendingRef.current, [sessionId]: true };
+      setBrainUploadPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
       try {
         setStatus("brain_uploading");
         await tauriInvoke<string>("brain_sync_upload_session", { sessionId });
@@ -146,6 +151,15 @@ export function MainPage() {
         const message = getErrorMessage(err).replace(/[A-Za-z0-9_-]{20,}/g, "[redacted]");
         setStatus(`error: Brain upload failed: ${message}`);
         await loadSessions().catch(() => undefined);
+      } finally {
+        const next = { ...brainUploadPendingRef.current };
+        delete next[sessionId];
+        brainUploadPendingRef.current = next;
+        setBrainUploadPendingBySession((prev) => {
+          const updated = { ...prev };
+          delete updated[sessionId];
+          return updated;
+        });
       }
     },
     [loadSessions],
@@ -229,6 +243,7 @@ export function MainPage() {
           sessionArtifactSearchHits={sessionArtifactSearchHits}
           textPendingBySession={textPendingBySession}
           summaryPendingBySession={summaryPendingBySession}
+          brainUploadPendingBySession={brainUploadPendingBySession}
           pipelineStateBySession={pipelineStateBySession}
           deleteTarget={deleteTarget}
           deletePendingSessionId={deletePendingSessionId}

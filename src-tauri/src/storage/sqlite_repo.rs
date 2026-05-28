@@ -3,6 +3,7 @@ use crate::storage::session_store::load_meta;
 use chrono::DateTime;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,8 +273,52 @@ pub fn list_session_events(
     Ok(out)
 }
 
+fn list_brain_upload_states(conn: &Connection) -> Result<HashMap<String, BrainUploadState>, String> {
+    let mut stmt = conn
+        .prepare(
+            "
+            SELECT e.session_id, e.at_iso, e.event_type, e.detail
+            FROM session_events e
+            INNER JOIN (
+                SELECT session_id, MAX(id) AS latest_id
+                FROM session_events
+                WHERE event_type IN (
+                    'brain_upload_started',
+                    'brain_upload_succeeded',
+                    'brain_upload_failed'
+                )
+                GROUP BY session_id
+            ) latest ON latest.latest_id = e.id
+            ",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SessionEvent {
+                id: 0,
+                session_id: row.get(0)?,
+                at_iso: row.get(1)?,
+                event_type: row.get(2)?,
+                detail: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut out = HashMap::new();
+    for row in rows {
+        let event = row.map_err(|e| e.to_string())?;
+        out.insert(
+            event.session_id.clone(),
+            derive_brain_upload_state(std::slice::from_ref(&event)),
+        );
+    }
+    Ok(out)
+}
+
 pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String> {
     let conn = open(app_data_dir)?;
+    let brain_upload_states = list_brain_upload_states(&conn)?;
     let mut stmt = conn
         .prepare(
             "
@@ -310,13 +355,11 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
     let mut out = Vec::new();
     for row in rows {
         let mut item = row.map_err(|e| e.to_string())?;
-        let brain_upload_state = derive_brain_upload_state(&list_session_events(
-            app_data_dir,
-            &item.session_id,
-        )?);
-        item.brain_upload_status = brain_upload_state.status;
-        item.brain_upload_last_error = brain_upload_state.last_error;
-        item.brain_upload_updated_at_iso = brain_upload_state.updated_at_iso;
+        if let Some(brain_upload_state) = brain_upload_states.get(&item.session_id) {
+            item.brain_upload_status = brain_upload_state.status.clone();
+            item.brain_upload_last_error = brain_upload_state.last_error.clone();
+            item.brain_upload_updated_at_iso = brain_upload_state.updated_at_iso.clone();
+        }
         if let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? {
             match load_meta(&meta_path) {
                 Err(err) => {
@@ -623,6 +666,43 @@ mod tests {
             Some("network down")
         );
         assert!(by_id("s-failed").brain_upload_updated_at_iso.is_some());
+    }
+
+    #[test]
+    fn list_brain_upload_states_returns_latest_status_event_per_session() {
+        let dir = temp_dir();
+        let conn = open(dir.path()).expect("open db");
+
+        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "old failure")
+            .expect("add old failure");
+        add_event(dir.path(), "s-uploaded", "brain_upload_succeeded", "ok")
+            .expect("add success");
+        add_event(dir.path(), "s-failed", "brain_upload_started", "started")
+            .expect("add started");
+        add_event(dir.path(), "s-failed", "brain_upload_failed", "latest failure")
+            .expect("add latest failure");
+        add_event(dir.path(), "s-ignored", "transcription_succeeded", "not a Brain status")
+            .expect("add unrelated event");
+
+        let states = list_brain_upload_states(&conn).expect("list brain states");
+
+        assert_eq!(
+            states.get("s-uploaded").expect("uploaded state").status,
+            BrainUploadStatus::Uploaded
+        );
+        assert_eq!(
+            states.get("s-failed").expect("failed state").status,
+            BrainUploadStatus::Failed
+        );
+        assert_eq!(
+            states
+                .get("s-failed")
+                .expect("failed state")
+                .last_error
+                .as_deref(),
+            Some("latest failure")
+        );
+        assert!(!states.contains_key("s-ignored"));
     }
 
     #[test]

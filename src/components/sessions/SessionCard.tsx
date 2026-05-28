@@ -21,6 +21,7 @@ type SessionCardProps = {
   transcriptMatch: boolean;
   summaryMatch: boolean;
   showNumSpeakers: boolean;
+  brainUploadPending: boolean;
   onContextMenu: (event: ReactMouseEvent<HTMLElement>, sessionId: string) => void;
   onDetailChange: (detail: SessionMetaView) => void;
   onOpenArtifact: (sessionId: string, kind: "transcript" | "summary") => void;
@@ -46,6 +47,7 @@ function SessionCardImpl({
   transcriptMatch,
   summaryMatch,
   showNumSpeakers,
+  brainUploadPending,
   onContextMenu,
   onDetailChange,
   onOpenArtifact,
@@ -137,10 +139,14 @@ function SessionCardImpl({
     failed: "Brain: ошибка",
     not_uploaded: "Brain: не загружено",
   } satisfies Record<BrainUploadStatus, string>;
-  const brainUploadStatus = item.brain_upload_status ?? "not_uploaded";
+  const brainUploadStatus = brainUploadPending
+    ? "uploading"
+    : (item.brain_upload_status ?? "not_uploaded");
+  const brainUploadError = brainUploadStatus === "failed" ? item.brain_upload_last_error?.trim() : "";
+  const brainUploadErrorId = `brain-upload-error-${item.session_id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
   const showBrainUploadButton =
     hasAudio && brainUploadStatus !== "uploaded";
-  const brainUploadDisabled = brainUploadStatus === "uploading";
+  const brainUploadDisabled = brainUploadPending || brainUploadStatus === "uploading";
 
   return (
     <article
@@ -181,14 +187,18 @@ function SessionCardImpl({
             )}
             <span
               className={`session-label session-label-brain session-label-brain-${brainUploadStatus}`}
-              title={
-                brainUploadStatus === "failed"
-                  ? item.brain_upload_last_error
-                  : undefined
-              }
+              title={brainUploadError || undefined}
+              tabIndex={brainUploadError ? 0 : undefined}
+              aria-label={brainUploadError ? `${brainLabelByStatus[brainUploadStatus]}. ${brainUploadError}` : undefined}
+              aria-describedby={brainUploadError ? brainUploadErrorId : undefined}
             >
               {brainLabelByStatus[brainUploadStatus]}
             </span>
+            {brainUploadError && (
+              <span id={brainUploadErrorId} className="visually-hidden">
+                {brainUploadError}
+              </span>
+            )}
             {showBrainUploadButton && (
               <Button
                 htmlType="button"

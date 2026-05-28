@@ -52,6 +52,7 @@ function renderCard(item: SessionListItem, onUploadToBrain = vi.fn()) {
       transcriptMatch={false}
       summaryMatch={false}
       showNumSpeakers={false}
+      brainUploadPending={false}
       onContextMenu={noop}
       onDetailChange={noop}
       onOpenArtifact={noop}
@@ -82,6 +83,10 @@ describe("SessionCard Brain upload status", () => {
   it("renders failed label with the last error as title", () => {
     renderCard(makeItem("failed", { brain_upload_last_error: "Network unavailable" }));
     expect(screen.getByText("Brain: ошибка")).toHaveAttribute("title", "Network unavailable");
+    expect(screen.getByText("Brain: ошибка")).toHaveAccessibleName(
+      "Brain: ошибка. Network unavailable",
+    );
+    expect(screen.getByText("Network unavailable")).toHaveClass("visually-hidden");
   });
 
   it("shows upload button for not uploaded sessions with audio and calls callback", async () => {
@@ -103,6 +108,40 @@ describe("SessionCard Brain upload status", () => {
     expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
   });
 
+  it("uses local pending state to disable upload before backend refresh", () => {
+    const noop = () => undefined;
+    render(
+      <SessionCard
+        item={makeItem("not_uploaded")}
+        detail={makeDetail()}
+        textPending={false}
+        summaryPending={false}
+        pipelineState={undefined}
+        searchQuery=""
+        knownTagOptions={[]}
+        transcriptMatch={false}
+        summaryMatch={false}
+        showNumSpeakers={false}
+        brainUploadPending={true}
+        onContextMenu={noop}
+        onDetailChange={noop}
+        onOpenArtifact={noop}
+        onGetText={noop}
+        onGetSummary={noop}
+        onOpenSummaryPrompt={noop}
+        onDelete={noop}
+        onDeleteAudio={noop}
+        onFieldBlur={noop}
+        onOpenFolder={noop}
+        onUploadToBrain={noop}
+        setStatus={noop}
+      />,
+    );
+
+    expect(screen.getByText("Brain: загрузка")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
+  });
+
   it("hides upload button for uploaded sessions and sessions without audio", () => {
     const { rerender } = renderCard(makeItem("uploaded"));
     expect(screen.queryByRole("button", { name: "Загрузить в Brain" })).not.toBeInTheDocument();
@@ -119,6 +158,7 @@ describe("SessionCard Brain upload status", () => {
         transcriptMatch={false}
         summaryMatch={false}
         showNumSpeakers={false}
+        brainUploadPending={false}
         onContextMenu={() => undefined}
         onDetailChange={() => undefined}
         onOpenArtifact={() => undefined}

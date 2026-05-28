@@ -104,6 +104,7 @@ function renderList(
     sessionArtifactSearchHits: {},
     textPendingBySession: {},
     summaryPendingBySession: {},
+    brainUploadPendingBySession: {},
     pipelineStateBySession: {},
     deleteTarget: null,
     deletePendingSessionId: null,
@@ -227,6 +228,7 @@ describe("SessionList lazy loading", () => {
         sessionArtifactSearchHits={{}}
         textPendingBySession={{}}
         summaryPendingBySession={{}}
+        brainUploadPendingBySession={{}}
         pipelineStateBySession={{}}
         deleteTarget={null}
         deletePendingSessionId={null}
