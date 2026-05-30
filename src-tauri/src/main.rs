@@ -1898,6 +1898,46 @@ mod ipc_runtime_tests {
     }
 
     #[test]
+    fn invoke_yandex_sync_set_token_rejects_control_characters() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "yandex_sync_set_token",
+                serde_json::json!({ "token": "abc\ndef" }),
+            ),
+        );
+        let err = response.expect_err("token with newline should fail");
+        assert_eq!(
+            extract_err_string(err),
+            "Token must not contain control characters"
+        );
+    }
+
+    #[test]
+    fn invoke_yandex_sync_set_token_rejects_unicode_separators() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "yandex_sync_set_token",
+                serde_json::json!({ "token": "abc\u{2028}def" }),
+            ),
+        );
+        let err = response.expect_err("token with line separator should fail");
+        assert_eq!(
+            extract_err_string(err),
+            "Token must not contain control characters"
+        );
+    }
+
+    #[test]
     fn invoke_brain_sync_has_token_returns_false_when_unset() {
         let (app, _dir) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -1974,6 +2014,26 @@ mod ipc_runtime_tests {
             ),
         );
         let err = response.expect_err("token with newline should fail");
+        assert_eq!(
+            extract_err_string(err),
+            "Token must not contain control characters"
+        );
+    }
+
+    #[test]
+    fn invoke_brain_sync_set_token_rejects_unicode_separators() {
+        let (app, _dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let response = get_ipc_response(
+            &webview,
+            invoke_request(
+                "brain_sync_set_token",
+                serde_json::json!({ "token": "abc\u{FEFF}def" }),
+            ),
+        );
+        let err = response.expect_err("token with BOM should fail");
         assert_eq!(
             extract_err_string(err),
             "Token must not contain control characters"
