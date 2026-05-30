@@ -19,6 +19,7 @@ pub enum BrainUploadStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrainUploadState {
     pub status: BrainUploadStatus,
+    pub server_ingested_once: bool,
     pub last_error: Option<String>,
     pub updated_at_iso: Option<String>,
 }
@@ -50,6 +51,8 @@ pub struct SessionListItem {
     pub has_transcript_text: bool,
     pub has_summary_text: bool,
     pub brain_upload_status: BrainUploadStatus,
+    #[serde(default)]
+    pub brain_server_ingested_once: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub brain_upload_last_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -74,41 +77,71 @@ pub struct SessionEvent {
     pub detail: String,
 }
 
+pub const BRAIN_UPLOAD_FRESH_MINUTES: i64 = 30;
+
+pub fn brain_upload_is_fresh(updated_at_iso: Option<&str>, now: chrono::DateTime<chrono::Local>) -> bool {
+    let Some(at_iso) = updated_at_iso else {
+        return false;
+    };
+    chrono::DateTime::parse_from_rfc3339(at_iso)
+        .map(|started| {
+            let age = now.signed_duration_since(started.with_timezone(&now.timezone()));
+            age >= chrono::Duration::zero() && age < chrono::Duration::minutes(BRAIN_UPLOAD_FRESH_MINUTES)
+        })
+        .unwrap_or(false)
+}
+
 pub fn derive_brain_upload_state(events: &[SessionEvent]) -> BrainUploadState {
     let mut state = BrainUploadState {
         status: BrainUploadStatus::NotUploaded,
+        server_ingested_once: false,
         last_error: None,
         updated_at_iso: None,
     };
-    let mut has_success = false;
     for event in events {
         match event.event_type.as_str() {
             "brain_upload_started" => {
-                if has_success {
-                    continue;
-                }
                 state.status = BrainUploadStatus::Uploading;
                 state.last_error = None;
                 state.updated_at_iso = Some(event.at_iso.clone());
             }
             "brain_upload_succeeded" => {
-                has_success = true;
+                state.server_ingested_once = true;
                 state.status = BrainUploadStatus::Uploaded;
                 state.last_error = None;
                 state.updated_at_iso = Some(event.at_iso.clone());
             }
-            "brain_upload_failed" => {
-                if has_success {
-                    continue;
-                }
+            "brain_upload_failed" | "brain_upload_interrupted" => {
                 state.status = BrainUploadStatus::Failed;
                 state.last_error = Some(event.detail.clone());
                 state.updated_at_iso = Some(event.at_iso.clone());
             }
+            "brain_upload_skipped" => {}
             _ => {}
         }
     }
     state
+}
+
+pub fn reconcile_stale_brain_uploads(app_data_dir: &Path) -> Result<(), String> {
+    let now = chrono::Local::now();
+    let conn = open(app_data_dir)?;
+    let states = list_brain_upload_states(&conn)?;
+    for (session_id, state) in states {
+        if state.status != BrainUploadStatus::Uploading {
+            continue;
+        }
+        if brain_upload_is_fresh(state.updated_at_iso.as_deref(), now) {
+            continue;
+        }
+        add_event(
+            app_data_dir,
+            &session_id,
+            "brain_upload_interrupted",
+            "Предыдущая загрузка Brain не завершилась. Можно повторить.",
+        )?;
+    }
+    Ok(())
 }
 
 fn db_path(app_data_dir: &Path) -> PathBuf {
@@ -157,6 +190,10 @@ pub(crate) fn audio_duration_hms(meta: &SessionMeta) -> String {
 }
 
 fn open(app_data_dir: &Path) -> Result<Connection, String> {
+    open_connection(app_data_dir)
+}
+
+pub fn open_connection(app_data_dir: &Path) -> Result<Connection, String> {
     let path = db_path(app_data_dir);
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     conn.busy_timeout(StdDuration::from_secs(5))
@@ -294,7 +331,9 @@ fn list_brain_upload_states(conn: &Connection) -> Result<HashMap<String, BrainUp
             WHERE event_type IN (
                 'brain_upload_started',
                 'brain_upload_succeeded',
-                'brain_upload_failed'
+                'brain_upload_failed',
+                'brain_upload_interrupted',
+                'brain_upload_skipped'
             )
             ORDER BY session_id ASC, id ASC
             ",
@@ -325,6 +364,7 @@ fn list_brain_upload_states(conn: &Connection) -> Result<HashMap<String, BrainUp
 }
 
 pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String> {
+    reconcile_stale_brain_uploads(app_data_dir)?;
     let conn = open(app_data_dir)?;
     let brain_upload_states = list_brain_upload_states(&conn)?;
     let mut stmt = conn
@@ -353,6 +393,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                 has_transcript_text: false,
                 has_summary_text: false,
                 brain_upload_status: BrainUploadStatus::NotUploaded,
+                brain_server_ingested_once: false,
                 brain_upload_last_error: None,
                 brain_upload_updated_at_iso: None,
                 meta: None,
@@ -365,6 +406,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
         let mut item = row.map_err(|e| e.to_string())?;
         if let Some(brain_upload_state) = brain_upload_states.get(&item.session_id) {
             item.brain_upload_status = brain_upload_state.status.clone();
+            item.brain_server_ingested_once = brain_upload_state.server_ingested_once;
             item.brain_upload_last_error = brain_upload_state.last_error.clone();
             item.brain_upload_updated_at_iso = brain_upload_state.updated_at_iso.clone();
         }
@@ -668,8 +710,12 @@ mod tests {
         };
 
         assert_eq!(by_id("s-not-uploaded").brain_upload_status, BrainUploadStatus::NotUploaded);
-        assert_eq!(by_id("s-uploaded").brain_upload_status, BrainUploadStatus::Uploaded);
-        assert_eq!(by_id("s-uploaded").brain_upload_last_error, None);
+        assert_eq!(by_id("s-uploaded").brain_upload_status, BrainUploadStatus::Failed);
+        assert!(by_id("s-uploaded").brain_server_ingested_once);
+        assert_eq!(
+            by_id("s-uploaded").brain_upload_last_error.as_deref(),
+            Some("retry failed")
+        );
         assert_eq!(by_id("s-failed").brain_upload_status, BrainUploadStatus::Failed);
         assert_eq!(
             by_id("s-failed").brain_upload_last_error.as_deref(),
@@ -679,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn list_brain_upload_states_keeps_uploaded_sessions_uploaded_after_failed_retry() {
+    fn list_brain_upload_states_shows_failed_retry_after_success() {
         let dir = temp_dir();
         let conn = open(dir.path()).expect("open db");
 
@@ -700,8 +746,9 @@ mod tests {
 
         assert_eq!(
             states.get("s-uploaded").expect("uploaded state").status,
-            BrainUploadStatus::Uploaded
+            BrainUploadStatus::Failed
         );
+        assert!(states.get("s-uploaded").expect("uploaded state").server_ingested_once);
         assert_eq!(
             states.get("s-failed").expect("failed state").status,
             BrainUploadStatus::Failed
@@ -715,6 +762,28 @@ mod tests {
             Some("latest failure")
         );
         assert!(!states.contains_key("s-ignored"));
+    }
+
+    #[test]
+    fn reconcile_stale_brain_uploads_persists_interrupted_event() {
+        let dir = temp_dir();
+        add_event(dir.path(), "s-stale", "brain_upload_started", "Uploading audio to Brain")
+            .expect("add started");
+
+        reconcile_stale_brain_uploads(dir.path()).expect("reconcile stale uploads");
+
+        let events = list_session_events(dir.path(), "s-stale").expect("list events");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event_type == "brain_upload_interrupted")
+        );
+        let conn = open(dir.path()).expect("open db");
+        let states = super::list_brain_upload_states(&conn).expect("list states");
+        assert_eq!(
+            states.get("s-stale").expect("stale state").status,
+            BrainUploadStatus::Failed
+        );
     }
 
     #[test]

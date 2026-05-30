@@ -50,7 +50,7 @@ use commands::yandex_sync::{
 #[cfg(test)]
 use domain::session::SessionMeta;
 use domain::session::SessionStatus;
-use services::brain_server::upload::upload_session_after_record;
+use services::brain_server::upload::{upload_session_after_record_with_shared_client, validate_upload_url};
 use services::brain_server::state::try_begin_session_upload;
 use services::pipeline_runner::{run_pipeline_core, spawn_retry_worker, PipelineMode};
 #[cfg(test)]
@@ -106,7 +106,7 @@ fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
 }
 
 fn should_upload_brain_after_stop(settings: &PublicSettings) -> bool {
-    settings.brain_sync_enabled && !settings.brain_sync_url.trim().is_empty()
+    settings.brain_sync_enabled && validate_upload_url(&settings.brain_sync_url).is_ok()
 }
 
 // ── Capture artifact recovery ────────────────────────────────────────────────
@@ -323,18 +323,28 @@ pub(crate) fn stop_active_recording_internal(
         let upload_audio_path = audio_output_path.clone();
         let upload_settings = settings.clone();
         let brain_upload_state = state.brain_upload.clone();
+        let brain_client = state.brain_client.clone();
         tauri::async_runtime::spawn(async move {
-            let Ok(_session_guard) =
-                try_begin_session_upload(&brain_upload_state, &upload_meta.session_id)
-            else {
+            let Ok(_session_guard) = try_begin_session_upload(
+                &app_data_dir,
+                &brain_upload_state,
+                &upload_meta.session_id,
+            ) else {
+                let _ = add_event(
+                    &app_data_dir,
+                    &upload_meta.session_id,
+                    "brain_upload_skipped",
+                    "Автозагрузка пропущена: загрузка Brain уже выполняется",
+                );
                 return;
             };
-            let _ = upload_session_after_record(
+            let _ = upload_session_after_record_with_shared_client(
                 app_data_dir,
                 session_dir,
                 upload_meta,
                 upload_audio_path,
                 upload_settings,
+                &brain_client,
             )
             .await;
         });
@@ -672,6 +682,13 @@ mod ipc_runtime_tests {
             ..Default::default()
         };
         assert!(should_upload_brain_after_stop(&enabled));
+
+        let invalid_url = PublicSettings {
+            brain_sync_enabled: true,
+            brain_sync_url: "ftp://example.com/upload".to_string(),
+            ..Default::default()
+        };
+        assert!(!should_upload_brain_after_stop(&invalid_url));
     }
 
     #[test]

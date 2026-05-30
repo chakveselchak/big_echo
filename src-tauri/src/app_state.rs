@@ -3,6 +3,7 @@ use crate::domain::session::SessionMeta;
 use crate::services::brain_server::state::{
     new_shared_state as new_shared_brain_upload_state, SharedBrainUploadState,
 };
+use crate::services::brain_server::client::BrainServerClient;
 use crate::services::yandex_disk::state::{new_shared_state, SharedYandexSyncState};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -21,6 +22,7 @@ pub struct AppState {
     pub known_tags_hydrated: Mutex<bool>,
     pub yandex_sync: SharedYandexSyncState,
     pub brain_upload: SharedBrainUploadState,
+    pub brain_client: BrainServerClient,
 }
 
 impl Default for AppState {
@@ -36,6 +38,7 @@ impl Default for AppState {
             known_tags_hydrated: Mutex::new(false),
             yandex_sync: new_shared_state(),
             brain_upload: new_shared_brain_upload_state(),
+            brain_client: BrainServerClient::new(),
         }
     }
 }

@@ -63,6 +63,7 @@ export type SessionListItem = {
   has_transcript_text: boolean;
   has_summary_text: boolean;
   brain_upload_status: BrainUploadStatus;
+  brain_server_ingested_once?: boolean;
   brain_upload_last_error?: string;
   brain_upload_updated_at_iso?: string;
   meta?: SessionMetaView;

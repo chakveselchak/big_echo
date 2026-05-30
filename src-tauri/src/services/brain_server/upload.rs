@@ -94,11 +94,26 @@ fn upload_metadata(
 }
 
 pub(crate) fn sanitize_error(raw: String, token: &str) -> String {
-    if token.is_empty() {
+    let exact = if token.is_empty() {
         raw
     } else {
         raw.replace(token, "[redacted]")
-    }
+    };
+    exact
+        .split_whitespace()
+        .map(|part| {
+            if part.len() >= 20
+                && part.chars().all(|c| {
+                    c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '=' | '+' | '/' | '.')
+                })
+            {
+                "[redacted]"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn record_failed_event(
@@ -183,6 +198,26 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
     }
 }
 
+pub(crate) async fn upload_session_after_record_even_when_disabled<C: UploadAudioClient + Sync>(
+    app_data_dir: PathBuf,
+    session_dir: PathBuf,
+    meta: SessionMeta,
+    audio_path: PathBuf,
+    settings: PublicSettings,
+    client: &C,
+) -> Result<BrainUploadResponse, String> {
+    upload_session_after_record_with_client(
+        app_data_dir,
+        session_dir,
+        meta,
+        audio_path,
+        settings,
+        client,
+        false,
+    )
+    .await
+}
+
 pub async fn upload_session_after_record(
     app_data_dir: PathBuf,
     session_dir: PathBuf,
@@ -203,22 +238,22 @@ pub async fn upload_session_after_record(
     .await
 }
 
-pub(crate) async fn upload_session_after_record_even_when_disabled(
+pub async fn upload_session_after_record_with_shared_client(
     app_data_dir: PathBuf,
     session_dir: PathBuf,
     meta: SessionMeta,
     audio_path: PathBuf,
     settings: PublicSettings,
+    client: &BrainServerClient,
 ) -> Result<BrainUploadResponse, String> {
-    let client = BrainServerClient::new();
     upload_session_after_record_with_client(
         app_data_dir,
         session_dir,
         meta,
         audio_path,
         settings,
-        &client,
-        false,
+        client,
+        true,
     )
     .await
 }
@@ -537,5 +572,13 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(event_types, vec!["brain_upload_failed"]);
         assert_eq!(events[0].detail, "Brain sync token is not configured");
+    }
+
+    #[test]
+    fn sanitize_error_redacts_token_like_fragments_from_twenty_chars() {
+        let token = "A".repeat(22);
+        let sanitized = super::sanitize_error(format!("server rejected {token}"), "");
+        assert!(!sanitized.contains(&token));
+        assert!(sanitized.contains("[redacted]"));
     }
 }

@@ -2,7 +2,8 @@ use crate::app_state::{AppDirs, AppState};
 use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{BrainServerClient, BrainUploadResponse};
 use crate::services::brain_server::state::{
-    try_begin_archive_upload, try_begin_session_upload, SharedBrainUploadState,
+    is_already_running_error, try_begin_archive_upload, try_begin_session_upload,
+    SharedBrainUploadState,
 };
 use crate::services::brain_server::upload::{
     sanitize_error, upload_session_after_record_even_when_disabled,
@@ -11,12 +12,14 @@ use crate::services::brain_server::upload::{
 use crate::settings::public_settings::load_settings;
 use crate::settings::public_settings::PublicSettings;
 use crate::settings::secret_store::{clear_secret, get_secret, set_secret};
+use crate::settings::token_validation::validate_secret_token;
 use crate::storage::session_store::load_meta;
 use crate::storage::sqlite_repo::{
-    add_event, derive_brain_upload_state, get_meta_path, get_session_dir, list_session_events,
-    list_sessions, BrainUploadState, BrainUploadStatus,
+    add_event, brain_upload_is_fresh, derive_brain_upload_state, get_meta_path, get_session_dir,
+    list_session_events, list_sessions, reconcile_stale_brain_uploads, BrainUploadState,
+    BrainUploadStatus,
 };
-use chrono::{DateTime, Duration, Local};
+use chrono::{DateTime, Local};
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
@@ -58,18 +61,23 @@ struct ArchiveCandidate {
 }
 
 fn fresh_uploading(state: &BrainUploadState, now: DateTime<Local>) -> bool {
-    if state.status != BrainUploadStatus::Uploading {
-        return false;
+    state.status == BrainUploadStatus::Uploading
+        && brain_upload_is_fresh(state.updated_at_iso.as_deref(), now)
+}
+
+fn already_running_response() -> BrainUploadResponse {
+    BrainUploadResponse {
+        ok: true,
+        job_id: None,
+        status: Some("already_running".to_string()),
+        principal_id: None,
+        workspace_id: None,
+        workspace_slug: None,
+        inbox_path: None,
+        meta_path: None,
+        duplicate: None,
+        error: Some("Загрузка Brain уже выполняется".to_string()),
     }
-    let Some(at_iso) = state.updated_at_iso.as_deref() else {
-        return false;
-    };
-    DateTime::parse_from_rfc3339(at_iso)
-        .map(|started| {
-            let age = now.signed_duration_since(started.with_timezone(&Local));
-            age >= Duration::zero() && age < Duration::minutes(30)
-        })
-        .unwrap_or(false)
 }
 
 fn archive_error(errors: &mut Vec<String>, message: String) {
@@ -107,8 +115,24 @@ fn archive_candidates(
         return Ok(candidates);
     };
     for item in list_sessions(app_data_dir)? {
-        let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? else {
-            continue;
+        let meta_path = match get_meta_path(app_data_dir, &item.session_id) {
+            Ok(Some(path)) => path,
+            Ok(None) => continue,
+            Err(err) => {
+                candidates.push(ArchiveCandidate {
+                    session_id: item.session_id.clone(),
+                    title: item.topic.clone(),
+                    session_dir: None,
+                    meta: None,
+                    audio_path: None,
+                    sort_at_iso: item.started_at_iso.clone(),
+                    skip_error: Some(format!(
+                        "{}: meta path unavailable: {err}",
+                        item.session_id
+                    )),
+                });
+                continue;
+            }
         };
         let meta = match load_meta(&meta_path) {
             Ok(meta) => meta,
@@ -136,6 +160,9 @@ fn archive_candidates(
         let events = match list_session_events(app_data_dir, &item.session_id) {
             Ok(events) => events,
             Err(err) => {
+                if item.brain_server_ingested_once {
+                    continue;
+                }
                 candidates.push(ArchiveCandidate {
                     session_id: item.session_id.clone(),
                     title: meta.topic.clone(),
@@ -143,13 +170,16 @@ fn archive_candidates(
                     meta: None,
                     audio_path: None,
                     sort_at_iso: meta.started_at_iso.clone(),
-                    skip_error: Some(format!("{}: events unavailable: {err}", item.session_id)),
+                    skip_error: Some(format!(
+                        "{}: events unavailable: {err}",
+                        item.session_id
+                    )),
                 });
                 continue;
             }
         };
         let brain_upload_state = derive_brain_upload_state(&events);
-        if brain_upload_state.status == BrainUploadStatus::Uploaded
+        if brain_upload_state.server_ingested_once
             || fresh_uploading(&brain_upload_state, now)
         {
             continue;
@@ -245,14 +275,8 @@ fn manual_upload_paths(
 
 #[tauri::command]
 pub fn brain_sync_set_token(dirs: State<'_, AppDirs>, token: String) -> Result<(), String> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return Err("Token must not be empty".to_string());
-    }
-    if trimmed.chars().any(char::is_control) {
-        return Err("Token must not contain control characters".to_string());
-    }
-    set_secret(&dirs.app_data_dir, TOKEN_KEY, trimmed)
+    let validated = validate_secret_token(&token)?;
+    set_secret(&dirs.app_data_dir, TOKEN_KEY, validated)
 }
 
 #[tauri::command]
@@ -274,7 +298,17 @@ pub async fn brain_sync_upload_session(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<BrainUploadResponse, String> {
-    let _session_guard = try_begin_session_upload(&state.brain_upload, &session_id)?;
+    let _session_guard = match try_begin_session_upload(
+        &dirs.app_data_dir,
+        &state.brain_upload,
+        &session_id,
+    ) {
+        Ok(guard) => guard,
+        Err(err) if is_already_running_error(&err) => {
+            return Ok(already_running_response());
+        }
+        Err(err) => return Err(err),
+    };
     let settings = load_settings(&dirs.app_data_dir)?;
     let session_dir = get_session_dir(&dirs.app_data_dir, &session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
@@ -294,6 +328,7 @@ pub async fn brain_sync_upload_session(
         meta,
         audio_path,
         settings,
+        &state.brain_client,
     )
     .await
 }
@@ -330,21 +365,25 @@ where
         return Err("Brain sync token is not configured".to_string());
     }
 
+    reconcile_stale_brain_uploads(&app_data_dir)?;
     let candidates = archive_candidates(&app_data_dir, &settings, Local::now())?;
     let total = candidates.len();
-    let _ = add_event(
+    let mut diagnostics = Vec::new();
+    if let Err(err) = add_event(
         &app_data_dir,
         ARCHIVE_EVENT_SESSION_ID,
         "brain_archive_upload_started",
         &format!("Uploading {total} archived Brain sessions"),
-    );
+    ) {
+        diagnostics.push(format!("brain_archive_upload_started event failed: {err}"));
+    }
 
     let mut summary = BrainArchiveUploadSummary {
         total,
         uploaded: 0,
         skipped: 0,
         failed: 0,
-        errors: Vec::new(),
+        errors: diagnostics,
     };
 
     emit_progress(progress_from_summary(total, 0, &summary, None, None))?;
@@ -359,7 +398,11 @@ where
         };
 
         if let Some(err) = candidate.skip_error {
-            summary.failed += 1;
+            if err.contains("events unavailable") {
+                summary.skipped += 1;
+            } else {
+                summary.failed += 1;
+            }
             archive_error(&mut summary.errors, err);
             emit_progress(progress_from_summary(
                 total,
@@ -385,7 +428,7 @@ where
         }
 
         let _session_guard = if let Some(state) = runtime_state.as_ref() {
-            match try_begin_session_upload(state, &session_id) {
+            match try_begin_session_upload(&app_data_dir, state, &session_id) {
                 Ok(guard) => Some(guard),
                 Err(err) => {
                     summary.skipped += 1;
@@ -443,7 +486,7 @@ where
         ))?;
     }
 
-    let _ = add_event(
+    if let Err(err) = add_event(
         &app_data_dir,
         ARCHIVE_EVENT_SESSION_ID,
         "brain_archive_upload_finished",
@@ -451,7 +494,12 @@ where
             "uploaded={}, skipped={}, failed={}",
             summary.uploaded, summary.skipped, summary.failed
         ),
-    );
+    ) {
+        archive_error(
+            &mut summary.errors,
+            format!("brain_archive_upload_finished event failed: {err}"),
+        );
+    }
     Ok(summary)
 }
 
@@ -466,7 +514,7 @@ where
     C: UploadAudioClient + Sync,
     E: Fn(BrainArchiveUploadProgress) -> Result<(), String>,
 {
-    let _archive_guard = try_begin_archive_upload(&runtime_state)?;
+    let _archive_guard = try_begin_archive_upload(&app_data_dir, &runtime_state)?;
     upload_archive_with_client_inner(
         app_data_dir,
         settings,
@@ -484,12 +532,11 @@ pub async fn brain_sync_upload_archive(
     state: State<'_, AppState>,
 ) -> Result<BrainArchiveUploadSummary, String> {
     let settings = load_settings(&dirs.app_data_dir)?;
-    let client = BrainServerClient::new();
     upload_archive_with_client_locked(
         dirs.app_data_dir.clone(),
         settings,
         state.brain_upload.clone(),
-        &client,
+        &state.brain_client,
         |progress| app.emit(ARCHIVE_PROGRESS_EVENT, progress).map_err(|e| e.to_string()),
     )
     .await

@@ -1,6 +1,6 @@
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SessionCard } from "./SessionCard";
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 
@@ -71,10 +71,6 @@ function renderCard(item: SessionListItem, onUploadToBrain = vi.fn()) {
 }
 
 describe("SessionCard Brain upload status", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it.each([
     ["uploaded", "Brain: загружено"],
     ["uploading", "Brain: загрузка"],
@@ -124,26 +120,10 @@ describe("SessionCard Brain upload status", () => {
     expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
   });
 
-  it("enables retry for stale uploading sessions", () => {
-    const staleUpdatedAt = new Date(Date.now() - 31 * 60 * 1000).toISOString();
-    renderCard(makeItem("uploading", { brain_upload_updated_at_iso: staleUpdatedAt }));
-
-    expect(screen.getByText("Brain: ошибка")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeEnabled();
-  });
-
-  it("enables retry when an uploading session ages past the stale cutoff", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-28T10:00:00Z"));
-    const almostStaleUpdatedAt = new Date(Date.now() - (30 * 60 * 1000 - 1000)).toISOString();
-    renderCard(makeItem("uploading", { brain_upload_updated_at_iso: almostStaleUpdatedAt }));
-
-    expect(screen.getByText("Brain: загрузка")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
-
-    act(() => {
-      vi.advanceTimersByTime(1100);
-    });
+  it("enables retry for failed sessions reconciled by backend", () => {
+    renderCard(makeItem("failed", {
+      brain_upload_last_error: "Предыдущая загрузка Brain не завершилась. Можно повторить.",
+    }));
 
     expect(screen.getByText("Brain: ошибка")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeEnabled();
@@ -188,37 +168,18 @@ describe("SessionCard Brain upload status", () => {
     expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
   });
 
-  it("hides upload button for uploaded sessions and sessions without audio", () => {
-    const { rerender } = renderCard(makeItem("uploaded"));
+  it("hides upload button for ingested uploaded sessions", () => {
+    renderCard(makeItem("uploaded", { brain_server_ingested_once: true }));
     expect(screen.queryByRole("button", { name: "Загрузить в Brain" })).not.toBeInTheDocument();
+  });
 
-    rerender(
-      <SessionCard
-        item={makeItem("not_uploaded", { audio_file: "", audio_format: "unknown" })}
-        detail={makeDetail()}
-        textPending={false}
-        summaryPending={false}
-        pipelineState={undefined}
-        searchQuery=""
-        knownTagOptions={[]}
-        transcriptMatch={false}
-        summaryMatch={false}
-        showNumSpeakers={false}
-        brainUploadPending={false}
-        onContextMenu={() => undefined}
-        onDetailChange={() => undefined}
-        onOpenArtifact={() => undefined}
-        onGetText={() => undefined}
-        onGetSummary={() => undefined}
-        onOpenSummaryPrompt={() => undefined}
-        onDelete={() => undefined}
-        onDeleteAudio={() => undefined}
-        onFieldBlur={() => undefined}
-        onOpenFolder={() => undefined}
-        onUploadToBrain={() => undefined}
-        setStatus={() => undefined}
-      />,
-    );
+  it("shows upload button after failed retry even when session was ingested before", () => {
+    renderCard(makeItem("failed", { brain_server_ingested_once: true }));
+    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeEnabled();
+  });
+
+  it("hides upload button for sessions without audio", () => {
+    renderCard(makeItem("not_uploaded", { audio_file: "", audio_format: "unknown" }));
     expect(screen.queryByRole("button", { name: "Загрузить в Brain" })).not.toBeInTheDocument();
   });
 });

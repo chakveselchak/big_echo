@@ -6,6 +6,7 @@ use thiserror::Error;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+const MIN_REDACT_TOKEN_LEN: usize = 20;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BrainUploadMetadata {
@@ -73,13 +74,21 @@ fn content_type_for_audio_path(path: &Path) -> &'static str {
         .map(|ext| ext.to_ascii_lowercase())
         .as_deref()
     {
-        Some("opus") => "audio/opus",
+        Some("opus") => "audio/ogg",
         Some("mp3") => "audio/mpeg",
         Some("m4a") => "audio/mp4",
         Some("ogg") => "audio/ogg",
         Some("wav") => "audio/wav",
         _ => "application/octet-stream",
     }
+}
+
+fn looks_like_secret_fragment(part: &str) -> bool {
+    if part.len() < MIN_REDACT_TOKEN_LEN {
+        return false;
+    }
+    part.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '=' | '+' | '/' | '.'))
 }
 
 fn body_preview(raw: &str, token: &str) -> String {
@@ -102,6 +111,7 @@ fn body_preview(raw: &str, token: &str) -> String {
             || lowered.contains("authorization")
             || lowered.contains("bearer")
             || part.contains('@')
+            || looks_like_secret_fragment(part)
         {
             sanitized.push("[redacted]");
         } else {
@@ -117,13 +127,19 @@ fn body_preview(raw: &str, token: &str) -> String {
     preview
 }
 
+#[derive(Clone)]
 pub struct BrainServerClient {
     http: reqwest::Client,
 }
 
 impl BrainServerClient {
     pub fn new() -> Self {
-        Self::with_timeouts(DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
+        Self {
+            http: reqwest::Client::builder()
+                .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+                .build()
+                .expect("Brain upload HTTP client should build"),
+        }
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -383,9 +399,9 @@ mod tests {
                 needles: vec![
                     "name=\"file\"",
                     "filename=\"audio.opus\"",
-                    "Content-Type: audio/opus",
+                    "Content-Type: audio/ogg",
                 ],
-                forbidden: vec!["Content-Type: audio/ogg"],
+                forbidden: vec!["Content-Type: audio/opus"],
             })
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "ok": true

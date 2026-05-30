@@ -1,10 +1,10 @@
+use crate::settings::token_validation::{contains_disallowed_token_chars, validate_secret_token};
+use fs2::FileExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::ErrorKind;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 
 const SERVICE_NAME: &str = "BigEcho";
 const FALLBACK_FILE_NAME: &str = "secrets.local.json";
@@ -14,16 +14,22 @@ fn fallback_path(app_data_dir: &Path) -> PathBuf {
 }
 
 fn fallback_lock_path(path: &Path) -> PathBuf {
-    path.with_extension("local.json.lock")
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| FALLBACK_FILE_NAME.to_string());
+    path.parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{file_name}.lock"))
 }
 
 struct FallbackFileLock {
-    path: PathBuf,
+    file: File,
 }
 
 impl Drop for FallbackFileLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        let _ = self.file.unlock();
     }
 }
 
@@ -32,22 +38,19 @@ fn acquire_fallback_lock(path: &Path) -> Result<FallbackFileLock, String> {
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    for _ in 0..100 {
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(_) => {
-                return Ok(FallbackFileLock { path: lock_path });
-            }
-            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(err) => return Err(err.to_string()),
-        }
-    }
-    Err("Timed out waiting for fallback secret lock".to_string())
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&lock_path)
+        .map_err(|e| e.to_string())?;
+    file.lock_exclusive().map_err(|e| e.to_string())?;
+    Ok(FallbackFileLock { file })
+}
+
+fn with_fallback_lock<T>(path: &Path, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let _lock = acquire_fallback_lock(path)?;
+    action()
 }
 
 fn load_fallback_map(path: &Path) -> Result<HashMap<String, String>, String> {
@@ -62,6 +65,11 @@ fn load_fallback_map(path: &Path) -> Result<HashMap<String, String>, String> {
     let mut out = HashMap::new();
     for (k, v) in obj {
         if let Some(text) = v.as_str() {
+            if contains_disallowed_token_chars(text) {
+                return Err(format!(
+                    "Invalid stored secret for {k}: control characters are not allowed"
+                ));
+            }
             out.insert(k.clone(), text.to_string());
         }
     }
@@ -73,29 +81,29 @@ fn save_fallback_map(path: &Path, map: &HashMap<String, String>) -> Result<(), S
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let raw = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
-    let tmp_path = path.with_extension(format!(
-        "tmp.{}",
-        std::process::id()
-    ));
-    std::fs::write(&tmp_path, raw).map_err(|e| e.to_string())?;
+    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+    {
+        let mut file = File::create(&tmp_path).map_err(|e| e.to_string())?;
+        file.write_all(raw.as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+    }
     match std::fs::rename(&tmp_path, path) {
         Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            std::fs::remove_file(path).map_err(|e| e.to_string())?;
-            std::fs::rename(&tmp_path, path).map_err(|e| e.to_string())
-        }
-        Err(err) => {
+        Err(_) => {
+            std::fs::write(path, raw).map_err(|e| e.to_string())?;
             let _ = std::fs::remove_file(&tmp_path);
-            Err(err.to_string())
+            Ok(())
         }
     }
 }
 
 pub fn set_secret(app_data_dir: &Path, name: &str, value: &str) -> Result<(), String> {
+    let validated = validate_secret_token(value)?;
+
     let mut keyring_err: Option<String> = None;
     match keyring::Entry::new(SERVICE_NAME, name).map_err(|e| e.to_string()) {
         Ok(entry) => {
-            if let Err(err) = entry.set_password(value) {
+            if let Err(err) = entry.set_password(validated) {
                 keyring_err = Some(err.to_string());
             }
         }
@@ -103,10 +111,11 @@ pub fn set_secret(app_data_dir: &Path, name: &str, value: &str) -> Result<(), St
     }
 
     let path = fallback_path(app_data_dir);
-    let _fallback_lock = acquire_fallback_lock(&path)?;
-    let mut map = load_fallback_map(&path)?;
-    map.insert(name.to_string(), value.to_string());
-    save_fallback_map(&path, &map)?;
+    with_fallback_lock(&path, || {
+        let mut map = load_fallback_map(&path)?;
+        map.insert(name.to_string(), validated.to_string());
+        save_fallback_map(&path, &map)
+    })?;
 
     if let Some(err) = keyring_err {
         eprintln!("warning: failed to write keyring secret {name}: {err}");
@@ -115,7 +124,6 @@ pub fn set_secret(app_data_dir: &Path, name: &str, value: &str) -> Result<(), St
 }
 
 pub fn clear_secret(app_data_dir: &Path, name: &str) -> Result<(), String> {
-    // Remove from the OS keyring. Treat "no entry" as success.
     if let Ok(entry) = keyring::Entry::new(SERVICE_NAME, name) {
         match entry.delete_credential() {
             Ok(()) => {}
@@ -124,16 +132,16 @@ pub fn clear_secret(app_data_dir: &Path, name: &str) -> Result<(), String> {
         }
     }
 
-    // Remove from the fallback file.
     let path = fallback_path(app_data_dir);
-    let _fallback_lock = acquire_fallback_lock(&path)?;
-    if path.exists() {
-        let mut map = load_fallback_map(&path)?;
-        if map.remove(name).is_some() {
-            save_fallback_map(&path, &map)?;
+    with_fallback_lock(&path, || {
+        if path.exists() {
+            let mut map = load_fallback_map(&path)?;
+            if map.remove(name).is_some() {
+                save_fallback_map(&path, &map)?;
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 pub fn get_secret(app_data_dir: &Path, name: &str) -> Result<String, String> {
@@ -141,18 +149,18 @@ pub fn get_secret(app_data_dir: &Path, name: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
         .and_then(|entry| entry.get_password().map_err(|e| e.to_string()));
     if let Ok(value) = keyring_result {
-        return Ok(value);
+        validate_secret_token(&value).map(|validated| validated.to_string())
+    } else {
+        let path = fallback_path(app_data_dir);
+        let map = load_fallback_map(&path)?;
+        if let Some(value) = map.get(name) {
+            validate_secret_token(value).map(|validated| validated.to_string())
+        } else {
+            Err(keyring_result
+                .err()
+                .unwrap_or_else(|| "No matching entry found in secure storage".to_string()))
+        }
     }
-
-    let path = fallback_path(app_data_dir);
-    let map = load_fallback_map(&path)?;
-    if let Some(value) = map.get(name) {
-        return Ok(value.clone());
-    }
-
-    Err(keyring_result
-        .err()
-        .unwrap_or_else(|| "No matching entry found in secure storage".to_string()))
 }
 
 #[cfg(test)]
@@ -161,15 +169,35 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn fallback_lock_path_uses_secrets_local_json_lock() {
+        let tmp = tempdir().expect("tempdir");
+        let path = fallback_path(tmp.path());
+        assert_eq!(
+            fallback_lock_path(&path),
+            tmp.path().join("secrets.local.json.lock")
+        );
+    }
+
+    #[test]
+    fn stale_lock_file_does_not_block_set_secret() {
+        let tmp = tempdir().expect("tempdir");
+        let path = fallback_path(tmp.path());
+        let lock_path = fallback_lock_path(&path);
+        std::fs::write(&lock_path, "stale lock from dead process").expect("write stale lock");
+        set_secret(tmp.path(), "BRAIN_SERVER_API_TOKEN", "fresh-token").expect("set secret");
+        assert_eq!(
+            get_secret(tmp.path(), "BRAIN_SERVER_API_TOKEN").expect("get secret"),
+            "fresh-token"
+        );
+    }
+
+    #[test]
     fn clear_secret_removes_previously_stored_value() {
         let tmp = tempdir().expect("tempdir");
         set_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN", "abc123").expect("set");
 
         clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("clear");
 
-        // Public API contract: after clear, get_secret no longer returns the value.
-        // (The keyring may or may not have been writable in this environment, so we
-        // only assert the observable contract, not the underlying file state.)
         match get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN") {
             Err(_) => {}
             Ok(v) => panic!("expected secret to be cleared, got {v:?}"),
@@ -181,9 +209,7 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         set_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN", "abc123").expect("set");
 
-        // First clear removes it.
         clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("first clear");
-        // Second clear is a no-op on the now-absent key.
         clear_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN").expect("second clear");
 
         match get_secret(tmp.path(), "YANDEX_DISK_OAUTH_TOKEN") {
@@ -217,5 +243,28 @@ mod tests {
             get_secret(&app_data_dir, "YANDEX_DISK_OAUTH_TOKEN").expect("yandex token"),
             "yandex-token"
         );
+    }
+
+    #[test]
+    fn set_secret_rejects_control_characters_in_token() {
+        let tmp = tempdir().expect("tempdir");
+        let err = set_secret(tmp.path(), "BRAIN_SERVER_API_TOKEN", "bad\nvalue")
+            .expect_err("newline token should fail");
+        assert_eq!(err, "Token must not contain control characters");
+    }
+
+    #[test]
+    fn get_secret_rejects_stored_token_with_control_characters() {
+        let tmp = tempdir().expect("tempdir");
+        let path = fallback_path(tmp.path());
+        std::fs::create_dir_all(tmp.path()).expect("create dir");
+        std::fs::write(
+            &path,
+            r#"{"BRAIN_SERVER_API_TOKEN":"bad\u2028value"}"#,
+        )
+        .expect("write fallback secrets");
+
+        let err = get_secret(tmp.path(), "BRAIN_SERVER_API_TOKEN").expect_err("stored bad token");
+        assert!(err.contains("control characters"));
     }
 }

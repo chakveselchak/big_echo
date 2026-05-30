@@ -49,7 +49,7 @@ export function redactSensitiveText(text: string): string {
       "$1[redacted]",
     )
     .replace(/\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})?\b/g, "[redacted]")
-    .replace(/\b(?:[A-Fa-f0-9]{32,}|[A-Za-z0-9+/_=-]{24,})\b/g, "[redacted]");
+    .replace(/\b(?:[A-Fa-f0-9]{32,}|[A-Za-z0-9+/_=-]{20,})\b/g, "[redacted]");
 }
 
 export function clamp01(value: number): number {

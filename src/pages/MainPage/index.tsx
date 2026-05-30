@@ -146,8 +146,14 @@ export function MainPage() {
         await tauriInvoke<string>("brain_sync_upload_session", { sessionId });
         await loadSessions();
       } catch (err) {
-        const message = redactSensitiveText(getErrorMessage(err));
-        setStatus(`error: Brain upload failed: ${message}`);
+        const message = getErrorMessage(err);
+        if (message.includes("BRAIN_ALREADY_RUNNING") || message.includes("уже выполняется")) {
+          setStatus("Brain: загрузка уже выполняется");
+          await loadSessions().catch(() => undefined);
+          return;
+        }
+        const safeMessage = redactSensitiveText(message);
+        setStatus(`error: Brain upload failed: ${safeMessage}`);
         await loadSessions().catch(() => undefined);
       } finally {
         const next = { ...brainUploadPendingRef.current };
