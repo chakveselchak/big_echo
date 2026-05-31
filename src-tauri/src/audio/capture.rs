@@ -575,46 +575,10 @@ pub fn detect_system_source_device() -> Result<Option<String>, String> {
     Ok(select_best_system_source(&devices))
 }
 
-pub fn probe_levels(
-    mic_name: Option<&str>,
-    system_name: Option<&str>,
-) -> Result<LiveLevels, String> {
-    let host = cpal::default_host();
-    let mic_device = select_input_device(&host, mic_name)
-        .or_else(|| host.default_input_device())
-        .ok_or_else(|| "No input device available for microphone".to_string())?;
-
-    let mic_device_name = mic_device.name().ok();
-    let device_names = list_input_devices_for_host(&host).unwrap_or_default();
-    let resolved_system_name =
-        resolve_system_source_name(system_name, mic_device_name.as_deref(), &device_names);
-    let system_device = resolved_system_name
-        .as_deref()
-        .and_then(|name| select_input_device(&host, Some(name)));
-
-    let mic_meter = Arc::new(AtomicU32::new(0.0f32.to_bits()));
-    let system_meter = Arc::new(AtomicU32::new(0.0f32.to_bits()));
-
-    let mic_stream = build_probe_level_stream(&mic_device, Arc::clone(&mic_meter))?;
-    mic_stream.play().map_err(|e| e.to_string())?;
-
-    let mut system_stream = None;
-    if let Some(dev) = system_device {
-        let stream = build_probe_level_stream(&dev, Arc::clone(&system_meter))?;
-        stream.play().map_err(|e| e.to_string())?;
-        system_stream = Some(stream);
-    }
-
-    std::thread::sleep(Duration::from_millis(72));
-    drop(mic_stream);
-    drop(system_stream);
-
-    Ok(LiveLevels {
-        mic: load_level(&mic_meter),
-        system: load_level(&system_meter),
-    })
-}
-
+// Used by the non-macOS capture path (`capture_until_stopped_device`) and by
+// tests; on macOS the live capture resolves the system source natively, so
+// outside test builds this reads as unused there.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn resolve_system_source_name(
     preferred_name: Option<&str>,
     mic_name: Option<&str>,
@@ -810,58 +774,6 @@ fn build_capture_stream(
     Ok((stream, sample_rate))
 }
 
-fn build_probe_level_stream(
-    device: &Device,
-    level_output: Arc<AtomicU32>,
-) -> Result<Stream, String> {
-    let default_cfg = device
-        .default_input_config()
-        .map_err(|e| format!("default input config error: {e}"))?;
-    let mut cfg: StreamConfig = default_cfg.clone().into();
-    cfg.channels = cfg.channels.max(1);
-    let channels = cfg.channels as usize;
-    let err_fn = |err| eprintln!("audio probe stream error: {err}");
-
-    let stream = match default_cfg.sample_format() {
-        SampleFormat::F32 => {
-            let level_output = Arc::clone(&level_output);
-            device
-                .build_input_stream(
-                    &cfg,
-                    move |data: &[f32], _| update_peak_level_f32(data, channels, &level_output),
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        SampleFormat::I16 => {
-            let level_output = Arc::clone(&level_output);
-            device
-                .build_input_stream(
-                    &cfg,
-                    move |data: &[i16], _| update_peak_level_i16(data, channels, &level_output),
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        SampleFormat::U16 => {
-            let level_output = Arc::clone(&level_output);
-            device
-                .build_input_stream(
-                    &cfg,
-                    move |data: &[u16], _| update_peak_level_u16(data, channels, &level_output),
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        _ => return Err("Unsupported input sample format".to_string()),
-    };
-
-    Ok(stream)
-}
-
 fn append_mono_f32_as_i16(
     data: &[f32],
     channels: usize,
@@ -971,69 +883,6 @@ fn append_mono_u16_as_i16(
     if let Ok(mut writer) = sink.lock() {
         let _ = writer.write_all(&bytes);
     }
-}
-
-fn update_peak_level_f32(data: &[f32], channels: usize, level_output: &Arc<AtomicU32>) {
-    if channels == 0 {
-        return;
-    }
-    let mut sum_sq = 0.0_f32;
-    let mut samples = 0_usize;
-    for frame in data.chunks(channels) {
-        if let Some(first) = frame.first() {
-            let v = first.clamp(-1.0, 1.0);
-            sum_sq += v * v;
-            samples += 1;
-        }
-    }
-    let rms = if samples > 0 {
-        (sum_sq / samples as f32).sqrt()
-    } else {
-        0.0
-    };
-    update_meter_level(level_output, rms);
-}
-
-fn update_peak_level_i16(data: &[i16], channels: usize, level_output: &Arc<AtomicU32>) {
-    if channels == 0 {
-        return;
-    }
-    let mut sum_sq = 0.0_f32;
-    let mut samples = 0_usize;
-    for frame in data.chunks(channels) {
-        if let Some(first) = frame.first() {
-            let v = *first as f32 / i16::MAX as f32;
-            sum_sq += v * v;
-            samples += 1;
-        }
-    }
-    let rms = if samples > 0 {
-        (sum_sq / samples as f32).sqrt()
-    } else {
-        0.0
-    };
-    update_meter_level(level_output, rms);
-}
-
-fn update_peak_level_u16(data: &[u16], channels: usize, level_output: &Arc<AtomicU32>) {
-    if channels == 0 {
-        return;
-    }
-    let mut sum_sq = 0.0_f32;
-    let mut samples = 0_usize;
-    for frame in data.chunks(channels) {
-        if let Some(first) = frame.first() {
-            let f = (*first as f32 / u16::MAX as f32) * 2.0 - 1.0;
-            sum_sq += f * f;
-            samples += 1;
-        }
-    }
-    let rms = if samples > 0 {
-        (sum_sq / samples as f32).sqrt()
-    } else {
-        0.0
-    };
-    update_meter_level(level_output, rms);
 }
 
 pub fn cleanup_artifacts(result: &CaptureArtifacts) {
