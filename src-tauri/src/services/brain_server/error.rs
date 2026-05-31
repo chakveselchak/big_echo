@@ -110,6 +110,12 @@ impl std::fmt::Display for BrainUploadPublicError {
 
 impl std::error::Error for BrainUploadPublicError {}
 
+impl From<String> for BrainUploadPublicError {
+    fn from(message: String) -> Self {
+        Self::configuration(message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

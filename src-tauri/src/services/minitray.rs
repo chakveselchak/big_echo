@@ -217,17 +217,23 @@ mod test_sinks {
 
 #[cfg(test)]
 pub(crate) fn install_show_sink_for_test(sink: ShowSink) {
-    *test_sinks::TEST_SHOW.lock().unwrap() = Some(sink);
+    *test_sinks::TEST_SHOW
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = Some(sink);
 }
 
 #[cfg(test)]
 pub(crate) fn install_hide_sink_for_test(sink: HideSink) {
-    *test_sinks::TEST_HIDE.lock().unwrap() = Some(sink);
+    *test_sinks::TEST_HIDE
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = Some(sink);
 }
 
 #[cfg(test)]
 pub(crate) fn install_level_sink_for_test(sink: LevelSink) {
-    *test_sinks::TEST_LEVEL.lock().unwrap() = Some(sink);
+    *test_sinks::TEST_LEVEL
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = Some(sink);
 }
 
 // Shared serialization lock for all tests that touch the minitray global state
@@ -238,33 +244,46 @@ pub(crate) fn install_level_sink_for_test(sink: LevelSink) {
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
+pub(crate) fn acquire_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_state() {
+    VISIBLE.store(false, Ordering::SeqCst);
+
+    if let Ok(mut guard) = POLLER.lock() {
+        guard.take();
+    }
+    if POLLER.is_poisoned() {
+        drop(POLLER.lock().unwrap_or_else(|e| e.into_inner()));
+    }
+
+    LAST_PUSH_NANOS.store(u64::MAX, Ordering::SeqCst);
+    *test_sinks::TEST_SHOW
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = None;
+    *test_sinks::TEST_HIDE
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = None;
+    *test_sinks::TEST_LEVEL
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = None;
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
     fn reset_state_for_test() {
-        // Tell any running poller thread to exit on its next iteration.
-        VISIBLE.store(false, Ordering::SeqCst);
-
-        // Drop the previous JoinHandle (detaches the thread; it will exit
-        // when it next reads VISIBLE=false).
-        if let Ok(mut guard) = POLLER.lock() {
-            guard.take();
-        }
-        if POLLER.is_poisoned() {
-            drop(POLLER.lock().unwrap_or_else(|e| e.into_inner()));
-        }
-
-        LAST_PUSH_NANOS.store(u64::MAX, Ordering::SeqCst);
-        *test_sinks::TEST_SHOW.lock().unwrap() = None;
-        *test_sinks::TEST_HIDE.lock().unwrap() = None;
-        *test_sinks::TEST_LEVEL.lock().unwrap() = None;
+        reset_test_state();
     }
 
     #[test]
     fn show_if_enabled_is_noop_when_setting_is_off() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = acquire_test_lock();
         reset_state_for_test();
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_for_sink = Arc::clone(&calls);
@@ -282,7 +301,7 @@ mod tests {
 
     #[test]
     fn show_if_enabled_calls_sink_when_setting_is_on() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = acquire_test_lock();
         reset_state_for_test();
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_for_sink = Arc::clone(&calls);
@@ -300,7 +319,7 @@ mod tests {
 
     #[test]
     fn show_if_enabled_is_idempotent() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = acquire_test_lock();
         reset_state_for_test();
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_for_sink = Arc::clone(&calls);
@@ -319,7 +338,7 @@ mod tests {
 
     #[test]
     fn hide_resets_visibility_and_calls_sink_once() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = acquire_test_lock();
         reset_state_for_test();
         let show_calls = Arc::new(AtomicUsize::new(0));
         let show_for_sink = Arc::clone(&show_calls);
@@ -348,7 +367,7 @@ mod tests {
 
     #[test]
     fn update_level_throttles_high_frequency_pushes() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = acquire_test_lock();
         reset_state_for_test();
         let pushes = Arc::new(AtomicUsize::new(0));
         let pushes_for_sink = Arc::clone(&pushes);
@@ -375,7 +394,7 @@ mod tests {
 
     #[test]
     fn update_level_is_noop_when_not_visible() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = acquire_test_lock();
         reset_state_for_test();
         let pushes = Arc::new(AtomicUsize::new(0));
         let pushes_for_sink = Arc::clone(&pushes);
@@ -389,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn show_pumps_levels_until_hide() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = acquire_test_lock();
         reset_state_for_test();
 
         let pushes = Arc::new(AtomicUsize::new(0));

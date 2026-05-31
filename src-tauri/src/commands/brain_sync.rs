@@ -6,6 +6,7 @@ use crate::services::brain_server::state::{
     is_already_running_error, try_begin_archive_upload, try_begin_session_upload,
     SharedBrainUploadState,
 };
+use crate::services::brain_server::TOKEN_KEY;
 use crate::services::brain_server::upload::{
     upload_session_after_record_even_when_disabled,
     upload_session_after_record_with_client, validate_upload_url, UploadAudioClient,
@@ -25,7 +26,6 @@ use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 
-pub(crate) const TOKEN_KEY: &str = "BRAIN_SERVER_API_TOKEN";
 const ARCHIVE_PROGRESS_EVENT: &str = "brain-archive-upload-progress";
 const ARCHIVE_EVENT_SESSION_ID: &str = "__brain_archive__";
 const MAX_ARCHIVE_ERRORS: usize = 20;
@@ -553,6 +553,7 @@ pub async fn brain_sync_upload_archive(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
     use crate::domain::session::{SessionMeta, SessionStatus};
     use crate::services::brain_server::client::{
         BrainUploadError, BrainUploadMetadata, BrainUploadResponse,

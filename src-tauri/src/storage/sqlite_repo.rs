@@ -194,6 +194,7 @@ fn open(app_data_dir: &Path) -> Result<Connection, String> {
 }
 
 pub fn open_connection(app_data_dir: &Path) -> Result<Connection, String> {
+    std::fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
     let path = db_path(app_data_dir);
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     conn.busy_timeout(StdDuration::from_secs(5))
@@ -764,11 +765,28 @@ mod tests {
         assert!(!states.contains_key("s-ignored"));
     }
 
+    fn backdate_last_event(dir: &Path, session_id: &str, minutes_ago: i64) {
+        let stale_at = (Local::now() - Duration::minutes(minutes_ago)).to_rfc3339();
+        let conn = open(dir).expect("open db");
+        conn.execute(
+            "
+            UPDATE session_events
+            SET at_iso = ?1
+            WHERE id = (
+                SELECT id FROM session_events WHERE session_id = ?2 ORDER BY id DESC LIMIT 1
+            )
+            ",
+            rusqlite::params![stale_at, session_id],
+        )
+        .expect("backdate event");
+    }
+
     #[test]
     fn reconcile_stale_brain_uploads_persists_interrupted_event() {
         let dir = temp_dir();
         add_event(dir.path(), "s-stale", "brain_upload_started", "Uploading audio to Brain")
             .expect("add started");
+        backdate_last_event(dir.path(), "s-stale", BRAIN_UPLOAD_FRESH_MINUTES + 1);
 
         reconcile_stale_brain_uploads(dir.path()).expect("reconcile stale uploads");
 

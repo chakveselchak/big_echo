@@ -1,4 +1,4 @@
-use crate::commands::brain_sync::TOKEN_KEY;
+use crate::services::brain_server::TOKEN_KEY;
 use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{
     BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
@@ -257,7 +257,7 @@ pub async fn upload_session_after_record_with_shared_client(
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::brain_sync::TOKEN_KEY;
+    use crate::services::brain_server::TOKEN_KEY;
     use crate::domain::session::{SessionMeta, SessionStatus};
     use crate::services::brain_server::client::{
         BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,

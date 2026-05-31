@@ -750,6 +750,9 @@ mod ipc_runtime_tests {
     }
 
     fn extract_err_string(err: serde_json::Value) -> String {
+        if let Some(message) = err.get("message").and_then(|value| value.as_str()) {
+            return message.to_string();
+        }
         match err {
             serde_json::Value::String(v) => v,
             other => other.to_string(),
@@ -818,7 +821,6 @@ mod ipc_runtime_tests {
                 brain_sync_set_token,
                 brain_sync_clear_token,
                 brain_sync_has_token,
-                brain_sync_upload_archive,
                 brain_sync_upload_session
             ])
             .build(ctx)

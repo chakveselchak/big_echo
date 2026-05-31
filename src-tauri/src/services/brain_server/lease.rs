@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_LEASE_TTL_SECS: i64 = 2 * 60 * 60;
 
+#[derive(Debug)]
 pub struct BrainUploadLeaseGuard {
     app_data_dir: std::path::PathBuf,
     lease_key: String,
@@ -73,15 +74,15 @@ pub fn try_acquire_brain_upload_lease(
         .map_err(|e| e.to_string())?;
 
     if inserted == 0 {
-        let (holder_pid, holder_expires): (i64, i64) = conn
+        let holder_expires: i64 = conn
             .query_row(
                 "
-                SELECT holder_pid, expires_at_epoch
+                SELECT expires_at_epoch
                 FROM brain_upload_leases
                 WHERE lease_key = ?1
                 ",
                 params![lease_key],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
 
@@ -90,21 +91,9 @@ pub fn try_acquire_brain_upload_lease(
             return try_acquire_brain_upload_lease(app_data_dir, lease_key, ttl_secs);
         }
 
-        if holder_pid == pid {
-            conn.execute(
-                "
-                UPDATE brain_upload_leases
-                SET expires_at_epoch = ?1
-                WHERE lease_key = ?2 AND holder_pid = ?3
-                ",
-                params![expires_at, lease_key, pid],
-            )
-            .map_err(|e| e.to_string())?;
-        } else {
-            return Err(format!(
-                "BRAIN_ALREADY_RUNNING: Brain upload lease is held by another process ({lease_key})"
-            ));
-        }
+        return Err(format!(
+            "BRAIN_ALREADY_RUNNING: Brain upload lease is held by another process ({lease_key})"
+        ));
     }
 
     Ok(BrainUploadLeaseGuard {
