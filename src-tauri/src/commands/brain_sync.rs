@@ -1,12 +1,13 @@
 use crate::app_state::{AppDirs, AppState};
 use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{BrainServerClient, BrainUploadResponse};
+use crate::services::brain_server::error::BrainUploadPublicError;
 use crate::services::brain_server::state::{
     is_already_running_error, try_begin_archive_upload, try_begin_session_upload,
     SharedBrainUploadState,
 };
 use crate::services::brain_server::upload::{
-    sanitize_error, upload_session_after_record_even_when_disabled,
+    upload_session_after_record_even_when_disabled,
     upload_session_after_record_with_client, validate_upload_url, UploadAudioClient,
 };
 use crate::settings::public_settings::load_settings;
@@ -76,7 +77,7 @@ fn already_running_response() -> BrainUploadResponse {
         inbox_path: None,
         meta_path: None,
         duplicate: None,
-        error: Some("Загрузка Brain уже выполняется".to_string()),
+        error: Some(BrainUploadPublicError::already_running().message),
     }
 }
 
@@ -297,7 +298,7 @@ pub async fn brain_sync_upload_session(
     dirs: State<'_, AppDirs>,
     state: State<'_, AppState>,
     session_id: String,
-) -> Result<BrainUploadResponse, String> {
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
     let _session_guard = match try_begin_session_upload(
         &dirs.app_data_dir,
         &state.brain_upload,
@@ -307,7 +308,11 @@ pub async fn brain_sync_upload_session(
         Err(err) if is_already_running_error(&err) => {
             return Ok(already_running_response());
         }
-        Err(err) => return Err(err),
+        Err(_) => {
+            return Err(BrainUploadPublicError::configuration(
+                "Не удалось начать загрузку Brain.",
+            ));
+        }
     };
     let settings = load_settings(&dirs.app_data_dir)?;
     let session_dir = get_session_dir(&dirs.app_data_dir, &session_id)?
@@ -473,7 +478,10 @@ where
             }
             Err(err) => {
                 summary.failed += 1;
-                archive_error(&mut summary.errors, sanitize_error(err, &token));
+                archive_error(
+                    &mut summary.errors,
+                    format!("{session_id}: {}", err.message),
+                );
             }
         }
 

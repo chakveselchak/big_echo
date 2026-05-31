@@ -3,9 +3,13 @@ import type { InputRef } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSessions } from "../../hooks/useSessions";
 import { initializeAnalytics } from "../../lib/analytics";
-import { getErrorMessage, redactSensitiveText } from "../../lib/appUtils";
+import { getErrorMessage } from "../../lib/appUtils";
+import {
+  formatBrainUploadUserMessage,
+  isBrainUploadAlreadyRunning,
+} from "../../lib/brainUploadError";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
-import type { StartResponse } from "../../types";
+import type { BrainUploadResponse, StartResponse } from "../../types";
 import { NexaraBalance } from "../../components/NexaraBalance";
 import { TranscriptionProviderSelect } from "../../components/TranscriptionProviderSelect";
 import { SessionFilters } from "../../components/sessions/SessionFilters";
@@ -143,17 +147,21 @@ export function MainPage() {
       brainUploadPendingRef.current = { ...brainUploadPendingRef.current, [sessionId]: true };
       setBrainUploadPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
       try {
-        await tauriInvoke<string>("brain_sync_upload_session", { sessionId });
-        await loadSessions();
-      } catch (err) {
-        const message = getErrorMessage(err);
-        if (message.includes("BRAIN_ALREADY_RUNNING") || message.includes("уже выполняется")) {
+        const response = await tauriInvoke<BrainUploadResponse>("brain_sync_upload_session", { sessionId });
+        if (response.status === "already_running") {
           setStatus("Brain: загрузка уже выполняется");
           await loadSessions().catch(() => undefined);
           return;
         }
-        const safeMessage = redactSensitiveText(message);
-        setStatus(`error: Brain upload failed: ${safeMessage}`);
+        await loadSessions();
+      } catch (err) {
+        if (isBrainUploadAlreadyRunning(err)) {
+          setStatus("Brain: загрузка уже выполняется");
+          await loadSessions().catch(() => undefined);
+          return;
+        }
+        const message = formatBrainUploadUserMessage(err) || getErrorMessage(err);
+        setStatus(`error: Brain upload failed: ${message}`);
         await loadSessions().catch(() => undefined);
       } finally {
         const next = { ...brainUploadPendingRef.current };

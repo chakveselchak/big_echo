@@ -3,6 +3,7 @@ use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{
     BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
 };
+use crate::services::brain_server::error::BrainUploadPublicError;
 use crate::settings::public_settings::PublicSettings;
 use crate::settings::secret_store::get_secret;
 use crate::storage::sqlite_repo::add_event;
@@ -119,17 +120,15 @@ pub(crate) fn sanitize_error(raw: String, token: &str) -> String {
 fn record_failed_event(
     app_data_dir: &Path,
     session_id: &str,
-    error: String,
-    token: &str,
-) -> String {
-    let safe_error = sanitize_error(error, token);
+    error: &BrainUploadPublicError,
+) -> BrainUploadPublicError {
     let _ = add_event(
         app_data_dir,
         session_id,
         "brain_upload_failed",
-        &safe_error,
+        &error.message,
     );
-    safe_error
+    error.clone()
 }
 
 pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient + Sync>(
@@ -140,28 +139,26 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
     settings: PublicSettings,
     client: &C,
     respect_enabled: bool,
-) -> Result<BrainUploadResponse, String> {
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
     if respect_enabled && !settings.brain_sync_enabled {
         return Ok(skipped_response());
     }
 
-    let url = validate_upload_url(&settings.brain_sync_url).map_err(|err| {
-        record_failed_event(&app_data_dir, &meta.session_id, err, "")
-    })?;
+    let url = validate_upload_url(&settings.brain_sync_url)
+        .map_err(|_| record_failed_event(&app_data_dir, &meta.session_id, &BrainUploadPublicError::invalid_url()))?;
+    let _ = url;
     let token = get_secret(&app_data_dir, TOKEN_KEY).map_err(|_| {
         record_failed_event(
             &app_data_dir,
             &meta.session_id,
-            "Brain sync token is not configured".to_string(),
-            "",
+            &BrainUploadPublicError::token_missing(),
         )
     })?;
     if token.trim().is_empty() {
         return Err(record_failed_event(
             &app_data_dir,
             &meta.session_id,
-            "Brain sync token is not configured".to_string(),
-            "",
+            &BrainUploadPublicError::token_missing(),
         ));
     }
 
@@ -171,7 +168,8 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
         &meta.session_id,
         "brain_upload_started",
         "Uploading audio to Brain",
-    )?;
+    )
+    .map_err(|_| BrainUploadPublicError::configuration("Не удалось сохранить статус загрузки Brain."))?;
 
     match client
         .upload_audio(&url, token.trim(), &audio_path, &metadata)
@@ -183,18 +181,17 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
                 &meta.session_id,
                 "brain_upload_succeeded",
                 "Brain upload accepted",
-            )?;
+            )
+            .map_err(|_| {
+                BrainUploadPublicError::configuration("Не удалось сохранить статус загрузки Brain.")
+            })?;
             Ok(response)
         }
-        Err(err) => {
-            let safe_error = record_failed_event(
-                &app_data_dir,
-                &meta.session_id,
-                err.to_string(),
-                token.trim(),
-            );
-            Err(safe_error)
-        }
+        Err(err) => Err(record_failed_event(
+            &app_data_dir,
+            &meta.session_id,
+            &BrainUploadPublicError::from_brain_upload_error(&err),
+        )),
     }
 }
 
@@ -205,7 +202,7 @@ pub(crate) async fn upload_session_after_record_even_when_disabled<C: UploadAudi
     audio_path: PathBuf,
     settings: PublicSettings,
     client: &C,
-) -> Result<BrainUploadResponse, String> {
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
     upload_session_after_record_with_client(
         app_data_dir,
         session_dir,
@@ -224,7 +221,7 @@ pub async fn upload_session_after_record(
     meta: SessionMeta,
     audio_path: PathBuf,
     settings: PublicSettings,
-) -> Result<BrainUploadResponse, String> {
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
     let client = BrainServerClient::new();
     upload_session_after_record_with_client(
         app_data_dir,
@@ -245,7 +242,7 @@ pub async fn upload_session_after_record_with_shared_client(
     audio_path: PathBuf,
     settings: PublicSettings,
     client: &BrainServerClient,
-) -> Result<BrainUploadResponse, String> {
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
     upload_session_after_record_with_client(
         app_data_dir,
         session_dir,
@@ -265,6 +262,7 @@ mod tests {
     use crate::services::brain_server::client::{
         BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
     };
+    use crate::services::brain_server::error::BrainUploadErrorCode;
     use crate::settings::public_settings::PublicSettings;
     use crate::settings::secret_store::set_secret;
     use crate::storage::sqlite_repo::list_session_events;
@@ -418,7 +416,8 @@ mod tests {
         .await
         .expect_err("upload fails");
 
-        assert!(!err.contains("secret-token"));
+        assert_eq!(err.code, BrainUploadErrorCode::ApiError);
+        assert!(!err.message.contains("secret-token"));
         let events =
             list_session_events(&app_data_dir, "session-upload").expect("load session events");
         let failed = events
@@ -462,8 +461,9 @@ mod tests {
         .await
         .expect_err("upload fails");
 
-        assert!(!err.contains(&token));
-        assert!(!err.contains(&token[..80]));
+        assert_eq!(err.code, BrainUploadErrorCode::ServerError);
+        assert!(!err.message.contains(&token));
+        assert!(!err.message.contains(&token[..80]));
         let events =
             list_session_events(&app_data_dir, "session-upload").expect("load session events");
         let failed = events
@@ -512,7 +512,11 @@ mod tests {
         .await
         .expect_err("invalid url should fail");
 
-        assert_eq!(err, "Invalid Brain sync URL");
+        assert_eq!(err.code, BrainUploadErrorCode::InvalidUrl);
+        assert_eq!(
+            err.message,
+            "Некорректный URL Brain. Проверьте адрес в настройках."
+        );
         assert!(calls.lock().expect("calls lock").is_empty());
         let events =
             list_session_events(&app_data_dir, "session-upload").expect("load session events");
@@ -521,7 +525,10 @@ mod tests {
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>();
         assert_eq!(event_types, vec!["brain_upload_failed"]);
-        assert_eq!(events[0].detail, "Invalid Brain sync URL");
+        assert_eq!(
+            events[0].detail,
+            "Некорректный URL Brain. Проверьте адрес в настройках."
+        );
         assert!(!events[0].detail.contains("secret-token"));
     }
 
@@ -562,7 +569,8 @@ mod tests {
         .await
         .expect_err("missing token should fail");
 
-        assert_eq!(err, "Brain sync token is not configured");
+        assert_eq!(err.code, BrainUploadErrorCode::TokenMissing);
+        assert_eq!(err.message, "API-токен Brain не настроен.");
         assert!(calls.lock().expect("calls lock").is_empty());
         let events =
             list_session_events(&app_data_dir, "session-upload").expect("load session events");
@@ -571,7 +579,7 @@ mod tests {
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>();
         assert_eq!(event_types, vec!["brain_upload_failed"]);
-        assert_eq!(events[0].detail, "Brain sync token is not configured");
+        assert_eq!(events[0].detail, "API-токен Brain не настроен.");
     }
 
     #[test]

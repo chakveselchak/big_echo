@@ -43,6 +43,14 @@ export type StartResponse = {
 
 export type BrainUploadStatus = "not_uploaded" | "uploading" | "uploaded" | "failed";
 
+export type BrainUploadResponse = {
+  ok: boolean;
+  job_id?: number | null;
+  status?: string | null;
+  duplicate?: boolean | null;
+  error?: string | null;
+};
+
 export type RecordingInputChannel = "mic" | "system";
 export type RecordingMuteState = {
   micMuted: boolean;

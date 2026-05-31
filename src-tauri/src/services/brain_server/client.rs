@@ -67,21 +67,7 @@ pub enum BrainUploadError {
     Api(String),
 }
 
-fn content_type_for_audio_path(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("opus") => "audio/ogg",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") => "audio/mp4",
-        Some("ogg") => "audio/ogg",
-        Some("wav") => "audio/wav",
-        _ => "application/octet-stream",
-    }
-}
+use super::mime::brain_upload_content_type;
 
 fn looks_like_secret_fragment(part: &str) -> bool {
     if part.len() < MIN_REDACT_TOKEN_LEN {
@@ -171,7 +157,7 @@ impl BrainServerClient {
 
         let file_part = reqwest::multipart::Part::bytes(data)
             .file_name(file_name)
-            .mime_str(content_type_for_audio_path(audio_path))
+            .mime_str(brain_upload_content_type(audio_path))
             .map_err(|e| BrainUploadError::Io(e.to_string()))?;
         let metadata_part = reqwest::multipart::Part::text(metadata_json)
             .mime_str("application/json")
@@ -399,9 +385,9 @@ mod tests {
                 needles: vec![
                     "name=\"file\"",
                     "filename=\"audio.opus\"",
-                    "Content-Type: audio/ogg",
+                    "Content-Type: audio/ogg;codecs=opus",
                 ],
-                forbidden: vec!["Content-Type: audio/opus"],
+                forbidden: vec!["Content-Type: audio/opus", "Content-Type: audio/ogg\r\n"],
             })
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "ok": true
