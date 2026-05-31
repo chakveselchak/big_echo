@@ -325,6 +325,24 @@ pub(crate) fn should_hide_tray_when_main_window_focuses(focused: bool) -> bool {
     focused
 }
 
+pub(crate) const TRAY_HOVER_OPEN_DELAY_MS: u64 = 600;
+
+pub(crate) fn should_schedule_main_open_on_tray_hover(platform: &str) -> bool {
+    platform == "macos"
+}
+
+pub(crate) fn should_cancel_main_open_on_tray_interaction(platform: &str) -> bool {
+    platform == "macos"
+}
+
+pub(crate) fn should_fire_main_open_after_tray_hover(
+    platform: &str,
+    scheduled_generation: u64,
+    current_generation: u64,
+) -> bool {
+    platform == "macos" && scheduled_generation == current_generation
+}
+
 // ── Tray popover positioning ─────────────────────────────────────────────────
 
 pub(crate) fn position_tray_popover(
@@ -423,5 +441,31 @@ mod tests {
         assert!(parse_recording_flag(r#"{"recording":true}"#));
         assert!(parse_recording_flag(r#""{\"recording\":true}""#));
         assert!(!parse_recording_flag(r#"{"recording":false}"#));
+    }
+
+    #[test]
+    fn tray_hover_open_policy_is_macos_only() {
+        assert!(should_schedule_main_open_on_tray_hover("macos"));
+        assert!(!should_schedule_main_open_on_tray_hover("windows"));
+        assert!(!should_schedule_main_open_on_tray_hover("linux"));
+    }
+
+    #[test]
+    fn tray_hover_click_and_leave_cancel_pending_open() {
+        assert!(should_cancel_main_open_on_tray_interaction("macos"));
+        assert!(!should_cancel_main_open_on_tray_interaction("windows"));
+        assert!(!should_cancel_main_open_on_tray_interaction("linux"));
+    }
+
+    #[test]
+    fn tray_hover_timer_fires_only_for_current_generation() {
+        assert!(should_fire_main_open_after_tray_hover("macos", 7, 7));
+        assert!(!should_fire_main_open_after_tray_hover("macos", 7, 8));
+    }
+
+    #[test]
+    fn tray_hover_timer_does_not_fire_on_non_macos() {
+        assert!(!should_fire_main_open_after_tray_hover("windows", 7, 7));
+        assert!(!should_fire_main_open_after_tray_hover("linux", 7, 7));
     }
 }

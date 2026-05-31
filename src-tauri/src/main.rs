@@ -415,6 +415,10 @@ fn main() {
         let left_click_context_menu =
             tray_manager::should_show_context_menu_on_left_click(std::env::consts::OS);
 
+        let tray_hover_generation =
+            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let tray_hover_generation_for_events = tray_hover_generation.clone();
+
         TrayIconBuilder::with_id(tray_manager::TRAY_ICON_ID)
             .icon(initial_tray_icon)
             .menu(&menu)
@@ -435,22 +439,62 @@ fn main() {
                     _ => {}
                 }
             })
-            .on_tray_icon_event(|tray, event| {
-                if let TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    position,
-                    ..
-                } = event
-                {
-                    if tray_manager::should_toggle_tray_popover_on_left_click(
-                        std::env::consts::OS,
-                    ) {
-                        let _ = window_manager::toggle_tray_window_visibility(
-                            tray.app_handle(),
-                            Some(position),
-                        );
+            .on_tray_icon_event(move |tray, event| {
+                let platform = std::env::consts::OS;
+                let cancel_pending_hover_open = || {
+                    if tray_manager::should_cancel_main_open_on_tray_interaction(platform) {
+                        tray_hover_generation_for_events
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     }
+                };
+
+                match event {
+                    TrayIconEvent::Enter { .. } => {
+                        if !tray_manager::should_schedule_main_open_on_tray_hover(platform) {
+                            return;
+                        }
+                        let scheduled_generation = tray_hover_generation_for_events
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                            + 1;
+                        let app = tray.app_handle().clone();
+                        let generation = tray_hover_generation_for_events.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                tray_manager::TRAY_HOVER_OPEN_DELAY_MS,
+                            ))
+                            .await;
+                            let current_generation =
+                                generation.load(std::sync::atomic::Ordering::SeqCst);
+                            if tray_manager::should_fire_main_open_after_tray_hover(
+                                platform,
+                                scheduled_generation,
+                                current_generation,
+                            ) {
+                                let _ = window_manager::focus_main_window(&app);
+                            }
+                        });
+                    }
+                    TrayIconEvent::Leave { .. } => {
+                        cancel_pending_hover_open();
+                    }
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        position,
+                        ..
+                    } => {
+                        cancel_pending_hover_open();
+                        if tray_manager::should_toggle_tray_popover_on_left_click(platform) {
+                            let _ = window_manager::toggle_tray_window_visibility(
+                                tray.app_handle(),
+                                Some(position),
+                            );
+                        }
+                    }
+                    TrayIconEvent::Click { .. } => {
+                        cancel_pending_hover_open();
+                    }
+                    _ => {}
                 }
             })
             .build(app)
