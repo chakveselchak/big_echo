@@ -67,6 +67,11 @@ function SessionCardImpl({
   const draftRef = useRef(draftDetail);
   draftRef.current = draftDetail;
 
+  // Orange "dirty" dot on the summary-prompt button when this session overrides
+  // the default summary prompt with a non-empty custom one — mirrors the dirty
+  // indicator shown in Settings.
+  const hasCustomSummaryPrompt = Boolean(draftDetail.custom_summary_prompt?.trim());
+
   // When the parent's committed detail changes (reload from disk, external
   // update, etc.) and it no longer matches what we have locally, refresh the
   // draft. We check via fields to avoid refs that changed without value-level
@@ -376,20 +381,39 @@ function SessionCardImpl({
                 "Get Summary"
               )}
             </Button>
-            <Button
-              htmlType="button"
-              type="text"
-              size="small"
-              shape="circle"
-              className="session-summary-prompt-button"
-              aria-label="Настроить промпт саммари"
-              title="Настроить промпт саммари"
-              icon={<MessageOutlined aria-hidden="true" />}
-              onClick={() => {
-                commitDraft();
-                onOpenSummaryPrompt(draftRef.current);
-              }}
-            />
+            <span style={{ position: "relative", display: "inline-flex" }}>
+              <Button
+                htmlType="button"
+                type="text"
+                size="small"
+                shape="circle"
+                className="session-summary-prompt-button"
+                aria-label="Настроить промпт саммари"
+                title="Настроить промпт саммари"
+                icon={<MessageOutlined aria-hidden="true" />}
+                onClick={() => {
+                  commitDraft();
+                  onOpenSummaryPrompt(draftRef.current);
+                }}
+              />
+              {hasCustomSummaryPrompt && (
+                <span
+                  role="img"
+                  aria-label="Промпт отличается от базового"
+                  title="Промпт отличается от базового"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    right: -4,
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    backgroundColor: "var(--ant-color-warning, #ffae14)",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+            </span>
             {summaryPending && (
               <span
                 className="visually-hidden"
