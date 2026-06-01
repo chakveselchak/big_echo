@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
+import { Dispatch, SetStateAction, startTransition, useEffect, useRef, useState } from "react";
 import {
   LiveInputLevels,
   RecordingInputChannel,
@@ -281,9 +281,16 @@ export function useRecordingController({
           mic: clamp01(levels.mic),
           system: clamp01(levels.system),
         };
-        setLiveLevels((prev) =>
-          prev.mic === nextLevels.mic && prev.system === nextLevels.system ? prev : nextLevels
-        );
+        // Mark the audio-level update as a non-urgent transition so React can
+        // interrupt this render if the user is typing in the Topic input. At
+        // 120 ms polling under recording load the controlled input was losing
+        // / reordering keystrokes — flagging this update as transition gives
+        // priority back to the keystroke render.
+        startTransition(() => {
+          setLiveLevels((prev) =>
+            prev.mic === nextLevels.mic && prev.system === nextLevels.system ? prev : nextLevels
+          );
+        });
       } catch {
         if (!active) return;
       } finally {
