@@ -226,7 +226,7 @@ describe("Tray window", () => {
     });
   });
 
-  it("saves topic edits to active tray recording session", async () => {
+  it("saves topic edits to active tray recording session on blur", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -243,7 +243,11 @@ describe("Tray window", () => {
       });
     });
 
-    await user.type(screen.getByLabelText("Topic (optional)"), "Daily sync");
+    // Topic is an uncontrolled input: typing stays in the DOM and only lands in
+    // React state (which drives the autosave) when the field loses focus.
+    const topicField = screen.getByLabelText("Topic (optional)");
+    await user.type(topicField, "Daily sync");
+    fireEvent.blur(topicField);
 
     await waitFor(
       () => {
