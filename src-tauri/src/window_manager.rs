@@ -1,5 +1,4 @@
-use crate::app_state::{AppDirs, AppState};
-use crate::settings::public_settings::load_settings;
+use crate::app_state::AppState;
 use crate::tray_manager::{
     apply_app_icons_for_theme, mark_tray_hidden_now, mark_tray_visible, position_tray_popover,
     register_tray_window_events, resolve_system_theme, set_tray_indicator,
@@ -215,56 +214,20 @@ pub(crate) fn should_reveal_main_window_on_app_reopen(
 
 // ── Live-levels worker ───────────────────────────────────────────────────────
 
-fn should_probe_idle_levels(recording_active: bool, tray_visible: bool) -> bool {
-    !recording_active && tray_visible
-}
-
-pub(crate) fn spawn_live_levels_worker(app: AppHandle, dirs: AppDirs) {
+pub(crate) fn spawn_live_levels_worker(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
             let recording_active = {
                 let state = app.state::<AppState>();
                 crate::tray_manager::is_recording_active(state.inner())
             };
-            let tray_visible = app
-                .get_webview_window("tray")
-                .and_then(|window| window.is_visible().ok())
-                .unwrap_or(false);
-
-            if should_probe_idle_levels(recording_active, tray_visible) {
-                let settings = load_settings(&dirs.app_data_dir).ok();
-                let (mic_name, system_name) = if let Some(settings) = settings {
-                    let mic = settings.mic_device_name.trim().to_string();
-                    let system = settings.system_device_name.trim().to_string();
-                    (
-                        if mic.is_empty() { None } else { Some(mic) },
-                        if system.is_empty() {
-                            None
-                        } else {
-                            Some(system)
-                        },
-                    )
-                } else {
-                    (None, None)
-                };
-                let probe_result = tauri::async_runtime::spawn_blocking(move || {
-                    crate::audio::capture::probe_levels(
-                        mic_name.as_deref(),
-                        system_name.as_deref(),
-                    )
-                })
-                .await
-                .ok()
-                .and_then(Result::ok);
-
-                let state = app.state::<AppState>();
-                if let Some(levels) = probe_result {
-                    state.live_levels.set_mic(levels.mic);
-                    state.live_levels.set_system(levels.system);
-                } else {
-                    state.live_levels.reset();
-                }
-            } else if !recording_active {
+            // Idle mic metering was removed on purpose. Opening a probe input
+            // stream every ~260ms churned the microphone (LED flicker, Bluetooth
+            // A2DP→HFP route thrash) and stalled the process run loop enough to
+            // drop keystrokes in the tray Topic field on slower machines. While
+            // not recording we only zero the bars; the live capture owns the
+            // levels while recording.
+            if !recording_active {
                 let state = app.state::<AppState>();
                 state.live_levels.reset();
             }
@@ -300,12 +263,5 @@ mod tests {
         assert!(should_reveal_main_window_on_app_reopen(false, false));
         assert!(!should_reveal_main_window_on_app_reopen(true, false));
         assert!(!should_reveal_main_window_on_app_reopen(false, true));
-    }
-
-    #[test]
-    fn idle_levels_probe_requires_visible_tray_window() {
-        assert!(should_probe_idle_levels(false, true));
-        assert!(!should_probe_idle_levels(false, false));
-        assert!(!should_probe_idle_levels(true, true));
     }
 }

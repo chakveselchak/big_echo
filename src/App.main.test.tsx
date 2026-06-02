@@ -523,6 +523,83 @@ describe("App main window", () => {
     );
   });
 
+  it("marks the summary-prompt button with an orange dot when the session uses a custom prompt", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-custom-prompt",
+            status: "recorded",
+            primary_tag: "slack",
+            topic: "Custom prompt session",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T12:30:00+03:00",
+            session_dir: "/tmp/s-custom-prompt",
+            audio_duration_hms: "00:20:00",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-custom-prompt",
+          source: "slack",
+          notes: "",
+          custom_summary_prompt: "Только решения и риски",
+          topic: "Custom prompt session",
+          tags: [],
+        };
+      }
+      return defaultInvokeImpl(cmd, args);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("img", { name: "Промпт отличается от базового" })
+    ).toBeInTheDocument();
+  });
+
+  it("does not mark the summary-prompt button when the session uses the default prompt", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-default-prompt",
+            status: "recorded",
+            primary_tag: "slack",
+            topic: "Default prompt session",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T12:30:00+03:00",
+            session_dir: "/tmp/s-default-prompt",
+            audio_duration_hms: "00:20:00",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-default-prompt",
+          source: "slack",
+          notes: "",
+          custom_summary_prompt: "",
+          topic: "Default prompt session",
+          tags: [],
+        };
+      }
+      return defaultInvokeImpl(cmd, args);
+    });
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Настроить промпт саммари" });
+    expect(
+      screen.queryByRole("img", { name: "Промпт отличается от базового" })
+    ).not.toBeInTheDocument();
+  });
+
   it("shows audio format in session title meta instead of source", async () => {
     const user = userEvent.setup();
     invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {

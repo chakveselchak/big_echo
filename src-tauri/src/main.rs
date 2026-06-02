@@ -372,12 +372,7 @@ fn main() {
         tauri::async_runtime::spawn(services::yandex_disk::scheduler::run_loop(
             app.handle().clone(),
         ));
-        window_manager::spawn_live_levels_worker(
-            app.handle().clone(),
-            AppDirs {
-                app_data_dir: data_dir.clone(),
-            },
-        );
+        window_manager::spawn_live_levels_worker(app.handle().clone());
         window_manager::prewarm_tray_window(&app.handle())?;
         crate::services::minitray::install_production_sinks();
         crate::services::minitray::install_callbacks(app.handle().clone());
