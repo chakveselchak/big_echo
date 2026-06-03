@@ -87,6 +87,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { App } from "./App";
+import packageJson from "../package.json";
 
 function expectSessionAntdSelectValue(label: string, value: string) {
   const combobox = screen.getByRole("combobox", { name: label });
@@ -107,6 +108,7 @@ async function clickAntdMenuItem(
 describe("App main window", () => {
   afterEach(() => {
     invokeMock.mockImplementation(defaultInvokeImpl);
+    window.localStorage.clear();
   });
 
   it("loads sessions and settings on initial render", async () => {
@@ -143,6 +145,23 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("list_sessions");
     });
+  });
+
+  it("keeps the Brain sync settings hidden until the version is tapped five times", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const version = await screen.findByText(`v${packageJson.version}`);
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    expect(await screen.findByRole("tab", { name: "Generals" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Brain sync/i })).toBeNull();
+
+    for (let i = 0; i < 5; i += 1) {
+      await user.click(version);
+    }
+
+    expect(await screen.findByRole("tab", { name: /Brain sync/i })).toBeInTheDocument();
   });
 
   it("renders the sessions empty state without a live status announcement", async () => {

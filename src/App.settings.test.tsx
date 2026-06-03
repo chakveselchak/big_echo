@@ -93,6 +93,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 
+const BRAIN_UNLOCK_STORAGE_KEY = "bigecho.brain_sync.unlocked";
+
 function getAntdSelect(label: string) {
   const combobox = screen.getByRole("combobox", { name: label });
   const select = combobox.closest(".ant-select");
@@ -168,6 +170,7 @@ function mockSettings() {
 describe("App settings window", () => {
   beforeEach(() => {
     invokeMock.mockClear();
+    window.localStorage.clear();
   });
 
   it("loads settings and auto-detects system source", async () => {
@@ -690,8 +693,23 @@ describe("App settings window", () => {
     expect(screen.getByRole("button", { name: /Save settings/i })).toBeInTheDocument();
   });
 
+  it("hides the Brain sync tab when not unlocked", async () => {
+    render(<App />);
+
+    await screen.findByRole("tab", { name: "Generals" });
+    expect(screen.queryByRole("tab", { name: /Brain sync/i })).toBeNull();
+  });
+
+  it("shows the Brain sync tab when previously unlocked", async () => {
+    window.localStorage.setItem(BRAIN_UNLOCK_STORAGE_KEY, "1");
+    render(<App />);
+
+    expect(await screen.findByRole("tab", { name: /Brain sync/i })).toBeInTheDocument();
+  });
+
   it("renders the Brain sync tab and saves Brain sync fields", async () => {
     const user = userEvent.setup();
+    window.localStorage.setItem(BRAIN_UNLOCK_STORAGE_KEY, "1");
     render(<App />);
 
     await user.click(await screen.findByRole("tab", { name: /Brain sync/i }));

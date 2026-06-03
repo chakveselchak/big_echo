@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
+import { readBrainSyncUnlocked } from "../../lib/brainSyncUnlock";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import { useYandexSync } from "../../hooks/useYandexSync";
 import type { PublicSettings, SettingsTab } from "../../types";
@@ -17,7 +18,7 @@ type SyncSessionsResult = {
   removed: number;
 };
 
-export function SettingsPage() {
+export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}) {
   const [status, setStatus] = useState("idle");
   const [isSyncingSessions, setIsSyncingSessions] = useState(false);
 
@@ -64,6 +65,10 @@ export function SettingsPage() {
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
 
   const yandexSync = useYandexSync(settingsTab === "yandex");
+
+  // When embedded in the main window the unlock flag is owned by MainPage and
+  // passed in; the standalone settings window falls back to reading storage.
+  const isBrainUnlocked = brainUnlocked ?? readBrainSyncUnlocked();
 
   if (!settings) {
     return (
@@ -214,21 +219,25 @@ export function SettingsPage() {
         />
       ),
     },
-    {
-      key: "brain" as SettingsTab,
-      label: (
-        <>
-          Brain sync{dirtyByTab.brain && dirtyDot}
-        </>
-      ),
-      children: (
-        <BrainSyncSettings
-          settings={settings}
-          setSettings={setSettings}
-          isDirty={isDirty}
-        />
-      ),
-    },
+    ...(isBrainUnlocked
+      ? [
+          {
+            key: "brain" as SettingsTab,
+            label: (
+              <>
+                Brain sync{dirtyByTab.brain && dirtyDot}
+              </>
+            ),
+            children: (
+              <BrainSyncSettings
+                settings={settings}
+                setSettings={setSettings}
+                isDirty={isDirty}
+              />
+            ),
+          },
+        ]
+      : []),
   ];
 
   return (

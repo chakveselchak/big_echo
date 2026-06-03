@@ -2,12 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { InputRef } from "antd";
 import { useRecordingController } from "../../hooks/useRecordingController";
 import { useSessions } from "../../hooks/useSessions";
+import packageJson from "../../../package.json";
 import { initializeAnalytics } from "../../lib/analytics";
 import { getErrorMessage } from "../../lib/appUtils";
 import {
   formatBrainUploadUserMessage,
   isBrainUploadAlreadyRunning,
 } from "../../lib/brainUploadError";
+import {
+  persistBrainSyncUnlocked,
+  readBrainSyncUnlocked,
+  registerUnlockTap,
+} from "../../lib/brainSyncUnlock";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
 import type { BrainUploadResponse, StartResponse } from "../../types";
 import { NexaraBalance } from "../../components/NexaraBalance";
@@ -32,6 +38,20 @@ export function MainPage() {
     if (tab === "settings") setSettingsMounted(true);
     setMainTab(tab);
   }, []);
+  // Tapping the version label five times within ten seconds reveals the hidden
+  // Brain sync settings section. The unlock persists across restarts via local
+  // storage. We keep only the last few tap timestamps (no timers), so the
+  // gesture cannot leak memory.
+  const [brainUnlocked, setBrainUnlocked] = useState(readBrainSyncUnlocked);
+  const versionTapsRef = useRef<number[]>([]);
+  const handleVersionTap = useCallback(() => {
+    if (brainUnlocked) return;
+    const { taps, unlocked } = registerUnlockTap(versionTapsRef.current, Date.now());
+    versionTapsRef.current = taps;
+    if (!unlocked) return;
+    persistBrainSyncUnlocked();
+    setBrainUnlocked(true);
+  }, [brainUnlocked]);
   const [topic, setTopic] = useState("");
   const [source, setSource] = useState("slack");
   const [transcriptionProvider, setTranscriptionProvider] = useState<string | null>(null);
@@ -294,7 +314,7 @@ export function MainPage() {
           className="panel"
           style={mainTab === "settings" ? undefined : { display: "none" }}
         >
-          <SettingsPage />
+          <SettingsPage brainUnlocked={brainUnlocked} />
         </section>
       )}
       {showNewVersionTab && updateInfo && (
@@ -305,6 +325,18 @@ export function MainPage() {
           <NewVersionPage updateInfo={updateInfo} />
         </section>
       )}
+      <div
+        onClick={handleVersionTap}
+        style={{
+          textAlign: "center",
+          paddingTop: 4,
+          color: "var(--ant-color-text-quaternary, #999)",
+          fontSize: 12,
+          userSelect: "none",
+        }}
+      >
+        v{packageJson.version}
+      </div>
     </main>
   );
 }
