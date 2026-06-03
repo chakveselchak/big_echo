@@ -209,6 +209,7 @@ fn import_audio_session_from_path(
         transcript_file: transcript_name(now),
         summary_file: summary_name(now),
         meta_file: "meta.json".to_string(),
+        tasks_sync_file: "tasks_sync.json".to_string(),
     };
 
     let audio_dst = session_dir.join(&meta.artifacts.audio_file);
@@ -982,6 +983,7 @@ mod tests {
             transcript_file: "transcript.txt".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
+            tasks_sync_file: "tasks_sync.json".to_string(),
         };
         meta
     }
@@ -1235,6 +1237,8 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
+            todoist_sync_enabled: false,
+            todoist_auto_add: false,
         };
         save_settings(&app_data_dir, &settings).expect("save settings");
 
@@ -1306,6 +1310,7 @@ mod tests {
             transcript_file: "transcript.md".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
+            tasks_sync_file: "tasks_sync.json".to_string(),
         };
         let meta_path = session_dir.join("meta.json");
         save_meta(&meta_path, &meta).expect("save meta");

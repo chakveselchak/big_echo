@@ -66,6 +66,7 @@ mod tests {
             transcript_file: "transcript.txt".to_string(),
             summary_file: "summary_10.03.2026.md".to_string(),
             meta_file: "meta.json".to_string(),
+            tasks_sync_file: "tasks_sync.json".to_string(),
         };
         save_meta(&path, &meta).expect("save meta");
 
@@ -89,6 +90,7 @@ mod tests {
             transcript_file: "transcript.txt".to_string(),
             summary_file: "summary_10.03.2026.txt".to_string(),
             meta_file: "meta.json".to_string(),
+            tasks_sync_file: "tasks_sync.json".to_string(),
         };
         save_meta(&path, &meta).expect("save meta");
 

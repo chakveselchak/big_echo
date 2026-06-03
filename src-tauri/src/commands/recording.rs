@@ -152,6 +152,7 @@ fn start_recording_impl(
         transcript_file: transcript_name(started_at),
         summary_file: summary_name(started_at),
         meta_file: "meta.json".to_string(),
+        tasks_sync_file: "tasks_sync.json".to_string(),
     };
 
     let mic_name = if settings.mic_device_name.trim().is_empty() {

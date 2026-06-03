@@ -46,6 +46,8 @@ pub struct PublicSettings {
     pub yandex_sync_interval: String,
     pub yandex_sync_remote_folder: String,
     pub show_minitray_overlay: bool,
+    pub todoist_sync_enabled: bool,
+    pub todoist_auto_add: bool,
 }
 
 impl Default for PublicSettings {
@@ -79,6 +81,8 @@ impl Default for PublicSettings {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
+            todoist_sync_enabled: false,
+            todoist_auto_add: false,
         }
     }
 }
@@ -626,5 +630,52 @@ mod tests {
         let raw = serde_json::to_string(&settings).expect("serialize");
         let restored: PublicSettings = serde_json::from_str(&raw).expect("deserialize");
         assert!(restored.show_minitray_overlay);
+    }
+
+    #[test]
+    fn todoist_settings_default_to_manual_disabled_sync() {
+        let settings = PublicSettings::default();
+
+        assert!(!settings.todoist_sync_enabled);
+        assert!(!settings.todoist_auto_add);
+    }
+
+    #[test]
+    fn missing_todoist_settings_use_defaults() {
+        let raw = r#"{
+        "recording_root":"./recordings",
+        "artifact_open_app":"",
+        "transcription_provider":"nexara",
+        "transcription_url":"",
+        "transcription_task":"transcribe",
+        "transcription_diarization_setting":"general",
+        "salute_speech_scope":"SALUTE_SPEECH_CORP",
+        "salute_speech_model":"general",
+        "salute_speech_language":"ru-RU",
+        "salute_speech_sample_rate":48000,
+        "salute_speech_channels_count":1,
+        "apple_speech_locale":"ru_RU",
+        "summary_url":"",
+        "summary_prompt":"",
+        "openai_model":"gpt-5.1-codex-mini",
+        "audio_format":"opus",
+        "opus_bitrate_kbps":24,
+        "mic_device_name":"",
+        "system_device_name":"",
+        "artifact_opener_app":"",
+        "auto_run_pipeline_on_stop":false,
+        "api_call_logging_enabled":false,
+        "auto_delete_audio_enabled":false,
+        "auto_delete_audio_days":30,
+        "yandex_sync_enabled":false,
+        "yandex_sync_interval":"24h",
+        "yandex_sync_remote_folder":"BigEcho",
+        "show_minitray_overlay":false
+    }"#;
+
+        let settings: PublicSettings = serde_json::from_str(raw).expect("legacy settings");
+
+        assert!(!settings.todoist_sync_enabled);
+        assert!(!settings.todoist_auto_add);
     }
 }

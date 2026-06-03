@@ -26,6 +26,8 @@ export type PublicSettings = {
   yandex_sync_interval: "1h" | "6h" | "24h" | "48h";
   yandex_sync_remote_folder: string;
   show_minitray_overlay: boolean;
+  todoist_sync_enabled: boolean;
+  todoist_auto_add: boolean;
 };
 
 export type MacosSystemAudioPermissionStatus = {
@@ -82,7 +84,7 @@ export type UiSyncStateView = {
 export type SecretSaveState = "unknown" | "updated" | "unchanged" | "error";
 export type PipelineUiState = { kind: "success" | "error"; text: string };
 export type LiveInputLevels = { mic: number; system: number };
-export type SettingsTab = "audiototext" | "generals" | "audio" | "yandex";
+export type SettingsTab = "audiototext" | "generals" | "audio" | "yandex" | "todoist";
 export type DeleteTarget = { sessionId: string; force: boolean };
 
 export type TextEditorAppOption = {
