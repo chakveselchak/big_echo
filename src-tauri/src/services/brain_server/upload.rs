@@ -1,4 +1,3 @@
-use crate::commands::brain_sync::TOKEN_KEY;
 use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{
     BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
@@ -8,6 +7,8 @@ use crate::settings::secret_store::get_secret;
 use crate::storage::sqlite_repo::add_event;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
+
+pub(crate) const TOKEN_KEY: &str = "BRAIN_SERVER_API_TOKEN";
 
 #[async_trait]
 pub(crate) trait UploadAudioClient {
@@ -225,7 +226,7 @@ pub(crate) async fn upload_session_after_record_even_when_disabled(
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::brain_sync::TOKEN_KEY;
+    use super::TOKEN_KEY;
     use crate::domain::session::{SessionMeta, SessionStatus};
     use crate::services::brain_server::client::{
         BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,

@@ -3,7 +3,7 @@ use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{BrainServerClient, BrainUploadResponse};
 use crate::services::brain_server::upload::{
     sanitize_error, upload_session_after_record_even_when_disabled,
-    upload_session_after_record_with_client, validate_upload_url, UploadAudioClient,
+    upload_session_after_record_with_client, validate_upload_url, UploadAudioClient, TOKEN_KEY,
 };
 use crate::settings::public_settings::load_settings;
 use crate::settings::public_settings::PublicSettings;
@@ -18,7 +18,6 @@ use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 
-pub(crate) const TOKEN_KEY: &str = "BRAIN_SERVER_API_TOKEN";
 const ARCHIVE_PROGRESS_EVENT: &str = "brain-archive-upload-progress";
 const ARCHIVE_EVENT_SESSION_ID: &str = "__brain_archive__";
 const MAX_ARCHIVE_ERRORS: usize = 20;
