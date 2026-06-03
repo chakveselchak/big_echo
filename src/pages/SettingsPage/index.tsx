@@ -110,6 +110,7 @@ export function SettingsPage() {
       isDirty("yandex_sync_enabled") ||
       isDirty("yandex_sync_interval") ||
       isDirty("yandex_sync_remote_folder"),
+    todoist: false,
   };
 
   const dirtyDot = (
