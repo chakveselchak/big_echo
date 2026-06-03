@@ -6,4 +6,5 @@ pub mod pipeline;
 pub mod services;
 pub mod settings;
 pub mod storage;
+pub mod task_sync;
 pub mod text_editors;

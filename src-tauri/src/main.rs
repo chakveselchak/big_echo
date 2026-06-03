@@ -8,6 +8,8 @@ mod pipeline;
 mod services;
 mod settings;
 mod storage;
+#[allow(dead_code)]
+mod task_sync;
 mod text_editors;
 mod tray_manager;
 mod window_manager;
