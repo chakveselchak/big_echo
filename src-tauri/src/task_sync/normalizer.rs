@@ -7,13 +7,7 @@ fn collapse_ws(value: &str) -> String {
 }
 
 fn is_iso_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[..4].iter().all(u8::is_ascii_digit)
-        && bytes[5..7].iter().all(u8::is_ascii_digit)
-        && bytes[8..10].iter().all(u8::is_ascii_digit)
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
 }
 
 fn normalized_priority(value: Option<i64>) -> i64 {
@@ -174,6 +168,26 @@ mod tests {
         .expect("rejected due preserved");
         assert_eq!(item.due, None);
         assert!(item.description.unwrap().contains("Due: завтра"));
+    }
+
+    #[test]
+    fn normalizer_rejects_invalid_calendar_due_dates() {
+        let mut rejected = raw("Task");
+        rejected.due = Some("2026-99-99".to_string());
+
+        let item = normalize_one(
+            TaskProvider::Todoist,
+            "session-1",
+            Path::new("/tmp/session/summary.md"),
+            rejected,
+        )
+        .expect("rejected due preserved");
+
+        assert_eq!(item.due, None);
+        assert!(item
+            .description
+            .unwrap()
+            .contains("Due: 2026-99-99"));
     }
 
     #[test]
