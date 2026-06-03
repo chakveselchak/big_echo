@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
+import { readBrainSyncUnlocked } from "../../lib/brainSyncUnlock";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import { useYandexSync } from "../../hooks/useYandexSync";
 import type { PublicSettings, SettingsTab } from "../../types";
@@ -9,6 +10,7 @@ import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
 import { YandexSyncSettings } from "../../components/settings/YandexSyncSettings";
+import { BrainSyncSettings } from "../../components/settings/BrainSyncSettings";
 import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
 
 type SyncSessionsResult = {
@@ -16,7 +18,7 @@ type SyncSessionsResult = {
   removed: number;
 };
 
-export function SettingsPage() {
+export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}) {
   const [status, setStatus] = useState("idle");
   const [isSyncingSessions, setIsSyncingSessions] = useState(false);
 
@@ -64,6 +66,10 @@ export function SettingsPage() {
 
   const yandexSync = useYandexSync(settingsTab === "yandex");
 
+  // When embedded in the main window the unlock flag is owned by MainPage and
+  // passed in; the standalone settings window falls back to reading storage.
+  const isBrainUnlocked = brainUnlocked ?? readBrainSyncUnlocked();
+
   if (!settings) {
     return (
       <LoadingPlaceholder
@@ -110,6 +116,9 @@ export function SettingsPage() {
       isDirty("yandex_sync_enabled") ||
       isDirty("yandex_sync_interval") ||
       isDirty("yandex_sync_remote_folder"),
+    brain:
+      isDirty("brain_sync_enabled") ||
+      isDirty("brain_sync_url"),
   };
 
   const dirtyDot = (
@@ -210,6 +219,25 @@ export function SettingsPage() {
         />
       ),
     },
+    ...(isBrainUnlocked
+      ? [
+          {
+            key: "brain" as SettingsTab,
+            label: (
+              <>
+                Brain sync{dirtyByTab.brain && dirtyDot}
+              </>
+            ),
+            children: (
+              <BrainSyncSettings
+                settings={settings}
+                setSettings={setSettings}
+                isDirty={isDirty}
+              />
+            ),
+          },
+        ]
+      : []),
   ];
 
   return (

@@ -1,12 +1,22 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { SessionList } from "./SessionList";
 import type { SessionListItem } from "../../types";
 
 vi.mock("./SessionCard", () => ({
-  SessionCard: ({ item }: { item: SessionListItem }) => (
-    <div data-testid="session-card" data-session-id={item.session_id} />
+  SessionCard: ({
+    item,
+    onUploadToBrain,
+  }: {
+    item: SessionListItem;
+    onUploadToBrain: (sessionId: string) => void;
+  }) => (
+    <div data-testid="session-card" data-session-id={item.session_id}>
+      <button type="button" onClick={() => onUploadToBrain(item.session_id)}>
+        upload {item.session_id}
+      </button>
+    </div>
   ),
 }));
 
@@ -75,6 +85,7 @@ function makeSession(i: number): SessionListItem {
     audio_duration_hms: "00:00:00",
     has_transcript_text: false,
     has_summary_text: false,
+    brain_upload_status: "not_uploaded",
   };
 }
 
@@ -93,6 +104,7 @@ function renderList(
     sessionArtifactSearchHits: {},
     textPendingBySession: {},
     summaryPendingBySession: {},
+    brainUploadPendingBySession: {},
     pipelineStateBySession: {},
     deleteTarget: null,
     deletePendingSessionId: null,
@@ -116,6 +128,7 @@ function renderList(
     flushSessionDetails: noop,
     requestDeleteSession: noop,
     requestDeleteAudio: noop,
+    onUploadToBrain: noop,
     setStatus: noop,
     ...overrides,
   };
@@ -123,6 +136,15 @@ function renderList(
 }
 
 describe("SessionList lazy loading", () => {
+  it("passes the Brain upload callback to session cards", () => {
+    const onUploadToBrain = vi.fn();
+    renderList([makeSession(1)], { onUploadToBrain });
+
+    fireEvent.click(screen.getByRole("button", { name: "upload s-1" }));
+
+    expect(onUploadToBrain).toHaveBeenCalledWith("s-1");
+  });
+
   it("renders only the first 20 cards when there are more than 20 sessions", () => {
     const sessions = Array.from({ length: 25 }, (_, i) => makeSession(i));
     renderList(sessions);
@@ -206,6 +228,7 @@ describe("SessionList lazy loading", () => {
         sessionArtifactSearchHits={{}}
         textPendingBySession={{}}
         summaryPendingBySession={{}}
+        brainUploadPendingBySession={{}}
         pipelineStateBySession={{}}
         deleteTarget={null}
         deletePendingSessionId={null}
@@ -229,6 +252,7 @@ describe("SessionList lazy loading", () => {
         flushSessionDetails={noop}
         requestDeleteSession={noop}
         requestDeleteAudio={noop}
+        onUploadToBrain={noop}
         setStatus={noop}
       />,
     );

@@ -74,6 +74,8 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
       yandex_sync_enabled: false,
       yandex_sync_interval: "24h",
       yandex_sync_remote_folder: "BigEcho",
+      brain_sync_enabled: false,
+      brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
       show_minitray_overlay: false,
     };
   }
@@ -289,6 +291,8 @@ describe("Tray window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -332,6 +336,8 @@ describe("Tray window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -422,6 +428,8 @@ describe("Tray window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }

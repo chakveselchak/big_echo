@@ -543,9 +543,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        let _guard = minitray::TEST_LOCK.lock().unwrap();
-        // Reset minitray state before test.
-        minitray::hide();
+        let _guard = minitray::acquire_test_lock();
+        minitray::reset_test_state();
 
         let show_calls = Arc::new(AtomicUsize::new(0));
         let show_for_sink = Arc::clone(&show_calls);
@@ -580,9 +579,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        let _guard = minitray::TEST_LOCK.lock().unwrap();
-        // Reset minitray state before test.
-        minitray::hide();
+        let _guard = minitray::acquire_test_lock();
+        minitray::reset_test_state();
 
         let hide_calls = Arc::new(AtomicUsize::new(0));
         let hide_for_sink = Arc::clone(&hide_calls);
@@ -632,8 +630,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        let _guard = minitray::TEST_LOCK.lock().unwrap();
-        minitray::hide();
+        let _guard = minitray::acquire_test_lock();
+        minitray::reset_test_state();
 
         let hide_calls = Arc::new(AtomicUsize::new(0));
         let hide_for_sink = Arc::clone(&hide_calls);
@@ -719,8 +717,8 @@ mod tests {
         use crate::services::minitray;
         use crate::stop_active_recording_internal;
 
-        let _guard = minitray::TEST_LOCK.lock().unwrap();
-        minitray::hide();
+        let _guard = minitray::acquire_test_lock();
+        minitray::reset_test_state();
         minitray::install_show_sink_for_test(Box::new(|| {}));
         minitray::install_hide_sink_for_test(Box::new(|| {}));
 

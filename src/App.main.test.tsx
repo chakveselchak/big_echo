@@ -51,6 +51,8 @@ const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         yandex_sync_enabled: false,
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
+        brain_sync_enabled: false,
+        brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
         show_minitray_overlay: false,
       };
     }
@@ -85,6 +87,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { App } from "./App";
+import packageJson from "../package.json";
 
 function expectSessionAntdSelectValue(label: string, value: string) {
   const combobox = screen.getByRole("combobox", { name: label });
@@ -105,6 +108,7 @@ async function clickAntdMenuItem(
 describe("App main window", () => {
   afterEach(() => {
     invokeMock.mockImplementation(defaultInvokeImpl);
+    window.localStorage.clear();
   });
 
   it("loads sessions and settings on initial render", async () => {
@@ -141,6 +145,23 @@ describe("App main window", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("list_sessions");
     });
+  });
+
+  it("keeps the Brain sync settings hidden until the version is tapped five times", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const version = await screen.findByText(`v${packageJson.version}`);
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    expect(await screen.findByRole("tab", { name: "Generals" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Brain sync/i })).toBeNull();
+
+    for (let i = 0; i < 5; i += 1) {
+      await user.click(version);
+    }
+
+    expect(await screen.findByRole("tab", { name: /Brain sync/i })).toBeInTheDocument();
   });
 
   it("renders the sessions empty state without a live status announcement", async () => {
@@ -452,6 +473,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -741,6 +764,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -905,6 +930,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -1036,6 +1063,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -1137,6 +1166,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -1243,6 +1274,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -1360,6 +1393,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -1553,6 +1588,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -1642,6 +1679,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -1710,6 +1749,8 @@ describe("App main window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+          brain_sync_enabled: false,
+          brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
       }
@@ -2063,6 +2104,124 @@ describe("App main window", () => {
         sessionId: "s6",
         artifactKind: "summary",
       });
+    });
+  });
+
+  it("uploads a session to Brain and refreshes the session list", async () => {
+    const user = userEvent.setup();
+    let uploadDone = false;
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-brain-upload",
+            status: "done",
+            primary_tag: "slack",
+            topic: "Brain upload",
+            display_date_ru: "28.05.2026",
+            started_at_iso: "2026-05-28T13:00:00+03:00",
+            session_dir: "/tmp/s-brain-upload",
+            audio_file: "audio.mp3",
+            audio_format: "mp3",
+            audio_duration_hms: "00:03:00",
+            has_transcript_text: true,
+            has_summary_text: true,
+            brain_upload_status: uploadDone ? "uploaded" : "not_uploaded",
+            meta: {
+              session_id: "s-brain-upload",
+              source: "slack",
+              notes: "",
+              topic: "Brain upload",
+              tags: [],
+            },
+          },
+        ];
+      }
+      if (cmd === "brain_sync_upload_session") {
+        uploadDone = true;
+        return "uploaded";
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await screen.findByText("Brain: не загружено");
+
+    await user.click(screen.getByRole("button", { name: "Загрузить в Brain" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("brain_sync_upload_session", {
+        sessionId: "s-brain-upload",
+      });
+      expect(screen.getByText("Brain: загружено")).toBeInTheDocument();
+    });
+  });
+
+  it("disables Brain upload immediately and ignores duplicate clicks while pending", async () => {
+    const user = userEvent.setup();
+    let resolveUpload: (() => void) | null = null;
+
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "set_ui_sync_state") {
+        return "updated";
+      }
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-brain-pending",
+            status: "done",
+            primary_tag: "slack",
+            topic: "Brain pending",
+            display_date_ru: "28.05.2026",
+            started_at_iso: "2026-05-28T13:00:00+03:00",
+            session_dir: "/tmp/s-brain-pending",
+            audio_file: "audio.mp3",
+            audio_format: "mp3",
+            audio_duration_hms: "00:03:00",
+            has_transcript_text: true,
+            has_summary_text: true,
+            brain_upload_status: "not_uploaded",
+            meta: {
+              session_id: "s-brain-pending",
+              source: "slack",
+              notes: "",
+              topic: "Brain pending",
+              tags: [],
+            },
+          },
+        ];
+      }
+      if (cmd === "brain_sync_upload_session") {
+        return new Promise<string>((resolve) => {
+          resolveUpload = () => resolve("uploaded");
+        });
+      }
+      return null;
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    const uploadButton = await screen.findByRole("button", { name: "Загрузить в Brain" });
+
+    await user.click(uploadButton);
+    await user.click(uploadButton);
+
+    expect(screen.getByRole("button", { name: "Загрузить в Brain" })).toBeDisabled();
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "brain_sync_upload_session")).toHaveLength(1);
+
+    act(() => {
+      resolveUpload?.();
     });
   });
 

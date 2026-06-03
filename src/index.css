@@ -1457,6 +1457,35 @@ select {
   border: 1px solid rgba(27, 122, 69, 0.18);
 }
 
+.session-label-brain {
+  color: #4f5f71;
+  background: #f3f5f7;
+  border: 1px solid rgba(79, 95, 113, 0.18);
+}
+
+.session-label-brain-uploaded {
+  color: #1b7a45;
+  background: #eef9f1;
+  border-color: rgba(27, 122, 69, 0.18);
+}
+
+.session-label-brain-uploading {
+  color: #7a5b00;
+  background: #fff7df;
+  border-color: rgba(122, 91, 0, 0.18);
+}
+
+.session-label-brain-failed {
+  color: var(--danger);
+  background: #fff1f0;
+  border-color: rgba(189, 43, 43, 0.18);
+}
+
+.session-label-brain-not_uploaded {
+  color: #7a8592;
+  background: #f6f7f8;
+}
+
 .session-card .button-row {
   gap: 6px;
   align-items: flex-start;

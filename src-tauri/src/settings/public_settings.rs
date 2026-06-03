@@ -6,6 +6,7 @@ use url::Url;
 
 pub const NEXARA_DEFAULT_TRANSCRIPTION_URL: &str =
     "https://api.nexara.ru/api/v1/audio/transcriptions";
+pub const BRAIN_SYNC_DEFAULT_URL: &str = "https://admin.my2brain.ru/api/v1/meetings/upload";
 
 const SALUTE_SPEECH_ALLOWED_SCOPES: &[&str] = &[
     "SALUTE_SPEECH_PERS",
@@ -45,6 +46,8 @@ pub struct PublicSettings {
     pub yandex_sync_enabled: bool,
     pub yandex_sync_interval: String,
     pub yandex_sync_remote_folder: String,
+    pub brain_sync_enabled: bool,
+    pub brain_sync_url: String,
     pub show_minitray_overlay: bool,
 }
 
@@ -78,6 +81,8 @@ impl Default for PublicSettings {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
+            brain_sync_enabled: false,
+            brain_sync_url: BRAIN_SYNC_DEFAULT_URL.to_string(),
             show_minitray_overlay: false,
         }
     }
@@ -132,6 +137,13 @@ impl PublicSettings {
         if !self.summary_url.is_empty() {
             Self::parse_http_url(&self.summary_url, "summary")?;
         }
+        let brain_sync_url = self.brain_sync_url.trim();
+        if self.brain_sync_enabled && brain_sync_url.is_empty() {
+            return Err("Invalid Brain sync URL".to_string());
+        }
+        if !brain_sync_url.is_empty() {
+            Self::parse_http_url(brain_sync_url, "Brain sync")?;
+        }
         if self.transcription_task != "transcribe" && self.transcription_task != "diarize" {
             return Err("Invalid transcription task".to_string());
         }
@@ -179,10 +191,12 @@ pub fn load_settings(app_data_dir: &Path) -> Result<PublicSettings, String> {
 }
 
 pub fn save_settings(app_data_dir: &Path, settings: &PublicSettings) -> Result<(), String> {
-    settings.validate()?;
+    let mut normalized = settings.clone();
+    normalized.brain_sync_url = normalized.brain_sync_url.trim().to_string();
+    normalized.validate()?;
     fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
     let path = settings_file_path(app_data_dir);
-    let body = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    let body = serde_json::to_string_pretty(&normalized).map_err(|e| e.to_string())?;
     fs::write(path, body).map_err(|e| e.to_string())
 }
 
@@ -626,5 +640,50 @@ mod tests {
         let raw = serde_json::to_string(&settings).expect("serialize");
         let restored: PublicSettings = serde_json::from_str(&raw).expect("deserialize");
         assert!(restored.show_minitray_overlay);
+    }
+
+    #[test]
+    fn brain_sync_defaults_are_disabled_with_upload_url() {
+        let settings = PublicSettings::default();
+
+        assert!(!settings.brain_sync_enabled);
+        assert_eq!(settings.brain_sync_url, BRAIN_SYNC_DEFAULT_URL);
+    }
+
+    #[test]
+    fn missing_brain_sync_fields_use_defaults() {
+        let json = serde_json::json!({
+            "transcription_provider": "nexara",
+            "transcription_url": "",
+            "transcription_task": "transcribe",
+            "transcription_diarization_setting": "general",
+        });
+        let parsed: PublicSettings =
+            serde_json::from_value(json).expect("legacy settings without Brain sync fields");
+
+        assert!(!parsed.brain_sync_enabled);
+        assert_eq!(parsed.brain_sync_url, BRAIN_SYNC_DEFAULT_URL);
+    }
+
+    #[test]
+    fn rejects_enabled_brain_sync_with_invalid_url() {
+        let s = PublicSettings {
+            brain_sync_enabled: true,
+            brain_sync_url: "ftp://example.com/upload".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(s.validate(), Err("Invalid Brain sync URL".to_string()));
+    }
+
+    #[test]
+    fn accepts_enabled_brain_sync_with_https_url() {
+        let s = PublicSettings {
+            brain_sync_enabled: true,
+            brain_sync_url: "  https://example.com/upload  ".to_string(),
+            ..Default::default()
+        };
+
+        assert!(s.validate().is_ok());
     }
 }

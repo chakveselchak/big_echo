@@ -2,10 +2,10 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
 import { ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
-import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
+import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
-import { extractStartTimeHm, resolveSessionAudioPath } from "../../lib/appUtils";
+import { extractStartTimeHm, redactSensitiveText, resolveSessionAudioPath } from "../../lib/appUtils";
 import { AudioPlayer } from "./AudioPlayer";
 
 const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
@@ -21,6 +21,7 @@ type SessionCardProps = {
   transcriptMatch: boolean;
   summaryMatch: boolean;
   showNumSpeakers: boolean;
+  brainUploadPending: boolean;
   onContextMenu: (event: ReactMouseEvent<HTMLElement>, sessionId: string) => void;
   onDetailChange: (detail: SessionMetaView) => void;
   onOpenArtifact: (sessionId: string, kind: "transcript" | "summary") => void;
@@ -31,6 +32,7 @@ type SessionCardProps = {
   onDeleteAudio: (sessionId: string) => void;
   onFieldBlur: (sessionId: string, detail?: SessionMetaView) => void;
   onOpenFolder: (sessionDir: string) => void;
+  onUploadToBrain: (sessionId: string) => void;
   setStatus: (status: string) => void;
 };
 
@@ -45,6 +47,7 @@ function SessionCardImpl({
   transcriptMatch,
   summaryMatch,
   showNumSpeakers,
+  brainUploadPending,
   onContextMenu,
   onDetailChange,
   onOpenArtifact,
@@ -55,6 +58,7 @@ function SessionCardImpl({
   onDeleteAudio,
   onFieldBlur,
   onOpenFolder,
+  onUploadToBrain,
   setStatus,
 }: SessionCardProps) {
   const hasAudio = resolveSessionAudioPath(item) !== null;
@@ -134,6 +138,25 @@ function SessionCardImpl({
   const sessionTitleMeta = startTimeHm
     ? `(${item.audio_format}) - ${item.display_date_ru} ${startTimeHm}`
     : `(${item.audio_format}) - ${item.display_date_ru}`;
+  const brainLabelByStatus = {
+    uploaded: "Brain: загружено",
+    uploading: "Brain: загрузка",
+    failed: "Brain: ошибка",
+    not_uploaded: "Brain: не загружено",
+  } satisfies Record<BrainUploadStatus, string>;
+  const brainUploadStatus = brainUploadPending
+    ? "uploading"
+    : (item.brain_upload_status ?? "not_uploaded");
+  const brainUploadError =
+    brainUploadStatus === "failed"
+      ? redactSensitiveText(item.brain_upload_last_error?.trim() ?? "")
+      : "";
+
+  const brainUploadErrorId = `brain-upload-error-${item.session_id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  const showBrainUploadButton =
+    hasAudio && !(brainUploadStatus === "uploaded" && item.brain_server_ingested_once);
+  const brainUploadDisabled =
+    brainUploadPending || brainUploadStatus === "uploading" || item.status === "recording";
 
   return (
     <article
@@ -170,6 +193,31 @@ function SessionCardImpl({
                 onClick={() => onOpenArtifact(item.session_id, "summary")}
               >
                 саммари
+              </Button>
+            )}
+            <span
+              className={`session-label session-label-brain session-label-brain-${brainUploadStatus}`}
+              title={brainUploadError || undefined}
+              tabIndex={brainUploadError ? 0 : undefined}
+              aria-label={brainUploadError ? `${brainLabelByStatus[brainUploadStatus]}. ${brainUploadError}` : undefined}
+              aria-describedby={brainUploadError ? brainUploadErrorId : undefined}
+            >
+              {brainLabelByStatus[brainUploadStatus]}
+            </span>
+            {brainUploadError && (
+              <span id={brainUploadErrorId} className="visually-hidden">
+                {brainUploadError}
+              </span>
+            )}
+            {showBrainUploadButton && (
+              <Button
+                htmlType="button"
+                size="small"
+                className="session-brain-upload-button"
+                disabled={brainUploadDisabled}
+                onClick={() => onUploadToBrain(item.session_id)}
+              >
+                Загрузить в Brain
               </Button>
             )}
           </div>
