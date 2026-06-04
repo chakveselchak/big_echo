@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button, Checkbox, Flex, Form, Input, Tag } from "antd";
 import type { UseTodoistSyncReturn } from "../../hooks/useTodoistSync";
 import type { PublicSettings } from "../../types";
@@ -58,13 +58,8 @@ export function TodoistSyncSettings({ settings, setSettings, isDirty, todoistSyn
       ? <Tag color="green">Saved</Tag>
       : <Tag>Not set</Tag>;
 
-  const autoAddDisabled = !settings.todoist_sync_enabled || !todoistSync.hasToken;
-
-  useEffect(() => {
-    if (autoAddDisabled && settings.todoist_auto_add) {
-      setSettings({ ...settings, todoist_auto_add: false });
-    }
-  }, [autoAddDisabled, settings, setSettings]);
+  const autoAddDisabled =
+    !settings.todoist_sync_enabled || !todoistSync.tokenLoaded || !todoistSync.hasToken;
 
   return (
     <Form layout="vertical" style={{ maxWidth: 760 }}>

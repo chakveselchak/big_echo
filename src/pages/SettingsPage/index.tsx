@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import { useTodoistSync } from "../../hooks/useTodoistSync";
@@ -65,7 +65,16 @@ export function SettingsPage() {
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
 
   const yandexSync = useYandexSync(settingsTab === "yandex");
-  const todoistSync = useTodoistSync(settingsTab === "todoist");
+  const todoistSync = useTodoistSync(true);
+
+  useEffect(() => {
+    if (!settings || !settings.todoist_auto_add) return;
+    const shouldDisableAutoAdd =
+      !settings.todoist_sync_enabled || (todoistSync.tokenLoaded && !todoistSync.hasToken);
+    if (shouldDisableAutoAdd) {
+      setSettings({ ...settings, todoist_auto_add: false });
+    }
+  }, [settings, setSettings, todoistSync.hasToken, todoistSync.tokenLoaded]);
 
   if (!settings) {
     return (

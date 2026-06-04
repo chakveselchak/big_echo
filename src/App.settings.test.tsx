@@ -695,6 +695,37 @@ describe("App settings window", () => {
     });
   });
 
+  it("normalizes Todoist auto-add when the saved token is missing", async () => {
+    invokeMock.mockImplementationOnce(async (cmd: string) => {
+      if (cmd === "get_settings") {
+        return {
+          ...mockSettings(),
+          todoist_sync_enabled: true,
+          todoist_auto_add: true,
+        };
+      }
+      return null;
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("todoist_sync_has_token");
+    });
+
+    await screen.findByRole("button", { name: "Save settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
+        payload: expect.objectContaining({
+          todoist_sync_enabled: true,
+          todoist_auto_add: false,
+        }),
+      });
+    });
+  });
+
   test("shows Sync now next to Save settings only on Yandex tab, disabled without token", async () => {
     render(<App />);
     expect(screen.queryByRole("button", { name: /Sync now/i })).not.toBeInTheDocument();

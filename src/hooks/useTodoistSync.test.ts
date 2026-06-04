@@ -22,13 +22,15 @@ describe("useTodoistSync", () => {
     const { result } = renderHook(() => useTodoistSync(true));
 
     await waitFor(() => expect(result.current.hasToken).toBe(true));
+    expect(result.current.tokenLoaded).toBe(true);
   });
 
   it("does not load token presence when disabled", async () => {
-    renderHook(() => useTodoistSync(false));
+    const { result } = renderHook(() => useTodoistSync(false));
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(invokeMock).not.toHaveBeenCalled();
+    expect(result.current.tokenLoaded).toBe(false);
   });
 
   it("saveToken stores the token, refreshes presence, and marks it updated", async () => {
@@ -48,6 +50,7 @@ describe("useTodoistSync", () => {
     expect(saved).toBe(true);
     expect(invokeMock).toHaveBeenCalledWith("todoist_sync_set_token", { token: "todoist-token" });
     expect(result.current.hasToken).toBe(true);
+    expect(result.current.tokenLoaded).toBe(true);
     expect(result.current.tokenState).toBe("updated");
   });
 
@@ -82,6 +85,7 @@ describe("useTodoistSync", () => {
     expect(cleared).toBe(true);
     expect(invokeMock).toHaveBeenCalledWith("todoist_sync_clear_token");
     expect(result.current.hasToken).toBe(false);
+    expect(result.current.tokenLoaded).toBe(true);
     expect(result.current.tokenState).toBe("unchanged");
   });
 });

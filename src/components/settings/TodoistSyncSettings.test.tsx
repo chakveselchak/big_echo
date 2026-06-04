@@ -45,6 +45,7 @@ function makeTodoistSyncStub(
 ): UseTodoistSyncReturn {
   return {
     hasToken: false,
+    tokenLoaded: true,
     tokenState: "unknown",
     refreshHasToken: vi.fn(async () => undefined),
     saveToken: vi.fn(async (_value: string) => true),
@@ -101,6 +102,23 @@ describe("TodoistSyncSettings", () => {
     );
   });
 
+  it("does not reset auto-add while token presence is still loading", () => {
+    const setSettings = vi.fn();
+
+    render(
+      <TodoistSyncSettings
+        settings={baseSettings({ todoist_sync_enabled: true, todoist_auto_add: true })}
+        setSettings={setSettings}
+        isDirty={() => false}
+        todoistSync={makeTodoistSyncStub({ hasToken: false, tokenLoaded: false })}
+      />,
+    );
+
+    expect(screen.getByRole("checkbox", { name: /Auto-add action items/i })).toBeDisabled();
+    expect(setSettings).not.toHaveBeenCalled();
+  });
+
+
   it("resets auto-add when Todoist sync is disabled", () => {
     const setSettings = vi.fn();
 
@@ -123,27 +141,8 @@ describe("TodoistSyncSettings", () => {
     );
   });
 
-  it("resets auto-add when settings load without a token", async () => {
-    const setSettings = vi.fn();
-
-    render(
-      <TodoistSyncSettings
-        settings={baseSettings({ todoist_sync_enabled: true, todoist_auto_add: true })}
-        setSettings={setSettings}
-        isDirty={() => false}
-        todoistSync={makeTodoistSyncStub({ hasToken: false })}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(setSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ todoist_auto_add: false }),
-      );
-    });
-  });
-
   it("saves the token through the hook with trimmed input", async () => {
-    const saveToken = vi.fn(async (_value: string) => undefined);
+    const saveToken = vi.fn(async (_value: string) => true);
 
     render(
       <TodoistSyncSettings
@@ -185,7 +184,7 @@ describe("TodoistSyncSettings", () => {
   });
 
   it("clears the token through the hook", async () => {
-    const clearToken = vi.fn(async () => undefined);
+    const clearToken = vi.fn(async () => true);
 
     render(
       <TodoistSyncSettings

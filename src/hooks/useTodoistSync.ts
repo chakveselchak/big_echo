@@ -4,6 +4,7 @@ import type { SecretSaveState } from "../types";
 
 export function useTodoistSync(enabled: boolean) {
   const [hasToken, setHasToken] = useState<boolean>(false);
+  const [tokenLoaded, setTokenLoaded] = useState<boolean>(false);
   const [tokenState, setTokenState] = useState<SecretSaveState>("unknown");
 
   const refreshHasToken = useCallback(async () => {
@@ -12,6 +13,8 @@ export function useTodoistSync(enabled: boolean) {
       setHasToken(Boolean(has));
     } catch {
       setHasToken(false);
+    } finally {
+      setTokenLoaded(true);
     }
   }, []);
 
@@ -49,6 +52,7 @@ export function useTodoistSync(enabled: boolean) {
 
   return {
     hasToken,
+    tokenLoaded,
     tokenState,
     refreshHasToken,
     saveToken,
