@@ -2118,6 +2118,9 @@ describe("App main window", () => {
       if (cmd === "set_ui_sync_state") {
         return "updated";
       }
+      if (cmd === "brain_sync_has_token") {
+        return true;
+      }
       if (cmd === "list_sessions") {
         return [
           {
@@ -2153,7 +2156,7 @@ describe("App main window", () => {
 
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
-    await screen.findByText("Brain: не загружено");
+    await screen.findByRole("button", { name: "Загрузить в Brain" });
 
     await user.click(screen.getByRole("button", { name: "Загрузить в Brain" }));
 
@@ -2175,6 +2178,9 @@ describe("App main window", () => {
       }
       if (cmd === "set_ui_sync_state") {
         return "updated";
+      }
+      if (cmd === "brain_sync_has_token") {
+        return true;
       }
       if (cmd === "list_sessions") {
         return [

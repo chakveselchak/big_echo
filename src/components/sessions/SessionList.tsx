@@ -48,6 +48,7 @@ type SessionListProps = {
   artifactPreview: SessionArtifactPreview | null;
   knownTags: string[];
   settings: PublicSettings | null;
+  brainSyncReady: boolean;
   transcriptionProvider: string | null;
   setDeleteTarget: (target: DeleteTarget | null) => void;
   setAudioDeleteTargetSessionId: (sessionId: string | null) => void;
@@ -87,6 +88,7 @@ export function SessionList({
   artifactPreview,
   knownTags,
   settings,
+  brainSyncReady,
   transcriptionProvider,
   setDeleteTarget,
   setAudioDeleteTargetSessionId,
@@ -426,6 +428,7 @@ export function SessionList({
                   summaryMatch={summaryMatch}
                   showNumSpeakers={transcriptionProvider === "nexara"}
                   brainUploadPending={brainUploadPending}
+                  brainSyncReady={brainSyncReady}
                   onContextMenu={openSessionContextMenu}
                   onDetailChange={(nextDetail) =>
                     setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))
