@@ -123,6 +123,25 @@ describe("TodoistSyncSettings", () => {
     );
   });
 
+  it("resets auto-add when settings load without a token", async () => {
+    const setSettings = vi.fn();
+
+    render(
+      <TodoistSyncSettings
+        settings={baseSettings({ todoist_sync_enabled: true, todoist_auto_add: true })}
+        setSettings={setSettings}
+        isDirty={() => false}
+        todoistSync={makeTodoistSyncStub({ hasToken: false })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(setSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ todoist_auto_add: false }),
+      );
+    });
+  });
+
   it("saves the token through the hook with trimmed input", async () => {
     const saveToken = vi.fn(async (_value: string) => undefined);
 
