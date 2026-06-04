@@ -58,11 +58,8 @@ fn extract_from_markdown(body: &str) -> Vec<ExtractedActionItem> {
     for line in body.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('#') {
-            let heading = trimmed.trim_start_matches('#').trim().to_ascii_lowercase();
-            in_action_section = heading.contains("action item")
-                || heading.contains("actions")
-                || heading.contains("задач")
-                || heading.contains("действ");
+            let heading = trimmed.trim_start_matches('#').trim();
+            in_action_section = is_action_heading(heading);
             continue;
         }
         if !in_action_section {
@@ -88,6 +85,23 @@ fn extract_from_markdown(body: &str) -> Vec<ExtractedActionItem> {
         }
     }
     items
+}
+
+fn is_action_heading(heading: &str) -> bool {
+    let normalized = heading.trim().to_lowercase();
+    if normalized.contains("задач") || normalized.contains("действ") {
+        return true;
+    }
+
+    let words = normalized
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+
+    words.contains(&"actions")
+        || words
+            .windows(2)
+            .any(|window| window == ["action", "items"])
 }
 
 #[cfg(test)]
@@ -134,6 +148,35 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Согласовать SAP_ID", "Отправить договор",]
         );
+    }
+
+    #[test]
+    fn extractor_ignores_transactions_heading() {
+        let tmp = tempdir().expect("tempdir");
+        let summary_md = tmp.path().join("summary.md");
+        std::fs::write(&summary_md, "## Transactions\n- payment detail\n").expect("summary md");
+
+        let result = extract_action_items(&summary_md).expect("extract");
+
+        assert!(result.items.is_empty());
+    }
+
+    #[test]
+    fn extractor_falls_back_to_markdown_when_summary_json_invalid() {
+        let tmp = tempdir().expect("tempdir");
+        let summary_md = tmp.path().join("summary.md");
+        let summary_json = tmp.path().join("summary.json");
+        std::fs::write(&summary_md, "## Action Items\n- [ ] Markdown task\n").expect("summary md");
+        std::fs::write(&summary_json, "{invalid json").expect("summary json");
+
+        let result = extract_action_items(&summary_md).expect("extract");
+
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].title, "Markdown task");
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("summary.json invalid:")));
     }
 
     #[test]
