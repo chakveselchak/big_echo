@@ -131,6 +131,7 @@ fn open(app_data_dir: &Path) -> Result<Connection, String> {
         ",
     )
     .map_err(|e| e.to_string())?;
+    crate::task_sync::queue::ensure_schema(&conn)?;
     Ok(conn)
 }
 
@@ -358,6 +359,11 @@ pub fn delete_session(app_data_dir: &Path, session_id: &str) -> Result<bool, Str
     .map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM session_events WHERE session_id=?1",
+        params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM task_sync_queue WHERE source_session_id=?1",
         params![session_id],
     )
     .map_err(|e| e.to_string())?;
