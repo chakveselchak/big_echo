@@ -1,7 +1,7 @@
 use crate::app_state::AppDirs;
 use crate::settings::secret_store::{clear_secret, get_secret, set_secret};
 use crate::task_sync::model::{ActionItem, TodoistTaskPreview};
-use crate::task_sync::worker::{self, TaskSyncResult};
+use crate::task_sync::worker::TaskSyncResult;
 use tauri::State;
 
 pub const TODOIST_TOKEN_KEY: &str = "TODOIST_API_TOKEN";
@@ -76,7 +76,7 @@ pub async fn sync_todoist_tasks(
     session_id: Option<String>,
 ) -> Result<TaskSyncResult, String> {
     let token = todoist_token(&dirs.app_data_dir)?;
-    worker::sync_queued(&dirs.app_data_dir, session_id.as_deref(), &token).await
+    crate::task_sync::sync_todoist_tasks_for_session(&dirs, session_id.as_deref(), &token).await
 }
 
 #[tauri::command]

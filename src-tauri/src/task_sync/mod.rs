@@ -6,8 +6,10 @@ pub mod snapshot;
 pub mod todoist;
 pub mod worker;
 
+use crate::app_state::AppDirs;
 use crate::storage::{session_store::load_meta, sqlite_repo::get_session_dir};
 use crate::task_sync::model::{ActionItem, TaskProvider, TodoistTaskPreview};
+use crate::task_sync::worker::TaskSyncResult;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -64,6 +66,22 @@ fn refresh_snapshot_for_session_if_available(
     }
 }
 
+fn refresh_snapshots_for_sessions(
+    app_data_dir: &Path,
+    session_ids: &[String],
+) -> Result<(), String> {
+    let mut refreshed = Vec::new();
+    for session_id in session_ids {
+        if refreshed.contains(session_id) {
+            continue;
+        }
+        let items = queue::list_by_session(app_data_dir, session_id, TODOIST_PROVIDER.as_str())?;
+        refresh_snapshot_for_session(app_data_dir, session_id, &items)?;
+        refreshed.push(session_id.clone());
+    }
+    Ok(())
+}
+
 pub fn preview_todoist_tasks_for_session(
     app_data_dir: &Path,
     session_id: &str,
@@ -110,6 +128,16 @@ pub fn enqueue_todoist_tasks_for_session(
 
 pub fn status_for_session(app_data_dir: &Path, session_id: &str) -> Result<Vec<ActionItem>, String> {
     queue::list_by_session(app_data_dir, session_id, TODOIST_PROVIDER.as_str())
+}
+
+pub async fn sync_todoist_tasks_for_session(
+    dirs: &AppDirs,
+    session_id: Option<&str>,
+    token: &str,
+) -> Result<TaskSyncResult, String> {
+    let result = worker::sync_queued(&dirs.app_data_dir, session_id, token).await?;
+    refresh_snapshots_for_sessions(&dirs.app_data_dir, &result.session_ids)?;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -217,5 +245,53 @@ mod tests {
             queue::list_by_session(&app_data_dir, "session-1", TODOIST_PROVIDER.as_str())
                 .expect("list rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Queued);
+    }
+
+    #[test]
+    fn refresh_snapshots_for_sessions_writes_current_queue_state() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("sessions").join("session-1");
+        std::fs::create_dir_all(&app_data_dir).expect("app data dir");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+
+        let mut meta = SessionMeta::new(
+            "session-1".to_string(),
+            "zoom".to_string(),
+            vec![],
+            "Task sync refresh".to_string(),
+            String::new(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.artifacts.summary_file = "summary.md".to_string();
+        meta.artifacts.tasks_sync_file = "tasks_sync.json".to_string();
+
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        std::fs::write(
+            session_dir.join("summary.md"),
+            "## Action Items\n- [ ] Send follow-up\n",
+        )
+        .expect("write summary");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
+        let preview =
+            preview_todoist_tasks_for_session(&app_data_dir, "session-1").expect("preview");
+        enqueue_todoist_tasks_for_session(
+            &app_data_dir,
+            "session-1",
+            vec![preview.items[0].id.clone()],
+        )
+        .expect("enqueue");
+        queue::mark_synced(&app_data_dir, &preview.items[0].id, "todoist-task-1")
+            .expect("mark synced");
+
+        refresh_snapshots_for_sessions(&app_data_dir, &["session-1".to_string()])
+            .expect("refresh snapshots");
+
+        let raw = std::fs::read_to_string(session_dir.join("tasks_sync.json"))
+            .expect("snapshot");
+        let json: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(json["items"][0]["status"], "synced");
+        assert_eq!(json["items"][0]["externalTaskId"], "todoist-task-1");
     }
 }

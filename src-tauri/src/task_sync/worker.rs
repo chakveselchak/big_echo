@@ -9,6 +9,7 @@ use std::path::Path;
 pub struct TaskSyncResult {
     pub synced: usize,
     pub failed: usize,
+    pub session_ids: Vec<String>,
 }
 
 pub async fn sync_queued(
@@ -35,9 +36,13 @@ where
     let mut result = TaskSyncResult {
         synced: 0,
         failed: 0,
+        session_ids: Vec::new(),
     };
 
     for item in batch {
+        if !result.session_ids.contains(&item.source_session_id) {
+            result.session_ids.push(item.source_session_id.clone());
+        }
         match create(item.clone()).await {
             Ok(external_id) => {
                 queue::mark_synced(app_data_dir, &item.id, &external_id)?;
@@ -69,6 +74,10 @@ mod tests {
     use tempfile::tempdir;
 
     fn item(id: &str) -> ActionItem {
+        item_with_session(id, "session-1")
+    }
+
+    fn item_with_session(id: &str, session_id: &str) -> ActionItem {
         ActionItem {
             id: id.to_string(),
             provider: "todoist".to_string(),
@@ -78,7 +87,7 @@ mod tests {
             priority: Some(1),
             assignee: None,
             context: None,
-            source_session_id: "session-1".to_string(),
+            source_session_id: session_id.to_string(),
             source_file_path: "/tmp/session/summary.md".to_string(),
             status: TaskSyncStatus::New,
             external_task_id: None,
@@ -102,6 +111,7 @@ mod tests {
         .expect("sync");
 
         assert_eq!(result.synced, 1);
+        assert_eq!(result.session_ids, vec!["session-1"]);
         let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Synced);
         assert_eq!(rows[0].external_task_id.as_deref(), Some("todoist-1"));
@@ -125,10 +135,43 @@ mod tests {
         .expect("sync");
 
         assert_eq!(result.failed, 1);
+        assert_eq!(result.session_ids, vec!["session-1"]);
         let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Failed);
         assert_eq!(rows[0].error.as_deref(), Some("rate limited"));
         assert_eq!(rows[0].error_kind.as_deref(), Some("rate_limit"));
         assert_eq!(rows[0].retryable, Some(true));
+    }
+
+    #[tokio::test]
+    async fn worker_reports_unique_session_ids_for_processed_batch() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(
+            tmp.path(),
+            &[
+                item_with_session("id-1", "session-1"),
+                item_with_session("id-2", "session-1"),
+                item_with_session("id-3", "session-2"),
+            ],
+        )
+        .expect("insert");
+        queue::enqueue_tasks(
+            tmp.path(),
+            "session-1",
+            "todoist",
+            &["id-1".to_string(), "id-2".to_string()],
+        )
+        .expect("enqueue session 1");
+        queue::enqueue_tasks(tmp.path(), "session-2", "todoist", &["id-3".to_string()])
+            .expect("enqueue session 2");
+
+        let result = sync_queued_with(tmp.path(), None, |item| async move {
+            Ok(format!("todoist-{}", item.id))
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.synced, 3);
+        assert_eq!(result.session_ids, vec!["session-1", "session-2"]);
     }
 }
