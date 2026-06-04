@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
-import { ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
+import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
 import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
@@ -31,6 +31,8 @@ type SessionCardProps = {
   onDeleteAudio: (sessionId: string) => void;
   onFieldBlur: (sessionId: string, detail?: SessionMetaView) => void;
   onOpenFolder: (sessionDir: string) => void;
+  onExportTodoist: (sessionId: string) => void;
+  todoistPending: boolean;
   setStatus: (status: string) => void;
 };
 
@@ -55,6 +57,8 @@ function SessionCardImpl({
   onDeleteAudio,
   onFieldBlur,
   onOpenFolder,
+  onExportTodoist,
+  todoistPending,
   setStatus,
 }: SessionCardProps) {
   const hasAudio = resolveSessionAudioPath(item) !== null;
@@ -196,6 +200,20 @@ function SessionCardImpl({
                 title="Удалить аудио"
                 icon={<ClearOutlined aria-hidden="true" style={{color: "gray"}}/>}
                 onClick={() => onDeleteAudio(item.session_id)}
+              />
+            )}
+            {item.has_summary_text && (
+              <Button
+                htmlType="button"
+                type="text"
+                size="small"
+                shape="circle"
+                className="session-todoist-export-button"
+                aria-label="Export action items to Todoist"
+                title="Export action items to Todoist"
+                loading={todoistPending}
+                icon={<CheckSquareOutlined aria-hidden="true" style={{color: "gray"}}/>}
+                onClick={() => onExportTodoist(item.session_id)}
               />
             )}
             <Button

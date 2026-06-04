@@ -4,10 +4,64 @@ import type { ComponentProps } from "react";
 import { SessionList } from "./SessionList";
 import type { SessionListItem } from "../../types";
 
+const todoistTasksMock = vi.hoisted(() => ({
+  openPreview: vi.fn(),
+  closePreview: vi.fn(),
+  enqueueAndSync: vi.fn(),
+  state: {
+    preview: null as { sessionId: string } | null,
+    loading: false,
+    syncing: false,
+  },
+}));
+
 vi.mock("./SessionCard", () => ({
-  SessionCard: ({ item }: { item: SessionListItem }) => (
-    <div data-testid="session-card" data-session-id={item.session_id} />
+  SessionCard: ({
+    item,
+    onExportTodoist,
+    todoistPending,
+  }: {
+    item: SessionListItem;
+    onExportTodoist: (sessionId: string) => void;
+    todoistPending: boolean;
+  }) => (
+    <div data-testid="session-card" data-session-id={item.session_id}>
+      {item.has_summary_text && (
+        <button
+          type="button"
+          aria-label="Export action items to Todoist"
+          data-pending={todoistPending}
+          onClick={() => onExportTodoist(item.session_id)}
+        >
+          Todoist
+        </button>
+      )}
+    </div>
   ),
+}));
+
+vi.mock("../../hooks/useTodoistTasks", () => ({
+  useTodoistTasks: () => ({
+    ...todoistTasksMock.state,
+    openPreview: todoistTasksMock.openPreview,
+    closePreview: todoistTasksMock.closePreview,
+    enqueueAndSync: todoistTasksMock.enqueueAndSync,
+  }),
+}));
+
+vi.mock("./TodoistExportModal", () => ({
+  TodoistExportModal: ({
+    open,
+    onAddSelected,
+  }: {
+    open: boolean;
+    onAddSelected: (taskIds: string[]) => void;
+  }) =>
+    open ? (
+      <button type="button" onClick={() => onAddSelected(["id-1"])}>
+        Add mocked Todoist task
+      </button>
+    ) : null,
 }));
 
 vi.mock("./DeleteConfirmModal", () => ({
@@ -54,6 +108,12 @@ class MockIntersectionObserver {
 
 beforeEach(() => {
   ioInstances.length = 0;
+  todoistTasksMock.openPreview.mockReset();
+  todoistTasksMock.closePreview.mockReset();
+  todoistTasksMock.enqueueAndSync.mockReset();
+  todoistTasksMock.state.preview = null;
+  todoistTasksMock.state.loading = false;
+  todoistTasksMock.state.syncing = false;
   vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 });
 
@@ -103,6 +163,7 @@ function renderList(
     artifactPreview: null,
     knownTags: [],
     settings: null,
+    transcriptionProvider: null,
     setDeleteTarget: noop,
     setAudioDeleteTargetSessionId: noop,
     confirmDeleteSession: noopAsync,
@@ -216,6 +277,7 @@ describe("SessionList lazy loading", () => {
         artifactPreview={null}
         knownTags={[]}
         settings={null}
+        transcriptionProvider={null}
         setDeleteTarget={noop}
         setAudioDeleteTargetSessionId={noop}
         confirmDeleteSession={noopAsync}
@@ -234,5 +296,39 @@ describe("SessionList lazy loading", () => {
     );
 
     expect(screen.getAllByTestId("session-card")).toHaveLength(30);
+  });
+
+  it("opens Todoist preview from a session with summary", async () => {
+    const sessions = [{ ...makeSession(1), has_summary_text: true }];
+    todoistTasksMock.openPreview.mockResolvedValue({
+      sessionId: "s-1",
+      summaryPath: "/tmp/s-1/summary.md",
+      warnings: [],
+      items: [],
+    });
+
+    renderList(sessions);
+    await act(async () => {
+      screen.getByRole("button", { name: "Export action items to Todoist" }).click();
+    });
+
+    expect(todoistTasksMock.openPreview).toHaveBeenCalledWith("s-1");
+  });
+
+  it("syncs selected Todoist task IDs from the modal", async () => {
+    const setStatus = vi.fn();
+    const sessions = [{ ...makeSession(1), has_summary_text: true }];
+    todoistTasksMock.state.preview = { sessionId: "s-1" };
+    todoistTasksMock.enqueueAndSync.mockResolvedValue({ synced: 1, failed: 0 });
+
+    renderList(sessions, { setStatus });
+    screen.getByRole("button", { name: "Add mocked Todoist task" }).click();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(todoistTasksMock.enqueueAndSync).toHaveBeenCalledWith("s-1", ["id-1"]);
+    expect(setStatus).toHaveBeenCalledWith("todoist_synced: 1 synced, 0 failed");
   });
 });

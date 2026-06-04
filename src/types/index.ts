@@ -107,6 +107,39 @@ export type SessionArtifactPreview = {
   query: string;
 };
 
+export type TaskSyncStatus = "new" | "queued" | "syncing" | "synced" | "failed" | "skipped";
+
+export type TodoistActionItem = {
+  id: string;
+  provider: "todoist";
+  title: string;
+  description: string | null;
+  due: string | null;
+  priority: number | null;
+  assignee: string | null;
+  context: string | null;
+  sourceSessionId: string;
+  sourceFilePath: string;
+  status: TaskSyncStatus;
+  externalTaskId: string | null;
+  error: string | null;
+  errorKind?: string | null;
+  retryable?: boolean | null;
+};
+
+export type TodoistTaskPreview = {
+  sessionId: string;
+  summaryPath: string;
+  warnings: string[];
+  items: TodoistActionItem[];
+};
+
+export type TodoistTaskSyncResult = {
+  synced: number;
+  failed: number;
+  sessionIds?: string[];
+};
+
 export const fixedSources = ["slack", "zoom", "telemost", "telegram", "browser", "facetime", "other"];
 export const transcriptionProviderOptions = ["nexara", "salute_speech", "apple_speech"];
 
