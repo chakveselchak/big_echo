@@ -3,6 +3,13 @@ use chrono::Local;
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+static CLAIM_OWNER: LazyLock<String> = LazyLock::new(|| uuid::Uuid::new_v4().to_string());
+
+pub fn current_claim_owner() -> &'static str {
+    CLAIM_OWNER.as_str()
+}
 
 fn db_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("bigecho.sqlite3")
@@ -30,6 +37,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
           created_at TEXT NOT NULL,
           queued_at TEXT,
           claimed_at TEXT,
+          claim_owner TEXT,
           synced_at TEXT
         );
 
@@ -42,6 +50,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "error_kind", "TEXT")?;
     add_column_if_missing(conn, "retryable", "INTEGER")?;
     add_column_if_missing(conn, "claimed_at", "TEXT")?;
+    add_column_if_missing(conn, "claim_owner", "TEXT")?;
     Ok(())
 }
 
@@ -117,7 +126,7 @@ pub fn upsert_new_tasks(app_data_dir: &Path, items: &[ActionItem]) -> Result<(),
     for item in items {
         tx.execute(
             "
-            INSERT OR IGNORE INTO task_sync_queue (
+            INSERT INTO task_sync_queue (
                 id, provider, title, description, due, priority, assignee, context,
                 source_session_id, source_file_path, external_task_id, status, error,
                 error_kind, retryable, created_at, queued_at, synced_at
@@ -125,6 +134,17 @@ pub fn upsert_new_tasks(app_data_dir: &Path, items: &[ActionItem]) -> Result<(),
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, 'new', NULL, NULL, NULL,
                 ?11, NULL, NULL
             )
+            ON CONFLICT(id) DO UPDATE SET
+                provider = excluded.provider,
+                title = excluded.title,
+                description = excluded.description,
+                due = excluded.due,
+                priority = excluded.priority,
+                assignee = excluded.assignee,
+                context = excluded.context,
+                source_session_id = excluded.source_session_id,
+                source_file_path = excluded.source_file_path
+            WHERE task_sync_queue.status IN ('new', 'queued', 'failed', 'skipped')
             ",
             params![
                 item.id,
@@ -193,7 +213,8 @@ pub fn enqueue_tasks(
                 error_kind = NULL,
                 retryable = NULL,
                 queued_at = ?1,
-                claimed_at = NULL
+                claimed_at = NULL,
+                claim_owner = NULL
             WHERE id = ?2
               AND source_session_id = ?3
               AND provider = ?4
@@ -313,10 +334,11 @@ pub fn claim_pending_batch(
                 "
                 UPDATE task_sync_queue
                 SET status = 'syncing',
-                    claimed_at = ?2
+                    claimed_at = ?2,
+                    claim_owner = ?3
                 WHERE id = ?1 AND status = 'queued'
                 ",
-                params![item.id, Local::now().to_rfc3339()],
+                params![item.id, Local::now().to_rfc3339(), current_claim_owner()],
             )
             .map_err(|e| e.to_string())?;
         if updated == 1 {
@@ -340,6 +362,7 @@ pub fn mark_synced(app_data_dir: &Path, id: &str, external_task_id: &str) -> Res
             error_kind = NULL,
             retryable = NULL,
             claimed_at = NULL,
+            claim_owner = NULL,
             synced_at = ?2
         WHERE id = ?3
         ",
@@ -383,7 +406,8 @@ fn mark_failed_inner(
             error = ?1,
             error_kind = ?2,
             retryable = ?3,
-            claimed_at = NULL
+            claimed_at = NULL,
+            claim_owner = NULL
         WHERE id = ?4
         ",
         params![error, kind, if retryable { 1 } else { 0 }, id],
@@ -448,9 +472,7 @@ pub fn prune_unsynced_absent(
 pub fn fail_stale_syncing(
     app_data_dir: &Path,
     session_id: Option<&str>,
-    older_than_seconds: i64,
 ) -> Result<(usize, Vec<String>), String> {
-    let cutoff = (Local::now() - chrono::Duration::seconds(older_than_seconds)).to_rfc3339();
     let mut conn = open(app_data_dir)?;
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -462,7 +484,7 @@ pub fn fail_stale_syncing(
             FROM task_sync_queue
             WHERE status = 'syncing'
               AND source_session_id = ?1
-              AND (claimed_at IS NULL OR claimed_at <= ?2)
+              AND (claim_owner IS NULL OR claim_owner != ?2)
             ORDER BY source_session_id ASC
             "
         }
@@ -471,7 +493,7 @@ pub fn fail_stale_syncing(
             SELECT DISTINCT source_session_id
             FROM task_sync_queue
             WHERE status = 'syncing'
-              AND (claimed_at IS NULL OR claimed_at <= ?1)
+              AND (claim_owner IS NULL OR claim_owner != ?1)
             ORDER BY source_session_id ASC
             "
         }
@@ -481,7 +503,9 @@ pub fn fail_stale_syncing(
     match session_id {
         Some(session_id) => {
             let rows = stmt
-                .query_map(params![session_id, cutoff], |row| row.get::<_, String>(0))
+                .query_map(params![session_id, current_claim_owner()], |row| {
+                    row.get::<_, String>(0)
+                })
                 .map_err(|e| e.to_string())?;
             for row in rows {
                 session_ids.push(row.map_err(|e| e.to_string())?);
@@ -489,7 +513,9 @@ pub fn fail_stale_syncing(
         }
         None => {
             let rows = stmt
-                .query_map(params![cutoff], |row| row.get::<_, String>(0))
+                .query_map(params![current_claim_owner()], |row| {
+                    row.get::<_, String>(0)
+                })
                 .map_err(|e| e.to_string())?;
             for row in rows {
                 session_ids.push(row.map_err(|e| e.to_string())?);
@@ -511,10 +537,11 @@ pub fn fail_stale_syncing(
                 error = 'Sync was interrupted before Todoist returned a result',
                 error_kind = 'sync_interrupted',
                 retryable = 1,
-                claimed_at = NULL
+                claimed_at = NULL,
+                claim_owner = NULL
             WHERE status = 'syncing'
               AND source_session_id = ?1
-              AND (claimed_at IS NULL OR claimed_at <= ?2)
+              AND (claim_owner IS NULL OR claim_owner != ?2)
             "
         }
         None => {
@@ -524,15 +551,16 @@ pub fn fail_stale_syncing(
                 error = 'Sync was interrupted before Todoist returned a result',
                 error_kind = 'sync_interrupted',
                 retryable = 1,
-                claimed_at = NULL
+                claimed_at = NULL,
+                claim_owner = NULL
             WHERE status = 'syncing'
-              AND (claimed_at IS NULL OR claimed_at <= ?1)
+              AND (claim_owner IS NULL OR claim_owner != ?1)
             "
         }
     };
     let updated = match session_id {
-        Some(session_id) => tx.execute(update_sql, params![session_id, cutoff]),
-        None => tx.execute(update_sql, params![cutoff]),
+        Some(session_id) => tx.execute(update_sql, params![session_id, current_claim_owner()]),
+        None => tx.execute(update_sql, params![current_claim_owner()]),
     }
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
@@ -549,7 +577,8 @@ pub fn requeue_failed(app_data_dir: &Path, session_id: &str, provider: &str) -> 
             error_kind = NULL,
             retryable = NULL,
             queued_at = ?1,
-            claimed_at = NULL
+            claimed_at = NULL,
+            claim_owner = NULL
         WHERE source_session_id = ?2 AND provider = ?3 AND status = 'failed'
         ",
         params![Local::now().to_rfc3339(), session_id, provider],
@@ -601,11 +630,35 @@ mod tests {
         upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
         enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()]).expect("enqueue");
         mark_synced(tmp.path(), "id-1", "todoist-task-1").expect("synced");
-        upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("upsert");
+        let mut changed = item("id-1");
+        changed.description = Some("Changed after sync".to_string());
+        upsert_new_tasks(tmp.path(), &[changed]).expect("upsert");
 
         let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("list");
         assert_eq!(rows[0].status, TaskSyncStatus::Synced);
         assert_eq!(rows[0].external_task_id.as_deref(), Some("todoist-task-1"));
+        assert_eq!(rows[0].description.as_deref(), Some("Desc"));
+    }
+
+    #[test]
+    fn upsert_updates_unsynced_payload_fields_for_existing_ids() {
+        let tmp = tempdir().expect("tempdir");
+        upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+
+        let mut updated = item("id-1");
+        updated.description = Some("Updated desc".to_string());
+        updated.priority = Some(4);
+        updated.context = Some("Updated context".to_string());
+        updated.source_file_path = "/tmp/session/new-summary.md".to_string();
+        upsert_new_tasks(tmp.path(), &[updated]).expect("upsert updated");
+
+        let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("list");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].description.as_deref(), Some("Updated desc"));
+        assert_eq!(rows[0].priority, Some(4));
+        assert_eq!(rows[0].context.as_deref(), Some("Updated context"));
+        assert_eq!(rows[0].source_file_path, "/tmp/session/new-summary.md");
+        assert_eq!(rows[0].status, TaskSyncStatus::New);
     }
 
     #[test]
@@ -672,13 +725,13 @@ mod tests {
         let old_claim = (Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
         let conn = open(tmp.path()).expect("open db");
         conn.execute(
-            "UPDATE task_sync_queue SET claimed_at = ?1 WHERE id = 'id-1'",
+            "UPDATE task_sync_queue SET claimed_at = ?1, claim_owner = 'previous-owner' WHERE id = 'id-1'",
             params![old_claim],
         )
         .expect("age claim");
 
         let (updated, session_ids) =
-            fail_stale_syncing(tmp.path(), Some("session-1"), 15 * 60).expect("fail stale");
+            fail_stale_syncing(tmp.path(), Some("session-1")).expect("fail stale");
 
         assert_eq!(updated, 1);
         assert_eq!(session_ids, vec!["session-1"]);
@@ -696,8 +749,16 @@ mod tests {
             .expect("enqueue");
         claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
 
+        let old_claim = (Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
+        let conn = open(tmp.path()).expect("open db");
+        conn.execute(
+            "UPDATE task_sync_queue SET claimed_at = ?1 WHERE id = 'id-1'",
+            params![old_claim],
+        )
+        .expect("age current owner claim");
+
         let (updated, session_ids) =
-            fail_stale_syncing(tmp.path(), Some("session-1"), 15 * 60).expect("fail stale");
+            fail_stale_syncing(tmp.path(), Some("session-1")).expect("fail stale");
 
         assert_eq!(updated, 0);
         assert!(session_ids.is_empty());

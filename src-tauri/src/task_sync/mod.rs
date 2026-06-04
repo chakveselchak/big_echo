@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const TODOIST_PROVIDER: TaskProvider = TaskProvider::Todoist;
-const STALE_SYNCING_SECONDS: i64 = 15 * 60;
 
 fn session_dir_for(app_data_dir: &Path, session_id: &str) -> Result<PathBuf, String> {
     get_session_dir(app_data_dir, session_id)?
@@ -114,7 +113,7 @@ pub fn preview_todoist_tasks_for_session(
     );
 
     let current_ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
-    queue::fail_stale_syncing(app_data_dir, Some(session_id), STALE_SYNCING_SECONDS)?;
+    queue::fail_stale_syncing(app_data_dir, Some(session_id))?;
     queue::prune_unsynced_absent(
         app_data_dir,
         session_id,
@@ -527,7 +526,7 @@ mod tests {
         let old_claim = (chrono::Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
         let conn = Connection::open(app_data_dir.join("bigecho.sqlite3")).expect("open db");
         conn.execute(
-            "UPDATE task_sync_queue SET claimed_at = ?1 WHERE id = ?2",
+            "UPDATE task_sync_queue SET claimed_at = ?1, claim_owner = 'previous-owner' WHERE id = ?2",
             params![old_claim, remove_interrupted],
         )
         .expect("age claim");

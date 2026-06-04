@@ -4,8 +4,6 @@ use serde::Serialize;
 use std::future::Future;
 use std::path::Path;
 
-const STALE_SYNCING_SECONDS: i64 = 15 * 60;
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSyncResult {
@@ -35,7 +33,7 @@ where
     Fut: Future<Output = Result<String, TaskSyncError>>,
 {
     let (recovered_failed, recovered_session_ids) =
-        queue::fail_stale_syncing(app_data_dir, session_id, STALE_SYNCING_SECONDS)?;
+        queue::fail_stale_syncing(app_data_dir, session_id)?;
     let batch = queue::claim_pending_batch(app_data_dir, session_id, 50)?;
     let mut result = TaskSyncResult {
         synced: 0,
@@ -224,7 +222,7 @@ mod tests {
         let old_claim = (chrono::Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
         let conn = Connection::open(tmp.path().join("bigecho.sqlite3")).expect("open db");
         conn.execute(
-            "UPDATE task_sync_queue SET claimed_at = ?1 WHERE id = 'id-1'",
+            "UPDATE task_sync_queue SET claimed_at = ?1, claim_owner = 'previous-owner' WHERE id = 'id-1'",
             params![old_claim],
         )
         .expect("age claim");
