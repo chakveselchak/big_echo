@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
+import { useTodoistSync } from "../../hooks/useTodoistSync";
 import { useYandexSync } from "../../hooks/useYandexSync";
 import type { PublicSettings, SettingsTab } from "../../types";
 import { tauriInvoke } from "../../lib/tauri";
@@ -8,6 +9,7 @@ import { getErrorMessage } from "../../lib/appUtils";
 import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
+import { TodoistSyncSettings } from "../../components/settings/TodoistSyncSettings";
 import { YandexSyncSettings } from "../../components/settings/YandexSyncSettings";
 import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
 
@@ -63,6 +65,7 @@ export function SettingsPage() {
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
 
   const yandexSync = useYandexSync(settingsTab === "yandex");
+  const todoistSync = useTodoistSync(settingsTab === "todoist");
 
   if (!settings) {
     return (
@@ -110,7 +113,7 @@ export function SettingsPage() {
       isDirty("yandex_sync_enabled") ||
       isDirty("yandex_sync_interval") ||
       isDirty("yandex_sync_remote_folder"),
-    todoist: false,
+    todoist: isDirty("todoist_sync_enabled") || isDirty("todoist_auto_add"),
   };
 
   const dirtyDot = (
@@ -208,6 +211,22 @@ export function SettingsPage() {
           setSettings={setSettings}
           isDirty={isDirty}
           yandexSync={yandexSync}
+        />
+      ),
+    },
+    {
+      key: "todoist" as SettingsTab,
+      label: (
+        <>
+          Todoist sync{dirtyByTab.todoist && dirtyDot}
+        </>
+      ),
+      children: (
+        <TodoistSyncSettings
+          settings={settings}
+          setSettings={setSettings}
+          isDirty={isDirty}
+          todoistSync={todoistSync}
         />
       ),
     },

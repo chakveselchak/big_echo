@@ -19,6 +19,7 @@ const { invokeMock } = vi.hoisted(() => ({
         salute_speech_language: "ru-RU",
         salute_speech_sample_rate: 48000,
         salute_speech_channels_count: 1,
+        apple_speech_locale: "en-US",
         summary_url: "",
         summary_prompt: "",
         openai_model: "gpt-4.1-mini",
@@ -34,6 +35,8 @@ const { invokeMock } = vi.hoisted(() => ({
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
         show_minitray_overlay: false,
+        todoist_sync_enabled: false,
+        todoist_auto_add: false,
       };
     }
     if (cmd === "detect_system_source_device") {
@@ -68,6 +71,9 @@ const { invokeMock } = vi.hoisted(() => ({
         failed: 0,
         errors: [],
       });
+    if (cmd === "todoist_sync_has_token") return Promise.resolve(false);
+    if (cmd === "todoist_sync_set_token") return Promise.resolve();
+    if (cmd === "todoist_sync_clear_token") return Promise.resolve();
     return null;
   }),
 }));
@@ -139,6 +145,7 @@ function mockSettings() {
     salute_speech_language: "ru-RU",
     salute_speech_sample_rate: 48000,
     salute_speech_channels_count: 1,
+    apple_speech_locale: "en-US",
     summary_url: "",
     summary_prompt: "",
     openai_model: "gpt-4.1-mini",
@@ -154,6 +161,8 @@ function mockSettings() {
     yandex_sync_interval: "24h",
     yandex_sync_remote_folder: "BigEcho",
     show_minitray_overlay: false,
+    todoist_sync_enabled: false,
+    todoist_auto_add: false,
   };
 }
 
@@ -668,6 +677,22 @@ describe("App settings window", () => {
     const tab = await screen.findByRole("tab", { name: /Sync Yandex.Disk/i });
     fireEvent.click(tab);
     await screen.findByText(/Enable Yandex\.Disk sync/i);
+  });
+
+  test("renders the Todoist sync tab and saves a token", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const tab = await screen.findByRole("tab", { name: /Todoist sync/i });
+    await user.click(tab);
+    await user.type(screen.getByLabelText(/API token/i), "todoist-secret");
+    await user.click(screen.getByRole("button", { name: /Save token/i }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("todoist_sync_set_token", {
+        token: "todoist-secret",
+      });
+    });
   });
 
   test("shows Sync now next to Save settings only on Yandex tab, disabled without token", async () => {
