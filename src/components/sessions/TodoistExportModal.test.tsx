@@ -17,7 +17,7 @@ function preview(): TodoistTaskPreview {
         description: null,
         due: "2026-06-05",
         priority: 3,
-        assignee: null,
+        assignee: "Андрей",
         context: "Context",
         sourceSessionId: "session-1",
         sourceFilePath: "/tmp/session/summary.md",
@@ -80,6 +80,25 @@ describe("TodoistExportModal", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add all" }));
 
     expect(onAddSelected).toHaveBeenCalledWith(["id-1"]);
+  });
+
+  it("shows due and assignee without internal status, priority, or source path", () => {
+    render(
+      <TodoistExportModal
+        preview={preview()}
+        open
+        syncing={false}
+        onCancel={vi.fn()}
+        onAddSelected={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Task one")).toBeInTheDocument();
+    expect(screen.getByText("Due: 2026-06-05")).toBeInTheDocument();
+    expect(screen.getByText("Ответственный: Андрей")).toBeInTheDocument();
+    expect(screen.queryByText("new")).not.toBeInTheDocument();
+    expect(screen.queryByText("p3")).not.toBeInTheDocument();
+    expect(screen.queryByText("/tmp/session/summary.md")).not.toBeInTheDocument();
   });
 
   it("resets selected tasks when preview changes", async () => {

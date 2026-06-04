@@ -112,18 +112,17 @@ export function TodoistExportModal({
                   title={
                     <Space size={8} wrap>
                       <Typography.Text strong>{item.title}</Typography.Text>
-                      <Tag color={statusColor(item.status)}>{item.status}</Tag>
-                      {item.due ? <Tag>{item.due}</Tag> : null}
-                      {item.priority ? <Tag>p{item.priority}</Tag> : null}
+                      {item.status !== "new" ? <Tag color={statusColor(item.status)}>{item.status}</Tag> : null}
                     </Space>
                   }
                   description={
                     <Space direction="vertical" size={2} style={{ width: "100%" }}>
+                      {item.due ? <Typography.Text type="secondary">Due: {item.due}</Typography.Text> : null}
+                      {item.assignee ? (
+                        <Typography.Text type="secondary">Ответственный: {item.assignee}</Typography.Text>
+                      ) : null}
                       {item.context ? <Typography.Text>{item.context}</Typography.Text> : null}
                       {item.error ? <Typography.Text type="danger">{item.error}</Typography.Text> : null}
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        {item.sourceFilePath}
-                      </Typography.Text>
                     </Space>
                   }
                 />
