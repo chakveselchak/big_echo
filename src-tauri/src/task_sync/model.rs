@@ -70,6 +70,8 @@ pub struct ActionItem {
     pub status: TaskSyncStatus,
     pub external_task_id: Option<String>,
     pub error: Option<String>,
+    pub error_kind: Option<String>,
+    pub retryable: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +82,19 @@ pub enum TaskSyncErrorKind {
     Server,
     BadRequest,
     Network,
+}
+
+impl TaskSyncErrorKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TaskSyncErrorKind::MissingToken => "missing_token",
+            TaskSyncErrorKind::InvalidToken => "invalid_token",
+            TaskSyncErrorKind::RateLimit => "rate_limit",
+            TaskSyncErrorKind::Server => "server",
+            TaskSyncErrorKind::BadRequest => "bad_request",
+            TaskSyncErrorKind::Network => "network",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

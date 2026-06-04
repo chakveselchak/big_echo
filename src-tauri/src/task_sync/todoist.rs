@@ -35,6 +35,16 @@ pub fn map_status_error(status: u16, body: &str) -> TaskSyncError {
             "Todoist token is invalid",
             false,
         ),
+        403 => TaskSyncError::new(
+            TaskSyncErrorKind::InvalidToken,
+            format!("Todoist access forbidden: {body}"),
+            false,
+        ),
+        404 => TaskSyncError::new(
+            TaskSyncErrorKind::BadRequest,
+            format!("Todoist resource not found: {body}"),
+            false,
+        ),
         429 => TaskSyncError::new(
             TaskSyncErrorKind::RateLimit,
             "Todoist rate limit reached",
@@ -103,6 +113,8 @@ mod tests {
             status: TaskSyncStatus::Queued,
             external_task_id: None,
             error: None,
+            error_kind: None,
+            retryable: None,
         }
     }
 
@@ -116,6 +128,9 @@ mod tests {
         assert_eq!(json["due_date"], "2026-06-05");
         assert_eq!(json["priority"], 3);
         assert!(json.get("project_id").is_none());
+        assert!(json.get("assignee").is_none());
+        assert!(json.get("assignee_id").is_none());
+        assert!(json.get("context").is_none());
     }
 
     #[test]
@@ -136,5 +151,13 @@ mod tests {
             map_status_error(400, "bad data").kind,
             TaskSyncErrorKind::BadRequest
         );
+
+        let forbidden = map_status_error(403, "forbidden");
+        assert_eq!(forbidden.kind, TaskSyncErrorKind::InvalidToken);
+        assert!(!forbidden.retryable);
+
+        let not_found = map_status_error(404, "missing");
+        assert_eq!(not_found.kind, TaskSyncErrorKind::BadRequest);
+        assert!(!not_found.retryable);
     }
 }

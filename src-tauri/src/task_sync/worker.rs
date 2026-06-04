@@ -44,7 +44,13 @@ where
                 result.synced += 1;
             }
             Err(err) => {
-                queue::mark_failed(app_data_dir, &item.id, &err.message, err.retryable)?;
+                queue::mark_failed_with_kind(
+                    app_data_dir,
+                    &item.id,
+                    &err.message,
+                    err.kind.as_str(),
+                    err.retryable,
+                )?;
                 result.failed += 1;
             }
         }
@@ -77,6 +83,8 @@ mod tests {
             status: TaskSyncStatus::New,
             external_task_id: None,
             error: None,
+            error_kind: None,
+            retryable: None,
         }
     }
 
@@ -120,5 +128,7 @@ mod tests {
         let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Failed);
         assert_eq!(rows[0].error.as_deref(), Some("rate limited"));
+        assert_eq!(rows[0].error_kind.as_deref(), Some("rate_limit"));
+        assert_eq!(rows[0].retryable, Some(true));
     }
 }

@@ -97,6 +97,8 @@ pub fn normalize_one(
         status: TaskSyncStatus::New,
         external_task_id: None,
         error: None,
+        error_kind: None,
+        retryable: None,
     })
 }
 

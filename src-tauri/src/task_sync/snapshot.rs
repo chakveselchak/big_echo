@@ -55,6 +55,8 @@ mod tests {
             status: TaskSyncStatus::Queued,
             external_task_id: None,
             error: None,
+            error_kind: None,
+            retryable: None,
         };
 
         write_snapshot(&path, "session-1", "todoist", &[item]).expect("write snapshot");

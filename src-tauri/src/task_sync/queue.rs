@@ -24,6 +24,8 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
           external_task_id TEXT,
           status TEXT NOT NULL,
           error TEXT,
+          error_kind TEXT,
+          retryable INTEGER,
           created_at TEXT NOT NULL,
           queued_at TEXT,
           synced_at TEXT
@@ -33,7 +35,38 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
         ON task_sync_queue(source_session_id, provider);
         ",
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    add_column_if_missing(conn, "error_kind", "TEXT")?;
+    add_column_if_missing(conn, "retryable", "INTEGER")?;
+    Ok(())
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| e.to_string())?;
+
+    for row in rows {
+        if row.map_err(|e| e.to_string())? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> Result<(), String> {
+    if !table_has_column(conn, "task_sync_queue", column)? {
+        conn.execute(
+            &format!("ALTER TABLE task_sync_queue ADD COLUMN {column} {definition}"),
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn open(app_data_dir: &Path) -> Result<Connection, String> {
@@ -54,6 +87,7 @@ fn status_from_str(value: &str) -> TaskSyncStatus {
 
 fn row_to_action_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActionItem> {
     let status: String = row.get(10)?;
+    let retryable: Option<i64> = row.get(14)?;
     Ok(ActionItem {
         id: row.get(0)?,
         provider: row.get(1)?,
@@ -68,6 +102,8 @@ fn row_to_action_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActionItem> {
         status: status_from_str(&status),
         external_task_id: row.get(11)?,
         error: row.get(12)?,
+        error_kind: row.get(13)?,
+        retryable: retryable.map(|value| value != 0),
     })
 }
 
@@ -80,9 +116,10 @@ pub fn upsert_new_tasks(app_data_dir: &Path, items: &[ActionItem]) -> Result<(),
             INSERT OR IGNORE INTO task_sync_queue (
                 id, provider, title, description, due, priority, assignee, context,
                 source_session_id, source_file_path, external_task_id, status, error,
-                created_at, queued_at, synced_at
+                error_kind, retryable, created_at, queued_at, synced_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, 'new', NULL, ?11, NULL, NULL
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, 'new', NULL, NULL, NULL,
+                ?11, NULL, NULL
             )
             ",
             params![
@@ -115,7 +152,8 @@ pub fn list_by_session(
             "
             SELECT
                 id, provider, title, description, due, priority, assignee, context,
-                source_session_id, source_file_path, status, external_task_id, error
+                source_session_id, source_file_path, status, external_task_id, error,
+                error_kind, retryable
             FROM task_sync_queue
             WHERE source_session_id = ?1 AND provider = ?2
             ORDER BY created_at ASC, id ASC
@@ -146,7 +184,11 @@ pub fn enqueue_tasks(
         tx.execute(
             "
             UPDATE task_sync_queue
-            SET status = 'queued', error = NULL, queued_at = ?1
+            SET status = 'queued',
+                error = NULL,
+                error_kind = NULL,
+                retryable = NULL,
+                queued_at = ?1
             WHERE id = ?2
               AND source_session_id = ?3
               AND provider = ?4
@@ -170,7 +212,8 @@ pub fn next_pending_batch(
             "
             SELECT
                 id, provider, title, description, due, priority, assignee, context,
-                source_session_id, source_file_path, status, external_task_id, error
+                source_session_id, source_file_path, status, external_task_id, error,
+                error_kind, retryable
             FROM task_sync_queue
             WHERE status = 'queued' AND source_session_id = ?1
             ORDER BY queued_at ASC, created_at ASC, id ASC
@@ -181,7 +224,8 @@ pub fn next_pending_batch(
             "
             SELECT
                 id, provider, title, description, due, priority, assignee, context,
-                source_session_id, source_file_path, status, external_task_id, error
+                source_session_id, source_file_path, status, external_task_id, error,
+                error_kind, retryable
             FROM task_sync_queue
             WHERE status = 'queued'
             ORDER BY queued_at ASC, created_at ASC, id ASC
@@ -214,6 +258,8 @@ pub fn mark_synced(app_data_dir: &Path, id: &str, external_task_id: &str) -> Res
         SET status = 'synced',
             external_task_id = ?1,
             error = NULL,
+            error_kind = NULL,
+            retryable = NULL,
             synced_at = ?2
         WHERE id = ?3
         ",
@@ -227,16 +273,36 @@ pub fn mark_failed(
     app_data_dir: &Path,
     id: &str,
     error: &str,
-    _retryable: bool,
+    retryable: bool,
+) -> Result<(), String> {
+    mark_failed_inner(app_data_dir, id, error, None, retryable)
+}
+
+pub fn mark_failed_with_kind(
+    app_data_dir: &Path,
+    id: &str,
+    error: &str,
+    kind: &str,
+    retryable: bool,
+) -> Result<(), String> {
+    mark_failed_inner(app_data_dir, id, error, Some(kind), retryable)
+}
+
+fn mark_failed_inner(
+    app_data_dir: &Path,
+    id: &str,
+    error: &str,
+    kind: Option<&str>,
+    retryable: bool,
 ) -> Result<(), String> {
     let conn = open(app_data_dir)?;
     conn.execute(
         "
         UPDATE task_sync_queue
-        SET status = 'failed', error = ?1
-        WHERE id = ?2
+        SET status = 'failed', error = ?1, error_kind = ?2, retryable = ?3
+        WHERE id = ?4
         ",
-        params![error, id],
+        params![error, kind, if retryable { 1 } else { 0 }, id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -247,7 +313,11 @@ pub fn requeue_failed(app_data_dir: &Path, session_id: &str, provider: &str) -> 
     conn.execute(
         "
         UPDATE task_sync_queue
-        SET status = 'queued', error = NULL, queued_at = ?1
+        SET status = 'queued',
+            error = NULL,
+            error_kind = NULL,
+            retryable = NULL,
+            queued_at = ?1
         WHERE source_session_id = ?2 AND provider = ?3 AND status = 'failed'
         ",
         params![Local::now().to_rfc3339(), session_id, provider],
@@ -277,6 +347,8 @@ mod tests {
             status: TaskSyncStatus::New,
             external_task_id: None,
             error: None,
+            error_kind: None,
+            retryable: None,
         }
     }
 
@@ -315,5 +387,21 @@ mod tests {
         assert_eq!(batch.len(), 1);
         assert_eq!(batch[0].status, TaskSyncStatus::Queued);
         assert_eq!(batch[0].error, None);
+        assert_eq!(batch[0].error_kind, None);
+        assert_eq!(batch[0].retryable, None);
+    }
+
+    #[test]
+    fn failed_rows_persist_structured_error_metadata() {
+        let tmp = tempdir().expect("tempdir");
+        upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        mark_failed_with_kind(tmp.path(), "id-1", "rate limited", "rate_limit", true)
+            .expect("failed");
+
+        let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("list");
+        assert_eq!(rows[0].status, TaskSyncStatus::Failed);
+        assert_eq!(rows[0].error.as_deref(), Some("rate limited"));
+        assert_eq!(rows[0].error_kind.as_deref(), Some("rate_limit"));
+        assert_eq!(rows[0].retryable, Some(true));
     }
 }
