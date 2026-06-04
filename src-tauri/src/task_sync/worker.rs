@@ -3,6 +3,11 @@ use crate::task_sync::{queue, todoist};
 use serde::Serialize;
 use std::future::Future;
 use std::path::Path;
+use std::time::Duration;
+use tokio::time;
+
+const STALE_SYNCING_SECONDS: i64 = 15 * 60;
+const CLAIM_RENEW_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +38,7 @@ where
     Fut: Future<Output = Result<String, TaskSyncError>>,
 {
     let (recovered_failed, recovered_session_ids) =
-        queue::fail_stale_syncing(app_data_dir, session_id)?;
+        queue::fail_stale_syncing(app_data_dir, session_id, STALE_SYNCING_SECONDS)?;
     let batch = queue::claim_pending_batch(app_data_dir, session_id, 50)?;
     let mut result = TaskSyncResult {
         synced: 0,
@@ -41,29 +46,61 @@ where
         session_ids: recovered_session_ids,
     };
 
-    for item in batch {
+    for claimed in batch {
+        let item = claimed.item;
         if !result.session_ids.contains(&item.source_session_id) {
             result.session_ids.push(item.source_session_id.clone());
         }
-        match create(item.clone()).await {
+        match run_with_claim_renewal(app_data_dir, &item.id, &claimed.claim_token, create(item.clone()))
+            .await
+        {
             Ok(external_id) => {
-                queue::mark_synced(app_data_dir, &item.id, &external_id)?;
-                result.synced += 1;
-            }
-            Err(err) => {
-                queue::mark_failed_with_kind(
+                if queue::mark_synced_claimed(
                     app_data_dir,
                     &item.id,
+                    &claimed.claim_token,
+                    &external_id,
+                )? {
+                    result.synced += 1;
+                }
+            }
+            Err(err) => {
+                if queue::mark_failed_with_kind_claimed(
+                    app_data_dir,
+                    &item.id,
+                    &claimed.claim_token,
                     &err.message,
                     err.kind.as_str(),
                     err.retryable,
-                )?;
-                result.failed += 1;
+                )? {
+                    result.failed += 1;
+                }
             }
         }
     }
 
     Ok(result)
+}
+
+async fn run_with_claim_renewal<Fut>(
+    app_data_dir: &Path,
+    task_id: &str,
+    claim_token: &str,
+    create: Fut,
+) -> Result<String, TaskSyncError>
+where
+    Fut: Future<Output = Result<String, TaskSyncError>>,
+{
+    tokio::pin!(create);
+
+    loop {
+        match time::timeout(Duration::from_secs(CLAIM_RENEW_SECONDS), &mut create).await {
+            Ok(result) => return result,
+            Err(_) => {
+                let _ = queue::renew_claim(app_data_dir, task_id, claim_token);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

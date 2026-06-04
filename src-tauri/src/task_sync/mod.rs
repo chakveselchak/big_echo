@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const TODOIST_PROVIDER: TaskProvider = TaskProvider::Todoist;
+const STALE_SYNCING_SECONDS: i64 = 15 * 60;
 
 fn session_dir_for(app_data_dir: &Path, session_id: &str) -> Result<PathBuf, String> {
     get_session_dir(app_data_dir, session_id)?
@@ -113,7 +114,7 @@ pub fn preview_todoist_tasks_for_session(
     );
 
     let current_ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
-    queue::fail_stale_syncing(app_data_dir, Some(session_id))?;
+    queue::fail_stale_syncing(app_data_dir, Some(session_id), STALE_SYNCING_SECONDS)?;
     queue::prune_unsynced_absent(
         app_data_dir,
         session_id,
