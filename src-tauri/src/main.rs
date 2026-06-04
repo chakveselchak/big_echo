@@ -8,7 +8,6 @@ mod pipeline;
 mod services;
 mod settings;
 mod storage;
-#[allow(dead_code)]
 mod task_sync;
 mod text_editors;
 mod tray_manager;
@@ -39,6 +38,11 @@ use commands::settings::{
     get_settings, list_audio_input_devices, list_text_editor_apps,
     open_macos_system_audio_settings, open_settings_window, open_tray_window, pick_recording_root,
     save_public_settings,
+};
+use commands::task_sync::{
+    enqueue_todoist_tasks, get_todoist_sync_status, preview_todoist_tasks,
+    sync_todoist_tasks, todoist_sync_clear_token, todoist_sync_has_token,
+    todoist_sync_set_token,
 };
 use commands::updates::{check_for_update, open_external_url};
 use commands::yandex_sync::{
@@ -582,6 +586,13 @@ fn main() {
             yandex_sync_has_token,
             yandex_sync_status,
             yandex_sync_now,
+            todoist_sync_set_token,
+            todoist_sync_clear_token,
+            todoist_sync_has_token,
+            preview_todoist_tasks,
+            enqueue_todoist_tasks,
+            sync_todoist_tasks,
+            get_todoist_sync_status,
             get_nexara_balance,
             get_apple_speech_availability,
             apple_speech_check_locale,
@@ -779,7 +790,14 @@ mod ipc_runtime_tests {
                 yandex_sync_clear_token,
                 yandex_sync_has_token,
                 yandex_sync_status,
-                yandex_sync_now
+                yandex_sync_now,
+                todoist_sync_set_token,
+                todoist_sync_clear_token,
+                todoist_sync_has_token,
+                preview_todoist_tasks,
+                enqueue_todoist_tasks,
+                sync_todoist_tasks,
+                get_todoist_sync_status
             ])
             .build(ctx)
             .expect("failed to build test app");
@@ -1833,6 +1851,71 @@ mod ipc_runtime_tests {
         let response = get_ipc_response(
             &webview,
             invoke_request("yandex_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token must succeed");
+        let value = extract_ok_json(response);
+        assert_eq!(value, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn invoke_todoist_sync_token_commands_round_trip() {
+        let (app, app_data_dir) = build_test_app();
+        let previous = crate::settings::secret_store::get_secret(
+            &app_data_dir,
+            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+        )
+        .ok();
+        struct RestoreTodoistToken {
+            app_data_dir: std::path::PathBuf,
+            previous: Option<String>,
+        }
+        impl Drop for RestoreTodoistToken {
+            fn drop(&mut self) {
+                match self.previous.as_deref() {
+                    Some(value) => {
+                        let _ = crate::settings::secret_store::set_secret(
+                            &self.app_data_dir,
+                            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+                            value,
+                        );
+                    }
+                    None => {
+                        let _ = crate::settings::secret_store::clear_secret(
+                            &self.app_data_dir,
+                            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+                        );
+                    }
+                }
+            }
+        }
+        let _restore = RestoreTodoistToken {
+            app_data_dir: app_data_dir.clone(),
+            previous,
+        };
+        crate::settings::secret_store::clear_secret(
+            &app_data_dir,
+            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+        )
+        .expect("clear todoist token");
+
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let unset = get_ipc_response(
+            &webview,
+            invoke_request("todoist_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token must succeed");
+        assert_eq!(extract_ok_json(unset), serde_json::Value::Bool(false));
+
+        let set = get_ipc_response(
+            &webview,
+            invoke_request("todoist_sync_set_token", serde_json::json!({ "token": "abc" })),
+        );
+        assert!(set.is_ok());
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("todoist_sync_has_token", serde_json::json!({})),
         )
         .expect("has_token must succeed");
         let value = extract_ok_json(response);

@@ -74,6 +74,15 @@ pub struct ActionItem {
     pub retryable: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoistTaskPreview {
+    pub session_id: String,
+    pub summary_path: String,
+    pub warnings: Vec<String>,
+    pub items: Vec<ActionItem>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskSyncErrorKind {
     MissingToken,
