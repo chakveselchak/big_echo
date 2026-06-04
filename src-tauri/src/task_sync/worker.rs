@@ -4,6 +4,8 @@ use serde::Serialize;
 use std::future::Future;
 use std::path::Path;
 
+const STALE_SYNCING_SECONDS: i64 = 15 * 60;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSyncResult {
@@ -32,6 +34,7 @@ where
     F: Fn(ActionItem) -> Fut,
     Fut: Future<Output = Result<String, TaskSyncError>>,
 {
+    queue::fail_stale_syncing(app_data_dir, session_id, STALE_SYNCING_SECONDS)?;
     let batch = queue::claim_pending_batch(app_data_dir, session_id, 50)?;
     let mut result = TaskSyncResult {
         synced: 0,

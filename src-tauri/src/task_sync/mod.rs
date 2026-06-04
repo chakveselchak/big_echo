@@ -71,7 +71,7 @@ fn refresh_snapshots_for_sessions(
             continue;
         }
         let items = queue::list_by_session(app_data_dir, session_id, TODOIST_PROVIDER.as_str())?;
-        refresh_snapshot_for_session(app_data_dir, session_id, &items)?;
+        refresh_snapshot_for_session_if_available(app_data_dir, session_id, &items)?;
         refreshed.push(session_id.clone());
     }
     Ok(())
@@ -299,6 +299,39 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&raw).expect("json");
         assert_eq!(json["items"][0]["status"], "synced");
         assert_eq!(json["items"][0]["externalTaskId"], "todoist-task-1");
+    }
+
+    #[test]
+    fn refresh_snapshots_for_sessions_tolerates_missing_session_metadata() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        std::fs::create_dir_all(&app_data_dir).expect("app data dir");
+
+        queue::upsert_new_tasks(
+            &app_data_dir,
+            &[ActionItem {
+                id: "task-1".to_string(),
+                provider: TODOIST_PROVIDER.as_str().to_string(),
+                title: "Already synced".to_string(),
+                description: None,
+                due: None,
+                priority: None,
+                assignee: None,
+                context: None,
+                source_session_id: "missing-session".to_string(),
+                source_file_path: "/tmp/missing/summary.md".to_string(),
+                status: TaskSyncStatus::New,
+                external_task_id: None,
+                error: None,
+                error_kind: None,
+                retryable: None,
+            }],
+        )
+        .expect("upsert task");
+        queue::mark_synced(&app_data_dir, "task-1", "todoist-task-1").expect("mark synced");
+
+        refresh_snapshots_for_sessions(&app_data_dir, &["missing-session".to_string()])
+            .expect("missing session metadata should not fail refresh");
     }
 
     #[test]

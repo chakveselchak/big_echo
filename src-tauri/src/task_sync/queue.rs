@@ -29,6 +29,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
           retryable INTEGER,
           created_at TEXT NOT NULL,
           queued_at TEXT,
+          claimed_at TEXT,
           synced_at TEXT
         );
 
@@ -40,6 +41,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
 
     add_column_if_missing(conn, "error_kind", "TEXT")?;
     add_column_if_missing(conn, "retryable", "INTEGER")?;
+    add_column_if_missing(conn, "claimed_at", "TEXT")?;
     Ok(())
 }
 
@@ -190,7 +192,8 @@ pub fn enqueue_tasks(
                 error = NULL,
                 error_kind = NULL,
                 retryable = NULL,
-                queued_at = ?1
+                queued_at = ?1,
+                claimed_at = NULL
             WHERE id = ?2
               AND source_session_id = ?3
               AND provider = ?4
@@ -309,10 +312,11 @@ pub fn claim_pending_batch(
             .execute(
                 "
                 UPDATE task_sync_queue
-                SET status = 'syncing'
+                SET status = 'syncing',
+                    claimed_at = ?2
                 WHERE id = ?1 AND status = 'queued'
                 ",
-                params![item.id],
+                params![item.id, Local::now().to_rfc3339()],
             )
             .map_err(|e| e.to_string())?;
         if updated == 1 {
@@ -335,6 +339,7 @@ pub fn mark_synced(app_data_dir: &Path, id: &str, external_task_id: &str) -> Res
             error = NULL,
             error_kind = NULL,
             retryable = NULL,
+            claimed_at = NULL,
             synced_at = ?2
         WHERE id = ?3
         ",
@@ -374,7 +379,11 @@ fn mark_failed_inner(
     conn.execute(
         "
         UPDATE task_sync_queue
-        SET status = 'failed', error = ?1, error_kind = ?2, retryable = ?3
+        SET status = 'failed',
+            error = ?1,
+            error_kind = ?2,
+            retryable = ?3,
+            claimed_at = NULL
         WHERE id = ?4
         ",
         params![error, kind, if retryable { 1 } else { 0 }, id],
@@ -436,6 +445,48 @@ pub fn prune_unsynced_absent(
     tx.commit().map_err(|e| e.to_string())
 }
 
+pub fn fail_stale_syncing(
+    app_data_dir: &Path,
+    session_id: Option<&str>,
+    older_than_seconds: i64,
+) -> Result<usize, String> {
+    let cutoff = (Local::now() - chrono::Duration::seconds(older_than_seconds)).to_rfc3339();
+    let conn = open(app_data_dir)?;
+    let sql = match session_id {
+        Some(_) => {
+            "
+            UPDATE task_sync_queue
+            SET status = 'failed',
+                error = 'Sync was interrupted before Todoist returned a result',
+                error_kind = 'sync_interrupted',
+                retryable = 1,
+                claimed_at = NULL
+            WHERE status = 'syncing'
+              AND source_session_id = ?1
+              AND (claimed_at IS NULL OR claimed_at <= ?2)
+            "
+        }
+        None => {
+            "
+            UPDATE task_sync_queue
+            SET status = 'failed',
+                error = 'Sync was interrupted before Todoist returned a result',
+                error_kind = 'sync_interrupted',
+                retryable = 1,
+                claimed_at = NULL
+            WHERE status = 'syncing'
+              AND (claimed_at IS NULL OR claimed_at <= ?1)
+            "
+        }
+    };
+    let updated = match session_id {
+        Some(session_id) => conn.execute(sql, params![session_id, cutoff]),
+        None => conn.execute(sql, params![cutoff]),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(updated)
+}
+
 pub fn requeue_failed(app_data_dir: &Path, session_id: &str, provider: &str) -> Result<(), String> {
     let conn = open(app_data_dir)?;
     conn.execute(
@@ -445,7 +496,8 @@ pub fn requeue_failed(app_data_dir: &Path, session_id: &str, provider: &str) -> 
             error = NULL,
             error_kind = NULL,
             retryable = NULL,
-            queued_at = ?1
+            queued_at = ?1,
+            claimed_at = NULL
         WHERE source_session_id = ?2 AND provider = ?3 AND status = 'failed'
         ",
         params![Local::now().to_rfc3339(), session_id, provider],
@@ -555,5 +607,47 @@ mod tests {
         assert_ne!(first[0].id, second[0].id);
         assert_eq!(first[0].status, TaskSyncStatus::Syncing);
         assert_eq!(second[0].status, TaskSyncStatus::Syncing);
+    }
+
+    #[test]
+    fn stale_syncing_rows_become_retryable_failures() {
+        let tmp = tempdir().expect("tempdir");
+        upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+        claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
+
+        let old_claim = (Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
+        let conn = open(tmp.path()).expect("open db");
+        conn.execute(
+            "UPDATE task_sync_queue SET claimed_at = ?1 WHERE id = 'id-1'",
+            params![old_claim],
+        )
+        .expect("age claim");
+
+        let updated =
+            fail_stale_syncing(tmp.path(), Some("session-1"), 15 * 60).expect("fail stale");
+
+        assert_eq!(updated, 1);
+        let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Failed);
+        assert_eq!(rows[0].error_kind.as_deref(), Some("sync_interrupted"));
+        assert_eq!(rows[0].retryable, Some(true));
+    }
+
+    #[test]
+    fn fresh_syncing_rows_are_not_failed() {
+        let tmp = tempdir().expect("tempdir");
+        upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+        claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
+
+        let updated =
+            fail_stale_syncing(tmp.path(), Some("session-1"), 15 * 60).expect("fail stale");
+
+        assert_eq!(updated, 0);
+        let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Syncing);
     }
 }
