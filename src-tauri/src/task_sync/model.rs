@@ -19,6 +19,7 @@ impl TaskProvider {
 pub enum TaskSyncStatus {
     New,
     Queued,
+    Syncing,
     Synced,
     Failed,
     Skipped,
@@ -29,6 +30,7 @@ impl TaskSyncStatus {
         match self {
             TaskSyncStatus::New => "new",
             TaskSyncStatus::Queued => "queued",
+            TaskSyncStatus::Syncing => "syncing",
             TaskSyncStatus::Synced => "synced",
             TaskSyncStatus::Failed => "failed",
             TaskSyncStatus::Skipped => "skipped",

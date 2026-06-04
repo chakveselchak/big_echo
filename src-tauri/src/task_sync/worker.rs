@@ -32,7 +32,7 @@ where
     F: Fn(ActionItem) -> Fut,
     Fut: Future<Output = Result<String, TaskSyncError>>,
 {
-    let batch = queue::next_pending_batch(app_data_dir, session_id, 50)?;
+    let batch = queue::claim_pending_batch(app_data_dir, session_id, 50)?;
     let mut result = TaskSyncResult {
         synced: 0,
         failed: 0,
@@ -67,10 +67,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task_sync::model::{
-        ActionItem, TaskSyncError, TaskSyncErrorKind, TaskSyncStatus,
-    };
+    use crate::task_sync::model::{ActionItem, TaskSyncError, TaskSyncErrorKind, TaskSyncStatus};
     use crate::task_sync::queue;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use tempfile::tempdir;
 
     fn item(id: &str) -> ActionItem {
@@ -173,5 +175,36 @@ mod tests {
 
         assert_eq!(result.synced, 3);
         assert_eq!(result.session_ids, vec!["session-1", "session-2"]);
+    }
+
+    #[tokio::test]
+    async fn worker_skips_rows_already_claimed_by_another_sync() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        queue::enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+        queue::claim_pending_batch(tmp.path(), Some("session-1"), 50).expect("claim");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let result = sync_queued_with(tmp.path(), Some("session-1"), {
+            let calls = Arc::clone(&calls);
+            move |_item| {
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok("todoist-1".to_string())
+                }
+            }
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.synced, 0);
+        assert_eq!(result.failed, 0);
+        assert!(result.session_ids.is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Syncing);
     }
 }

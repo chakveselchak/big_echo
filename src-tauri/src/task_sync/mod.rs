@@ -45,12 +45,7 @@ fn refresh_snapshot_for_session(
     let session_dir = session_dir_for(app_data_dir, session_id)?;
     let meta = load_meta(&session_dir.join("meta.json"))?;
     let snapshot_path = session_dir.join(&meta.artifacts.tasks_sync_file);
-    snapshot::write_snapshot(
-        &snapshot_path,
-        session_id,
-        TODOIST_PROVIDER.as_str(),
-        items,
-    )
+    snapshot::write_snapshot(&snapshot_path, session_id, TODOIST_PROVIDER.as_str(), items)
 }
 
 fn refresh_snapshot_for_session_if_available(
@@ -97,6 +92,13 @@ pub fn preview_todoist_tasks_for_session(
         extraction.items,
     );
 
+    let current_ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+    queue::prune_unsynced_absent(
+        app_data_dir,
+        session_id,
+        TODOIST_PROVIDER.as_str(),
+        &current_ids,
+    )?;
     queue::upsert_new_tasks(app_data_dir, &items)?;
     let existing = queue::list_by_session(app_data_dir, session_id, TODOIST_PROVIDER.as_str())?;
     merge_queue_fields(&mut items, &existing);
@@ -126,7 +128,10 @@ pub fn enqueue_todoist_tasks_for_session(
     Ok(items)
 }
 
-pub fn status_for_session(app_data_dir: &Path, session_id: &str) -> Result<Vec<ActionItem>, String> {
+pub fn status_for_session(
+    app_data_dir: &Path,
+    session_id: &str,
+) -> Result<Vec<ActionItem>, String> {
     queue::list_by_session(app_data_dir, session_id, TODOIST_PROVIDER.as_str())
 }
 
@@ -180,7 +185,10 @@ mod tests {
             preview_todoist_tasks_for_session(&app_data_dir, "session-1").expect("preview");
 
         assert_eq!(preview.session_id, "session-1");
-        assert_eq!(preview.summary_path, session_dir.join("summary.md").to_string_lossy());
+        assert_eq!(
+            preview.summary_path,
+            session_dir.join("summary.md").to_string_lossy()
+        );
         assert!(preview.warnings.is_empty());
         assert_eq!(preview.items.len(), 1);
         assert_eq!(preview.items[0].title, "Send follow-up");
@@ -241,9 +249,8 @@ mod tests {
         .expect_err("snapshot write failure should be returned");
 
         assert!(!err.is_empty());
-        let rows =
-            queue::list_by_session(&app_data_dir, "session-1", TODOIST_PROVIDER.as_str())
-                .expect("list rows");
+        let rows = queue::list_by_session(&app_data_dir, "session-1", TODOIST_PROVIDER.as_str())
+            .expect("list rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Queued);
     }
 
@@ -288,10 +295,79 @@ mod tests {
         refresh_snapshots_for_sessions(&app_data_dir, &["session-1".to_string()])
             .expect("refresh snapshots");
 
-        let raw = std::fs::read_to_string(session_dir.join("tasks_sync.json"))
-            .expect("snapshot");
+        let raw = std::fs::read_to_string(session_dir.join("tasks_sync.json")).expect("snapshot");
         let json: serde_json::Value = serde_json::from_str(&raw).expect("json");
         assert_eq!(json["items"][0]["status"], "synced");
         assert_eq!(json["items"][0]["externalTaskId"], "todoist-task-1");
+    }
+
+    #[test]
+    fn preview_prunes_stale_unsynced_rows_but_keeps_synced_history() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("sessions").join("session-1");
+        std::fs::create_dir_all(&app_data_dir).expect("app data dir");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+
+        let mut meta = SessionMeta::new(
+            "session-1".to_string(),
+            "zoom".to_string(),
+            vec![],
+            "Task sync preview prune".to_string(),
+            String::new(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.artifacts.summary_file = "summary.md".to_string();
+        meta.artifacts.tasks_sync_file = "tasks_sync.json".to_string();
+
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
+
+        std::fs::write(
+            session_dir.join("summary.md"),
+            "## Action Items\n- [ ] Keep task\n- [ ] Remove queued\n- [ ] Keep synced\n",
+        )
+        .expect("write summary");
+        let first_preview =
+            preview_todoist_tasks_for_session(&app_data_dir, "session-1").expect("first preview");
+
+        let remove_queued = first_preview
+            .items
+            .iter()
+            .find(|item| item.title == "Remove queued")
+            .expect("remove queued")
+            .id
+            .clone();
+        let keep_synced = first_preview
+            .items
+            .iter()
+            .find(|item| item.title == "Keep synced")
+            .expect("keep synced")
+            .id
+            .clone();
+
+        enqueue_todoist_tasks_for_session(&app_data_dir, "session-1", vec![remove_queued.clone()])
+            .expect("enqueue stale row");
+        queue::mark_synced(&app_data_dir, &keep_synced, "todoist-keep-synced")
+            .expect("mark synced");
+
+        std::fs::write(
+            session_dir.join("summary.md"),
+            "## Action Items\n- [ ] Keep task\n",
+        )
+        .expect("rewrite summary");
+
+        let second_preview =
+            preview_todoist_tasks_for_session(&app_data_dir, "session-1").expect("second preview");
+        let rows = status_for_session(&app_data_dir, "session-1").expect("status");
+
+        assert_eq!(second_preview.items.len(), 1);
+        assert_eq!(second_preview.items[0].title, "Keep task");
+        assert!(rows.iter().any(|item| item.title == "Keep task"));
+        assert!(rows
+            .iter()
+            .any(|item| { item.title == "Keep synced" && item.status == TaskSyncStatus::Synced }));
+        assert!(!rows.iter().any(|item| item.id == remove_queued));
     }
 }

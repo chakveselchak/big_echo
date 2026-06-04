@@ -1,6 +1,7 @@
 use crate::task_sync::model::{ActionItem, TaskSyncStatus};
 use chrono::Local;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 fn db_path(app_data_dir: &Path) -> PathBuf {
@@ -78,6 +79,7 @@ fn open(app_data_dir: &Path) -> Result<Connection, String> {
 fn status_from_str(value: &str) -> TaskSyncStatus {
     match value {
         "queued" => TaskSyncStatus::Queued,
+        "syncing" => TaskSyncStatus::Syncing,
         "synced" => TaskSyncStatus::Synced,
         "failed" => TaskSyncStatus::Failed,
         "skipped" => TaskSyncStatus::Skipped,
@@ -250,6 +252,79 @@ pub fn next_pending_batch(
     Ok(out)
 }
 
+pub fn claim_pending_batch(
+    app_data_dir: &Path,
+    session_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<ActionItem>, String> {
+    let mut conn = open(app_data_dir)?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let sql = match session_id {
+        Some(_) => {
+            "
+            SELECT
+                id, provider, title, description, due, priority, assignee, context,
+                source_session_id, source_file_path, status, external_task_id, error,
+                error_kind, retryable
+            FROM task_sync_queue
+            WHERE status = 'queued' AND source_session_id = ?1
+            ORDER BY queued_at ASC, created_at ASC, id ASC
+            LIMIT ?2
+            "
+        }
+        None => {
+            "
+            SELECT
+                id, provider, title, description, due, priority, assignee, context,
+                source_session_id, source_file_path, status, external_task_id, error,
+                error_kind, retryable
+            FROM task_sync_queue
+            WHERE status = 'queued'
+            ORDER BY queued_at ASC, created_at ASC, id ASC
+            LIMIT ?1
+            "
+        }
+    };
+    let mut stmt = tx.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = match session_id {
+        Some(session_id) => stmt
+            .query_map(params![session_id, limit], row_to_action_item)
+            .map_err(|e| e.to_string())?,
+        None => stmt
+            .query_map(params![limit], row_to_action_item)
+            .map_err(|e| e.to_string())?,
+    };
+
+    let mut selected = Vec::new();
+    for row in rows {
+        selected.push(row.map_err(|e| e.to_string())?);
+    }
+    drop(stmt);
+
+    let mut claimed = Vec::new();
+    for mut item in selected {
+        let updated = tx
+            .execute(
+                "
+                UPDATE task_sync_queue
+                SET status = 'syncing'
+                WHERE id = ?1 AND status = 'queued'
+                ",
+                params![item.id],
+            )
+            .map_err(|e| e.to_string())?;
+        if updated == 1 {
+            item.status = TaskSyncStatus::Syncing;
+            claimed.push(item);
+        }
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(claimed)
+}
+
 pub fn mark_synced(app_data_dir: &Path, id: &str, external_task_id: &str) -> Result<(), String> {
     let conn = open(app_data_dir)?;
     conn.execute(
@@ -306,6 +381,59 @@ fn mark_failed_inner(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub fn prune_unsynced_absent(
+    app_data_dir: &Path,
+    session_id: &str,
+    provider: &str,
+    current_ids: &[String],
+) -> Result<(), String> {
+    let current_ids = current_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut conn = open(app_data_dir)?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut stmt = tx
+        .prepare(
+            "
+            SELECT id
+            FROM task_sync_queue
+            WHERE source_session_id = ?1
+              AND provider = ?2
+              AND status IN ('new', 'queued', 'failed', 'skipped')
+            ",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![session_id, provider], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+
+    let mut stale_ids = Vec::new();
+    for row in rows {
+        let id = row.map_err(|e| e.to_string())?;
+        if !current_ids.contains(id.as_str()) {
+            stale_ids.push(id);
+        }
+    }
+    drop(stmt);
+
+    for id in stale_ids {
+        tx.execute(
+            "
+            DELETE FROM task_sync_queue
+            WHERE id = ?1
+              AND source_session_id = ?2
+              AND provider = ?3
+              AND status IN ('new', 'queued', 'failed', 'skipped')
+            ",
+            params![id, session_id, provider],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())
 }
 
 pub fn requeue_failed(app_data_dir: &Path, session_id: &str, provider: &str) -> Result<(), String> {
@@ -403,5 +531,29 @@ mod tests {
         assert_eq!(rows[0].error.as_deref(), Some("rate limited"));
         assert_eq!(rows[0].error_kind.as_deref(), Some("rate_limit"));
         assert_eq!(rows[0].retryable, Some(true));
+    }
+
+    #[test]
+    fn claim_pending_batch_does_not_return_the_same_row_twice() {
+        let tmp = tempdir().expect("tempdir");
+        upsert_new_tasks(tmp.path(), &[item("id-1"), item("id-2")]).expect("insert");
+        enqueue_tasks(
+            tmp.path(),
+            "session-1",
+            "todoist",
+            &["id-1".to_string(), "id-2".to_string()],
+        )
+        .expect("enqueue");
+
+        let first = claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("first claim");
+        let second = claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("second claim");
+        let third = claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("third claim");
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert!(third.is_empty());
+        assert_ne!(first[0].id, second[0].id);
+        assert_eq!(first[0].status, TaskSyncStatus::Syncing);
+        assert_eq!(second[0].status, TaskSyncStatus::Syncing);
     }
 }
