@@ -34,12 +34,13 @@ where
     F: Fn(ActionItem) -> Fut,
     Fut: Future<Output = Result<String, TaskSyncError>>,
 {
-    queue::fail_stale_syncing(app_data_dir, session_id, STALE_SYNCING_SECONDS)?;
+    let (recovered_failed, recovered_session_ids) =
+        queue::fail_stale_syncing(app_data_dir, session_id, STALE_SYNCING_SECONDS)?;
     let batch = queue::claim_pending_batch(app_data_dir, session_id, 50)?;
     let mut result = TaskSyncResult {
         synced: 0,
-        failed: 0,
-        session_ids: Vec::new(),
+        failed: recovered_failed,
+        session_ids: recovered_session_ids,
     };
 
     for item in batch {
@@ -76,6 +77,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+    use rusqlite::{params, Connection};
     use tempfile::tempdir;
 
     fn item(id: &str) -> ActionItem {
@@ -209,5 +211,45 @@ mod tests {
 
         let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Syncing);
+    }
+
+    #[tokio::test]
+    async fn worker_reports_recovered_stale_syncing_sessions() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        queue::enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+        queue::claim_pending_batch(tmp.path(), Some("session-1"), 50).expect("claim");
+
+        let old_claim = (chrono::Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
+        let conn = Connection::open(tmp.path().join("bigecho.sqlite3")).expect("open db");
+        conn.execute(
+            "UPDATE task_sync_queue SET claimed_at = ?1 WHERE id = 'id-1'",
+            params![old_claim],
+        )
+        .expect("age claim");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let result = sync_queued_with(tmp.path(), Some("session-1"), {
+            let calls = Arc::clone(&calls);
+            move |_item| {
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok("todoist-1".to_string())
+                }
+            }
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.synced, 0);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.session_ids, vec!["session-1"]);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Failed);
+        assert_eq!(rows[0].error_kind.as_deref(), Some("sync_interrupted"));
     }
 }

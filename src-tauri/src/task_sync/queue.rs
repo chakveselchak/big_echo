@@ -449,10 +449,61 @@ pub fn fail_stale_syncing(
     app_data_dir: &Path,
     session_id: Option<&str>,
     older_than_seconds: i64,
-) -> Result<usize, String> {
+) -> Result<(usize, Vec<String>), String> {
     let cutoff = (Local::now() - chrono::Duration::seconds(older_than_seconds)).to_rfc3339();
-    let conn = open(app_data_dir)?;
-    let sql = match session_id {
+    let mut conn = open(app_data_dir)?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let select_sql = match session_id {
+        Some(_) => {
+            "
+            SELECT DISTINCT source_session_id
+            FROM task_sync_queue
+            WHERE status = 'syncing'
+              AND source_session_id = ?1
+              AND (claimed_at IS NULL OR claimed_at <= ?2)
+            ORDER BY source_session_id ASC
+            "
+        }
+        None => {
+            "
+            SELECT DISTINCT source_session_id
+            FROM task_sync_queue
+            WHERE status = 'syncing'
+              AND (claimed_at IS NULL OR claimed_at <= ?1)
+            ORDER BY source_session_id ASC
+            "
+        }
+    };
+    let mut session_ids = Vec::new();
+    let mut stmt = tx.prepare(select_sql).map_err(|e| e.to_string())?;
+    match session_id {
+        Some(session_id) => {
+            let rows = stmt
+                .query_map(params![session_id, cutoff], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                session_ids.push(row.map_err(|e| e.to_string())?);
+            }
+        }
+        None => {
+            let rows = stmt
+                .query_map(params![cutoff], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                session_ids.push(row.map_err(|e| e.to_string())?);
+            }
+        }
+    }
+    drop(stmt);
+
+    if session_ids.is_empty() {
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok((0, session_ids));
+    }
+
+    let update_sql = match session_id {
         Some(_) => {
             "
             UPDATE task_sync_queue
@@ -480,11 +531,12 @@ pub fn fail_stale_syncing(
         }
     };
     let updated = match session_id {
-        Some(session_id) => conn.execute(sql, params![session_id, cutoff]),
-        None => conn.execute(sql, params![cutoff]),
+        Some(session_id) => tx.execute(update_sql, params![session_id, cutoff]),
+        None => tx.execute(update_sql, params![cutoff]),
     }
     .map_err(|e| e.to_string())?;
-    Ok(updated)
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok((updated, session_ids))
 }
 
 pub fn requeue_failed(app_data_dir: &Path, session_id: &str, provider: &str) -> Result<(), String> {
@@ -625,10 +677,11 @@ mod tests {
         )
         .expect("age claim");
 
-        let updated =
+        let (updated, session_ids) =
             fail_stale_syncing(tmp.path(), Some("session-1"), 15 * 60).expect("fail stale");
 
         assert_eq!(updated, 1);
+        assert_eq!(session_ids, vec!["session-1"]);
         let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Failed);
         assert_eq!(rows[0].error_kind.as_deref(), Some("sync_interrupted"));
@@ -643,10 +696,11 @@ mod tests {
             .expect("enqueue");
         claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
 
-        let updated =
+        let (updated, session_ids) =
             fail_stale_syncing(tmp.path(), Some("session-1"), 15 * 60).expect("fail stale");
 
         assert_eq!(updated, 0);
+        assert!(session_ids.is_empty());
         let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
         assert_eq!(rows[0].status, TaskSyncStatus::Syncing);
     }

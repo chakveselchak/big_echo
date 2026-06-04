@@ -53,11 +53,31 @@ fn refresh_snapshot_for_session_if_available(
     session_id: &str,
     items: &[ActionItem],
 ) -> Result<(), String> {
-    match refresh_snapshot_for_session(app_data_dir, session_id, items) {
-        // Enqueue can be called after queue rows outlive their source session metadata.
-        // In that case there is no session snapshot to refresh, so status listing still succeeds.
-        Err(err) if err.starts_with("session_not_found:") => Ok(()),
-        result => result,
+    let Some(session_dir) = get_session_dir(app_data_dir, session_id)? else {
+        // Queue rows can outlive their source session metadata. In that case there
+        // is no session snapshot to refresh, so status listing still succeeds.
+        return Ok(());
+    };
+    let Ok(meta) = load_meta(&session_dir.join("meta.json")) else {
+        return Ok(());
+    };
+    let snapshot_path = session_dir.join(&meta.artifacts.tasks_sync_file);
+    snapshot::write_snapshot(
+        &snapshot_path,
+        session_id,
+        TODOIST_PROVIDER.as_str(),
+        items,
+    )
+}
+
+fn refresh_snapshot_for_session_if_session_exists(
+    app_data_dir: &Path,
+    session_id: &str,
+    items: &[ActionItem],
+) -> Result<(), String> {
+    match get_session_dir(app_data_dir, session_id)? {
+        Some(_) => refresh_snapshot_for_session(app_data_dir, session_id, items),
+        None => Ok(()),
     }
 }
 
@@ -124,7 +144,7 @@ pub fn enqueue_todoist_tasks_for_session(
         &task_ids,
     )?;
     let items = queue::list_by_session(app_data_dir, session_id, TODOIST_PROVIDER.as_str())?;
-    refresh_snapshot_for_session_if_available(app_data_dir, session_id, &items)?;
+    refresh_snapshot_for_session_if_session_exists(app_data_dir, session_id, &items)?;
     Ok(items)
 }
 
@@ -332,6 +352,57 @@ mod tests {
 
         refresh_snapshots_for_sessions(&app_data_dir, &["missing-session".to_string()])
             .expect("missing session metadata should not fail refresh");
+    }
+
+    #[test]
+    fn refresh_snapshots_for_sessions_tolerates_missing_meta_file() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("sessions").join("session-1");
+        std::fs::create_dir_all(&app_data_dir).expect("app data dir");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+
+        let mut meta = SessionMeta::new(
+            "session-1".to_string(),
+            "zoom".to_string(),
+            vec![],
+            "Task sync missing meta".to_string(),
+            String::new(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.artifacts.summary_file = "summary.md".to_string();
+        meta.artifacts.tasks_sync_file = "tasks_sync.json".to_string();
+
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
+        std::fs::remove_file(&meta_path).expect("remove meta");
+
+        queue::upsert_new_tasks(
+            &app_data_dir,
+            &[ActionItem {
+                id: "task-1".to_string(),
+                provider: TODOIST_PROVIDER.as_str().to_string(),
+                title: "Already synced".to_string(),
+                description: None,
+                due: None,
+                priority: None,
+                assignee: None,
+                context: None,
+                source_session_id: "session-1".to_string(),
+                source_file_path: session_dir.join("summary.md").to_string_lossy().to_string(),
+                status: TaskSyncStatus::New,
+                external_task_id: None,
+                error: None,
+                error_kind: None,
+                retryable: None,
+            }],
+        )
+        .expect("upsert task");
+        queue::mark_synced(&app_data_dir, "task-1", "todoist-task-1").expect("mark synced");
+
+        refresh_snapshots_for_sessions(&app_data_dir, &["session-1".to_string()])
+            .expect("missing meta file should not fail refresh");
     }
 
     #[test]
