@@ -1,7 +1,9 @@
 use crate::task_sync::model::{ActionItem, TaskSyncError, TaskSyncErrorKind};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 const TODOIST_CREATE_TASK_URL: &str = "https://api.todoist.com/api/v1/tasks";
+const TODOIST_REQUEST_TIMEOUT_SECONDS: u64 = 60;
 
 #[derive(Debug, Serialize)]
 pub struct TodoistCreateTaskPayload {
@@ -69,7 +71,10 @@ pub fn map_status_error(status: u16, body: &str) -> TaskSyncError {
 }
 
 pub async fn create_task(token: &str, item: &ActionItem) -> Result<String, TaskSyncError> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(TODOIST_REQUEST_TIMEOUT_SECONDS))
+        .build()
+        .map_err(|e| TaskSyncError::new(TaskSyncErrorKind::Network, e.to_string(), true))?;
     let response = client
         .post(TODOIST_CREATE_TASK_URL)
         .bearer_auth(token)

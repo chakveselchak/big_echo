@@ -8,6 +8,7 @@ use tokio::time;
 
 const STALE_SYNCING_SECONDS: i64 = 15 * 60;
 const CLAIM_RENEW_SECONDS: u64 = 30;
+const CREATE_TASK_DEADLINE_SECONDS: u64 = 90;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,10 +52,15 @@ where
         if !result.session_ids.contains(&item.source_session_id) {
             result.session_ids.push(item.source_session_id.clone());
         }
-        match run_with_claim_renewal(app_data_dir, &item.id, &claimed.claim_token, create(item.clone()))
-            .await
+        match run_with_claim_renewal(
+            app_data_dir,
+            &item.id,
+            &claimed.claim_token,
+            create(item.clone()),
+        )
+        .await
         {
-            Ok(external_id) => {
+            ClaimRunResult::Completed(Ok(external_id)) => {
                 if queue::mark_synced_claimed(
                     app_data_dir,
                     &item.id,
@@ -64,7 +70,7 @@ where
                     result.synced += 1;
                 }
             }
-            Err(err) => {
+            ClaimRunResult::Completed(Err(err)) => {
                 if queue::mark_failed_with_kind_claimed(
                     app_data_dir,
                     &item.id,
@@ -76,10 +82,29 @@ where
                     result.failed += 1;
                 }
             }
+            ClaimRunResult::TimedOut => {
+                if queue::mark_failed_with_kind_claimed(
+                    app_data_dir,
+                    &item.id,
+                    &claimed.claim_token,
+                    "Todoist request timed out",
+                    "network",
+                    true,
+                )? {
+                    result.failed += 1;
+                }
+            }
+            ClaimRunResult::LostClaim => {}
         }
     }
 
     Ok(result)
+}
+
+enum ClaimRunResult {
+    Completed(Result<String, TaskSyncError>),
+    TimedOut,
+    LostClaim,
 }
 
 async fn run_with_claim_renewal<Fut>(
@@ -87,17 +112,23 @@ async fn run_with_claim_renewal<Fut>(
     task_id: &str,
     claim_token: &str,
     create: Fut,
-) -> Result<String, TaskSyncError>
+) -> ClaimRunResult
 where
     Fut: Future<Output = Result<String, TaskSyncError>>,
 {
     tokio::pin!(create);
+    let deadline = time::sleep(Duration::from_secs(CREATE_TASK_DEADLINE_SECONDS));
+    tokio::pin!(deadline);
 
     loop {
         match time::timeout(Duration::from_secs(CLAIM_RENEW_SECONDS), &mut create).await {
-            Ok(result) => return result,
-            Err(_) => {
-                let _ = queue::renew_claim(app_data_dir, task_id, claim_token);
+            Ok(result) => return ClaimRunResult::Completed(result),
+            Err(_) => match time::timeout(Duration::from_millis(0), &mut deadline).await {
+                Ok(_) => return ClaimRunResult::TimedOut,
+                Err(_) => match queue::renew_claim(app_data_dir, task_id, claim_token) {
+                    Ok(true) => {}
+                    Ok(false) | Err(_) => return ClaimRunResult::LostClaim,
+                },
             }
         }
     }
