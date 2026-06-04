@@ -21,8 +21,10 @@ export function useTodoistSync(enabled: boolean) {
         await tauriInvoke("todoist_sync_set_token", { token: value });
         setTokenState("updated");
         await refreshHasToken();
+        return true;
       } catch {
         setTokenState("error");
+        return false;
       }
     },
     [refreshHasToken],
@@ -33,8 +35,10 @@ export function useTodoistSync(enabled: boolean) {
       await tauriInvoke("todoist_sync_clear_token");
       setTokenState("unchanged");
       await refreshHasToken();
+      return true;
     } catch {
       setTokenState("error");
+      return false;
     }
   }, [refreshHasToken]);
 

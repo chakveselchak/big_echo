@@ -40,13 +40,29 @@ describe("useTodoistSync", () => {
 
     const { result } = renderHook(() => useTodoistSync(true));
 
+    let saved = false;
     await act(async () => {
-      await result.current.saveToken("todoist-token");
+      saved = await result.current.saveToken("todoist-token");
     });
 
+    expect(saved).toBe(true);
     expect(invokeMock).toHaveBeenCalledWith("todoist_sync_set_token", { token: "todoist-token" });
     expect(result.current.hasToken).toBe(true);
     expect(result.current.tokenState).toBe("updated");
+  });
+
+  it("saveToken marks errors and reports failure", async () => {
+    invokeMock.mockRejectedValue(new Error("keyring failed"));
+
+    const { result } = renderHook(() => useTodoistSync(false));
+
+    let saved = true;
+    await act(async () => {
+      saved = await result.current.saveToken("todoist-token");
+    });
+
+    expect(saved).toBe(false);
+    expect(result.current.tokenState).toBe("error");
   });
 
   it("clearToken clears the token, refreshes presence, and marks it unchanged", async () => {
@@ -58,10 +74,12 @@ describe("useTodoistSync", () => {
 
     const { result } = renderHook(() => useTodoistSync(true));
 
+    let cleared = false;
     await act(async () => {
-      await result.current.clearToken();
+      cleared = await result.current.clearToken();
     });
 
+    expect(cleared).toBe(true);
     expect(invokeMock).toHaveBeenCalledWith("todoist_sync_clear_token");
     expect(result.current.hasToken).toBe(false);
     expect(result.current.tokenState).toBe("unchanged");

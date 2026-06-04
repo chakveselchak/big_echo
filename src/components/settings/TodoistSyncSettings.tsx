@@ -31,8 +31,25 @@ export function TodoistSyncSettings({ settings, setSettings, isDirty, todoistSyn
   const handleSaveToken = async () => {
     const token = tokenInput.trim();
     if (!token) return;
-    await todoistSync.saveToken(token);
-    setTokenInput("");
+    const saved = await todoistSync.saveToken(token);
+    if (saved) {
+      setTokenInput("");
+    }
+  };
+
+  const handleClearToken = async () => {
+    const cleared = await todoistSync.clearToken();
+    if (cleared && settings.todoist_auto_add) {
+      setSettings({ ...settings, todoist_auto_add: false });
+    }
+  };
+
+  const handleSyncEnabledChange = (checked: boolean) => {
+    setSettings({
+      ...settings,
+      todoist_sync_enabled: checked,
+      todoist_auto_add: checked ? settings.todoist_auto_add : false,
+    });
   };
 
   const tokenBadge = todoistSync.tokenState === "error"
@@ -50,9 +67,7 @@ export function TodoistSyncSettings({ settings, setSettings, isDirty, todoistSyn
           id="todoist_sync_enabled"
           aria-label="Enable Todoist sync"
           checked={Boolean(settings.todoist_sync_enabled)}
-          onChange={(e) =>
-            setSettings({ ...settings, todoist_sync_enabled: e.target.checked })
-          }
+          onChange={(e) => handleSyncEnabledChange(e.target.checked)}
         >
           Enable Todoist sync
           {isDirty("todoist_sync_enabled") && dirtyDot}
@@ -75,7 +90,7 @@ export function TodoistSyncSettings({ settings, setSettings, isDirty, todoistSyn
             Save token
           </Button>
           {todoistSync.hasToken && (
-            <Button onClick={() => void todoistSync.clearToken()}>
+            <Button onClick={() => void handleClearToken()}>
               Clear token
             </Button>
           )}

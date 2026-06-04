@@ -47,8 +47,8 @@ function makeTodoistSyncStub(
     hasToken: false,
     tokenState: "unknown",
     refreshHasToken: vi.fn(async () => undefined),
-    saveToken: vi.fn(async (_value: string) => undefined),
-    clearToken: vi.fn(async () => undefined),
+    saveToken: vi.fn(async (_value: string) => true),
+    clearToken: vi.fn(async () => true),
     ...overrides,
   };
 }
@@ -101,6 +101,28 @@ describe("TodoistSyncSettings", () => {
     );
   });
 
+  it("resets auto-add when Todoist sync is disabled", () => {
+    const setSettings = vi.fn();
+
+    render(
+      <TodoistSyncSettings
+        settings={baseSettings({ todoist_sync_enabled: true, todoist_auto_add: true })}
+        setSettings={setSettings}
+        isDirty={() => false}
+        todoistSync={makeTodoistSyncStub({ hasToken: true })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Enable Todoist sync/i }));
+
+    expect(setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        todoist_sync_enabled: false,
+        todoist_auto_add: false,
+      }),
+    );
+  });
+
   it("saves the token through the hook with trimmed input", async () => {
     const saveToken = vi.fn(async (_value: string) => undefined);
 
@@ -121,6 +143,28 @@ describe("TodoistSyncSettings", () => {
     await waitFor(() => expect(saveToken).toHaveBeenCalledWith("secret-token"));
   });
 
+  it("keeps token input when saving fails", async () => {
+    const saveToken = vi.fn(async (_value: string) => false);
+
+    render(
+      <TodoistSyncSettings
+        settings={baseSettings({ todoist_sync_enabled: true })}
+        setSettings={() => undefined}
+        isDirty={() => false}
+        todoistSync={makeTodoistSyncStub({ saveToken, tokenState: "error" })}
+      />,
+    );
+
+    const input = screen.getByLabelText(/API token/i);
+    fireEvent.change(input, {
+      target: { value: "retry-token" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save token/i }));
+
+    await waitFor(() => expect(saveToken).toHaveBeenCalledWith("retry-token"));
+    expect(input).toHaveValue("retry-token");
+  });
+
   it("clears the token through the hook", async () => {
     const clearToken = vi.fn(async () => undefined);
 
@@ -136,5 +180,26 @@ describe("TodoistSyncSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: /Clear token/i }));
 
     await waitFor(() => expect(clearToken).toHaveBeenCalled());
+  });
+
+  it("resets auto-add after clearing a saved token", async () => {
+    const clearToken = vi.fn(async () => true);
+    const setSettings = vi.fn();
+
+    render(
+      <TodoistSyncSettings
+        settings={baseSettings({ todoist_sync_enabled: true, todoist_auto_add: true })}
+        setSettings={setSettings}
+        isDirty={() => false}
+        todoistSync={makeTodoistSyncStub({ hasToken: true, clearToken })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Clear token/i }));
+
+    await waitFor(() => expect(clearToken).toHaveBeenCalled());
+    expect(setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ todoist_auto_add: false }),
+    );
   });
 });
