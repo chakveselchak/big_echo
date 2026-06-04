@@ -71,3 +71,30 @@ pub struct ActionItem {
     pub external_task_id: Option<String>,
     pub error: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskSyncErrorKind {
+    MissingToken,
+    InvalidToken,
+    RateLimit,
+    Server,
+    BadRequest,
+    Network,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSyncError {
+    pub kind: TaskSyncErrorKind,
+    pub message: String,
+    pub retryable: bool,
+}
+
+impl TaskSyncError {
+    pub fn new(kind: TaskSyncErrorKind, message: impl Into<String>, retryable: bool) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            retryable,
+        }
+    }
+}
