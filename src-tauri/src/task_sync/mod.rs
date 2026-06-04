@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const TODOIST_PROVIDER: TaskProvider = TaskProvider::Todoist;
+const STALE_SYNCING_SECONDS: i64 = 15 * 60;
 
 fn session_dir_for(app_data_dir: &Path, session_id: &str) -> Result<PathBuf, String> {
     get_session_dir(app_data_dir, session_id)?
@@ -113,6 +114,7 @@ pub fn preview_todoist_tasks_for_session(
     );
 
     let current_ids = items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+    queue::fail_stale_syncing(app_data_dir, Some(session_id), STALE_SYNCING_SECONDS)?;
     queue::prune_unsynced_absent(
         app_data_dir,
         session_id,
@@ -171,6 +173,7 @@ mod tests {
     use crate::domain::session::{SessionMeta, SessionStatus};
     use crate::storage::{session_store::save_meta, sqlite_repo::upsert_session};
     use crate::task_sync::model::TaskSyncStatus;
+    use rusqlite::{params, Connection};
     use tempfile::tempdir;
 
     #[test]
@@ -473,5 +476,74 @@ mod tests {
             .iter()
             .any(|item| { item.title == "Keep synced" && item.status == TaskSyncStatus::Synced }));
         assert!(!rows.iter().any(|item| item.id == remove_queued));
+    }
+
+    #[test]
+    fn preview_prunes_stale_syncing_rows_absent_from_summary() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("sessions").join("session-1");
+        std::fs::create_dir_all(&app_data_dir).expect("app data dir");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+
+        let mut meta = SessionMeta::new(
+            "session-1".to_string(),
+            "zoom".to_string(),
+            vec![],
+            "Task sync stale syncing prune".to_string(),
+            String::new(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.artifacts.summary_file = "summary.md".to_string();
+        meta.artifacts.tasks_sync_file = "tasks_sync.json".to_string();
+
+        let meta_path = session_dir.join("meta.json");
+        save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
+
+        std::fs::write(
+            session_dir.join("summary.md"),
+            "## Action Items\n- [ ] Keep task\n- [ ] Remove interrupted\n",
+        )
+        .expect("write summary");
+        let first_preview =
+            preview_todoist_tasks_for_session(&app_data_dir, "session-1").expect("first preview");
+        let remove_interrupted = first_preview
+            .items
+            .iter()
+            .find(|item| item.title == "Remove interrupted")
+            .expect("remove interrupted")
+            .id
+            .clone();
+
+        enqueue_todoist_tasks_for_session(
+            &app_data_dir,
+            "session-1",
+            vec![remove_interrupted.clone()],
+        )
+        .expect("enqueue interrupted row");
+        queue::claim_pending_batch(&app_data_dir, Some("session-1"), 50).expect("claim");
+
+        let old_claim = (chrono::Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
+        let conn = Connection::open(app_data_dir.join("bigecho.sqlite3")).expect("open db");
+        conn.execute(
+            "UPDATE task_sync_queue SET claimed_at = ?1 WHERE id = ?2",
+            params![old_claim, remove_interrupted],
+        )
+        .expect("age claim");
+
+        std::fs::write(
+            session_dir.join("summary.md"),
+            "## Action Items\n- [ ] Keep task\n",
+        )
+        .expect("rewrite summary");
+
+        let second_preview =
+            preview_todoist_tasks_for_session(&app_data_dir, "session-1").expect("second preview");
+        let rows = status_for_session(&app_data_dir, "session-1").expect("status");
+
+        assert_eq!(second_preview.items.len(), 1);
+        assert_eq!(second_preview.items[0].title, "Keep task");
+        assert!(!rows.iter().any(|item| item.id == remove_interrupted));
     }
 }
