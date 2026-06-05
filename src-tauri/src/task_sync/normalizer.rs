@@ -144,7 +144,7 @@ pub fn normalize_one(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     {
-        description_parts.push(format!("Контекст:\n{context}"));
+        description_parts.push(format!("**Контекст:**\n{context}"));
     }
     if let Some(assignee) = raw
         .assignee
@@ -152,15 +152,12 @@ pub fn normalize_one(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     {
-        description_parts.push(format!("Исполнитель: {assignee}"));
+        description_parts.push(format!("**Исполнитель:** {assignee}"));
     }
     if raw_due.is_some() && due.is_none() && !is_unspecified_due(raw_due.unwrap()) {
         description_parts.push(format!("Due: {}", raw_due.unwrap()));
     }
-    description_parts.push(format!(
-        "Источник: BigEcho\nВстреча: {source_session_id}\nФайл: {}",
-        source_file_path.display()
-    ));
+    description_parts.push(format!("*Файл:* `{}`", source_file_path.display()));
 
     Some(ActionItem {
         id: deterministic_id(provider, source_session_id, &title, due.as_deref()),
@@ -316,6 +313,27 @@ mod tests {
 
         assert_eq!(normalized.due, None);
         assert!(!normalized.description.unwrap().contains("Due: не указан"));
+    }
+
+    #[test]
+    fn normalizer_formats_todoist_description_with_markdown() {
+        let mut item = raw("Task");
+        item.context = Some("Обсуждали пилот с баннерами".to_string());
+        item.assignee = Some("Андрей".to_string());
+
+        let normalized = normalize_one(
+            TaskProvider::Todoist,
+            "session-1",
+            Path::new("/tmp/session/summary.md"),
+            &[],
+            item,
+        )
+        .expect("normalized");
+
+        assert_eq!(
+            normalized.description.as_deref(),
+            Some("**Контекст:**\nОбсуждали пилот с баннерами\n\n**Исполнитель:** Андрей\n\n*Файл:* `/tmp/session/summary.md`")
+        );
     }
 
     #[test]
