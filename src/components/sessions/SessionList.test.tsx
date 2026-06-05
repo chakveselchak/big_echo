@@ -115,6 +115,7 @@ function renderList(
     artifactPreview: null,
     knownTags: [],
     settings: null,
+    brainSyncReady: true,
     setDeleteTarget: noop,
     setAudioDeleteTargetSessionId: noop,
     confirmDeleteSession: noopAsync,
@@ -239,6 +240,7 @@ describe("SessionList lazy loading", () => {
         artifactPreview={null}
         knownTags={[]}
         settings={null}
+        brainSyncReady={true}
         setDeleteTarget={noop}
         setAudioDeleteTargetSessionId={noop}
         confirmDeleteSession={noopAsync}

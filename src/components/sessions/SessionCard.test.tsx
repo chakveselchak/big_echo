@@ -38,7 +38,7 @@ function makeDetail(): SessionMetaView {
   };
 }
 
-function renderCard(item: SessionListItem, onUploadToBrain = vi.fn()) {
+function renderCard(item: SessionListItem, onUploadToBrain = vi.fn(), brainSyncReady = true) {
   const noop = () => undefined;
   const result = render(
     <SessionCard
@@ -53,6 +53,7 @@ function renderCard(item: SessionListItem, onUploadToBrain = vi.fn()) {
       summaryMatch={false}
       showNumSpeakers={false}
       brainUploadPending={false}
+      brainSyncReady={brainSyncReady}
       onContextMenu={noop}
       onDetailChange={noop}
       onOpenArtifact={noop}
@@ -74,31 +75,38 @@ describe("SessionCard Brain upload status", () => {
   it.each([
     ["uploaded", "Brain: загружено"],
     ["uploading", "Brain: загрузка"],
-    ["not_uploaded", "Brain: не загружено"],
   ] as const)("renders %s label", (status, label) => {
     renderCard(makeItem(status));
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 
-  it("renders failed label with the last error as title", () => {
-    renderCard(makeItem("failed", { brain_upload_last_error: "Network unavailable" }));
-    expect(screen.getByText("Brain: ошибка")).toHaveAttribute("title", "Network unavailable");
-    expect(screen.getByText("Brain: ошибка")).toHaveAccessibleName(
-      "Brain: ошибка. Network unavailable",
-    );
-    expect(screen.getByText("Network unavailable")).toHaveClass("visually-hidden");
+  it("shows a red dot instead of a label for not-uploaded sessions", () => {
+    const { container } = renderCard(makeItem("not_uploaded"));
+    expect(screen.queryByText("Brain: не загружено")).not.toBeInTheDocument();
+    expect(container.querySelector(".ant-badge-dot")).toBeInTheDocument();
   });
 
-  it("redacts token-like values from failed Brain upload details", () => {
+  it("hides the red dot only once the session is uploaded", () => {
+    const failed = renderCard(makeItem("failed"));
+    expect(failed.container.querySelector(".ant-badge-dot")).toBeInTheDocument();
+    failed.unmount();
+
+    const uploaded = renderCard(makeItem("uploaded"));
+    expect(uploaded.container.querySelector(".ant-badge-dot")).not.toBeInTheDocument();
+  });
+
+  it("renders failed status as a label without leaking error details", () => {
     renderCard(makeItem("failed", {
       brain_upload_last_error: "Bearer eyJhbGciOiJIUzI1NiJ9.shortpayload.signature== was rejected",
     }));
 
-    expect(screen.getByText("Brain: ошибка")).toHaveAttribute(
-      "title",
-      "Bearer [redacted] was rejected",
-    );
+    expect(screen.getByText("Brain: ошибка")).toBeInTheDocument();
     expect(screen.queryByText(/eyJhbGci/)).not.toBeInTheDocument();
+  });
+
+  it("hides the upload button when Brain sync is not ready", () => {
+    renderCard(makeItem("not_uploaded"), vi.fn(), false);
+    expect(screen.queryByRole("button", { name: "Загрузить в Brain" })).not.toBeInTheDocument();
   });
 
   it("shows upload button for not uploaded sessions with audio and calls callback", async () => {
@@ -149,6 +157,7 @@ describe("SessionCard Brain upload status", () => {
         summaryMatch={false}
         showNumSpeakers={false}
         brainUploadPending={true}
+        brainSyncReady={true}
         onContextMenu={noop}
         onDetailChange={noop}
         onOpenArtifact={noop}

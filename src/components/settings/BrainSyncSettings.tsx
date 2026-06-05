@@ -176,7 +176,7 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
   }
 
   return (
-    <Form layout="vertical" style={{ maxWidth: 760 }}>
+    <Form layout="vertical" style={{ maxWidth: 760, marginBottom: 10 }}>
       <Form.Item>
         <CheckboxWithDirty
           checked={Boolean(settings.brain_sync_enabled)}

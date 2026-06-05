@@ -707,6 +707,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     sessions,
     setAudioDeleteTargetSessionId,
     setDeleteTarget,
+    setPipelineStateBySession,
     setSessionDetails,
     setSessionSearchQuery,
     summaryPendingBySession,

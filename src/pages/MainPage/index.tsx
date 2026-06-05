@@ -60,6 +60,7 @@ export function MainPage() {
   const [status, setStatus] = useState("idle");
   const [refreshKey, setRefreshKey] = useState(0);
   const [brainUploadPendingBySession, setBrainUploadPendingBySession] = useState<Record<string, boolean>>({});
+  const [brainSyncReady, setBrainSyncReady] = useState(false);
   const { updateInfo } = useVersionCheck();
   const showNewVersionTab = updateInfo?.is_newer === true;
   const sessionSearchInputRef = useRef<InputRef | null>(null);
@@ -89,6 +90,7 @@ export function MainPage() {
     openSessionArtifact,
     openArtifactInEditor,
     pipelineStateBySession,
+    setPipelineStateBySession,
     requestDeleteAudio,
     requestDeleteSession,
     saveSessionDetails,
@@ -156,16 +158,32 @@ export function MainPage() {
       });
   }, []);
 
+  const refreshBrainSyncReady = useCallback(async () => {
+    try {
+      const hasToken = await tauriInvoke<boolean>("brain_sync_has_token");
+      setBrainSyncReady(hasToken === true);
+    } catch {
+      setBrainSyncReady(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (mainTab !== "sessions") return;
     loadSessionsRef.current?.().catch((err) => setStatus(`error: ${String(err)}`));
-  }, [mainTab]);
+    void refreshBrainSyncReady();
+  }, [mainTab, refreshBrainSyncReady]);
 
   const uploadSessionToBrain = useCallback(
     async (sessionId: string) => {
       if (brainUploadPendingRef.current[sessionId]) return;
       brainUploadPendingRef.current = { ...brainUploadPendingRef.current, [sessionId]: true };
       setBrainUploadPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
+      // Чистим прежний статус сессии, чтобы наружу вышел свежий статус Brain.
+      setPipelineStateBySession((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
       try {
         const response = await tauriInvoke<BrainUploadResponse>("brain_sync_upload_session", { sessionId });
         if (response.status === "already_running") {
@@ -194,7 +212,7 @@ export function MainPage() {
         });
       }
     },
-    [loadSessions],
+    [loadSessions, setPipelineStateBySession],
   );
 
   useEffect(() => {
@@ -286,6 +304,7 @@ export function MainPage() {
           artifactPreview={artifactPreview}
           knownTags={knownTags}
           settings={null}
+          brainSyncReady={brainSyncReady}
           transcriptionProvider={transcriptionProvider}
           setDeleteTarget={setDeleteTarget}
           setAudioDeleteTargetSessionId={setAudioDeleteTargetSessionId}
