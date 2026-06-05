@@ -86,6 +86,17 @@ fn normalized_priority(value: Option<i64>) -> i64 {
     value.unwrap_or(1).clamp(1, 4)
 }
 
+fn normalize_labels(labels: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for label in labels {
+        let normalized = collapse_ws(label);
+        if !normalized.is_empty() && !out.contains(&normalized) {
+            out.push(normalized);
+        }
+    }
+    out
+}
+
 fn deterministic_id(
     provider: TaskProvider,
     session_id: &str,
@@ -107,6 +118,7 @@ pub fn normalize_one(
     provider: TaskProvider,
     source_session_id: &str,
     source_file_path: &Path,
+    session_tags: &[String],
     raw: ExtractedActionItem,
 ) -> Option<ActionItem> {
     let title = collapse_ws(&raw.title);
@@ -165,6 +177,7 @@ pub fn normalize_one(
             .context
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
+        labels: normalize_labels(session_tags),
         source_session_id: source_session_id.to_string(),
         source_file_path: source_file_path.to_string_lossy().to_string(),
         status: TaskSyncStatus::New,
@@ -179,11 +192,20 @@ pub fn normalize_many(
     provider: TaskProvider,
     source_session_id: &str,
     source_file_path: &Path,
+    session_tags: &[String],
     items: Vec<ExtractedActionItem>,
 ) -> Vec<ActionItem> {
     items
         .into_iter()
-        .filter_map(|item| normalize_one(provider, source_session_id, source_file_path, item))
+        .filter_map(|item| {
+            normalize_one(
+                provider,
+                source_session_id,
+                source_file_path,
+                session_tags,
+                item,
+            )
+        })
         .collect()
 }
 
@@ -211,6 +233,7 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             raw("  Согласовать   SAP_ID \n с безопасниками  "),
         )
         .expect("normalized");
@@ -227,6 +250,7 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             accepted,
         )
         .expect("accepted");
@@ -238,6 +262,7 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             rejected,
         )
         .expect("rejected due preserved");
@@ -284,6 +309,7 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             item,
         )
         .expect("normalized");
@@ -301,6 +327,7 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             rejected,
         )
         .expect("rejected due preserved");
@@ -318,6 +345,7 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             raw.clone(),
         )
         .expect("first");
@@ -325,6 +353,7 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             raw,
         )
         .expect("second");
@@ -338,9 +367,34 @@ mod tests {
             TaskProvider::Todoist,
             "session-1",
             Path::new("/tmp/session/summary.md"),
+            &[],
             raw("   "),
         );
 
         assert!(item.is_none());
+    }
+
+    #[test]
+    fn normalizer_copies_session_tags_to_todoist_labels() {
+        let tags = vec![
+            " project/acme ".to_string(),
+            "call/sales".to_string(),
+            "project/acme".to_string(),
+            " ".to_string(),
+        ];
+
+        let item = normalize_one(
+            TaskProvider::Todoist,
+            "session-1",
+            Path::new("/tmp/session/summary.md"),
+            &tags,
+            raw("Task"),
+        )
+        .expect("normalized");
+
+        assert_eq!(
+            item.labels,
+            vec!["project/acme".to_string(), "call/sales".to_string()]
+        );
     }
 }

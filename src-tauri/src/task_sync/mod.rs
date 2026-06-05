@@ -63,12 +63,7 @@ fn refresh_snapshot_for_session_if_available(
         return Ok(());
     };
     let snapshot_path = session_dir.join(&meta.artifacts.tasks_sync_file);
-    snapshot::write_snapshot(
-        &snapshot_path,
-        session_id,
-        TODOIST_PROVIDER.as_str(),
-        items,
-    )
+    snapshot::write_snapshot(&snapshot_path, session_id, TODOIST_PROVIDER.as_str(), items)
 }
 
 fn refresh_snapshot_for_session_if_session_exists(
@@ -110,6 +105,7 @@ pub fn preview_todoist_tasks_for_session(
         TODOIST_PROVIDER,
         session_id,
         &summary_path,
+        &meta.tags,
         extraction.items,
     );
 
@@ -187,7 +183,7 @@ mod tests {
         let mut meta = SessionMeta::new(
             "session-1".to_string(),
             "zoom".to_string(),
-            vec![],
+            vec!["project/acme".to_string(), "call/sales".to_string()],
             "Task sync preview".to_string(),
             String::new(),
         );
@@ -215,7 +211,23 @@ mod tests {
         assert!(preview.warnings.is_empty());
         assert_eq!(preview.items.len(), 1);
         assert_eq!(preview.items[0].title, "Send follow-up");
+        assert_eq!(
+            preview.items[0].labels,
+            vec!["project/acme".to_string(), "call/sales".to_string()]
+        );
+        let rows = queue::list_by_session(&app_data_dir, "session-1", TODOIST_PROVIDER.as_str())
+            .expect("queue rows");
+        assert_eq!(
+            rows[0].labels,
+            vec!["project/acme".to_string(), "call/sales".to_string()]
+        );
         assert!(session_dir.join("tasks_sync.json").exists());
+        let raw = std::fs::read_to_string(session_dir.join("tasks_sync.json")).expect("snapshot");
+        let json: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        assert_eq!(
+            json["items"][0]["labels"],
+            serde_json::json!(["project/acme", "call/sales"])
+        );
     }
 
     #[test]
@@ -253,6 +265,7 @@ mod tests {
                 priority: None,
                 assignee: None,
                 context: None,
+                labels: vec![],
                 source_session_id: "session-1".to_string(),
                 source_file_path: session_dir.join("summary.md").to_string_lossy().to_string(),
                 status: TaskSyncStatus::New,
@@ -341,6 +354,7 @@ mod tests {
                 priority: None,
                 assignee: None,
                 context: None,
+                labels: vec![],
                 source_session_id: "missing-session".to_string(),
                 source_file_path: "/tmp/missing/summary.md".to_string(),
                 status: TaskSyncStatus::New,
@@ -392,6 +406,7 @@ mod tests {
                 priority: None,
                 assignee: None,
                 context: None,
+                labels: vec![],
                 source_session_id: "session-1".to_string(),
                 source_file_path: session_dir.join("summary.md").to_string_lossy().to_string(),
                 status: TaskSyncStatus::New,

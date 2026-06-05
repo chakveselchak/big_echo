@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  AlignLeftOutlined,
+  CalendarOutlined,
+  CheckCircleOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
 import { Button, Checkbox, Empty, List, Modal, Space, Tag, Typography } from "antd";
 import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import type { TodoistActionItem, TodoistTaskPreview } from "../../types";
@@ -10,6 +16,9 @@ type TodoistExportModalProps = {
   onCancel: () => void;
   onAddSelected: (taskIds: string[]) => void;
 };
+
+const taskMetaIconStyle = { color: "#000" };
+const syncedIconStyle = { color: "#52c41a", marginLeft: 6 };
 
 function statusColor(status: TodoistActionItem["status"]) {
   if (status === "synced") return "green";
@@ -98,11 +107,13 @@ export function TodoistExportModal({
           dataSource={preview?.items ?? []}
           renderItem={(item) => {
             const disabled = item.status === "synced";
+            const checkboxId = `todoist-export-${item.id}`;
             return (
               <List.Item>
                 <List.Item.Meta
                   avatar={
                     <Checkbox
+                      id={checkboxId}
                       aria-label={`Select ${item.title}`}
                       checked={selectedIds.includes(item.id)}
                       disabled={disabled || syncing}
@@ -110,18 +121,46 @@ export function TodoistExportModal({
                     />
                   }
                   title={
-                    <Space size={8} wrap>
-                      <Typography.Text strong>{item.title}</Typography.Text>
-                      {item.status !== "new" ? <Tag color={statusColor(item.status)}>{item.status}</Tag> : null}
-                    </Space>
+                    <label htmlFor={checkboxId}>
+                      <Space size={8} wrap>
+                        <Typography.Text strong>
+                          {item.title}
+                          {item.status === "synced" ? (
+                            <CheckCircleOutlined aria-label="Synced" style={syncedIconStyle} />
+                          ) : null}
+                        </Typography.Text>
+                        {item.status !== "new" && item.status !== "synced" ? (
+                          <Tag color={statusColor(item.status)}>{item.status}</Tag>
+                        ) : null}
+                      </Space>
+                    </label>
                   }
                   description={
                     <Space direction="vertical" size={2} style={{ width: "100%" }}>
-                      {item.due ? <Typography.Text type="secondary">Due: {item.due}</Typography.Text> : null}
-                      {item.assignee ? (
-                        <Typography.Text type="secondary">Ответственный: {item.assignee}</Typography.Text>
+                      {item.due ? (
+                        <Typography.Text aria-label="Due" type="secondary">
+                          <Space size={6}>
+                            <CalendarOutlined aria-hidden style={taskMetaIconStyle} />
+                            <span>{item.due}</span>
+                          </Space>
+                        </Typography.Text>
                       ) : null}
-                      {item.context ? <Typography.Text>{item.context}</Typography.Text> : null}
+                      {item.assignee ? (
+                        <Typography.Text aria-label="Assignee" type="secondary">
+                          <Space size={6}>
+                            <UserOutlined aria-hidden style={taskMetaIconStyle} />
+                            <span>{item.assignee}</span>
+                          </Space>
+                        </Typography.Text>
+                      ) : null}
+                      {item.context ? (
+                        <Typography.Text type="secondary">
+                          <Space size={6}>
+                            <AlignLeftOutlined aria-hidden style={taskMetaIconStyle} />
+                            <span>{item.context}</span>
+                          </Space>
+                        </Typography.Text>
+                      ) : null}
                       {item.error ? <Typography.Text type="danger">{item.error}</Typography.Text> : null}
                     </Space>
                   }

@@ -67,6 +67,8 @@ pub struct ActionItem {
     pub priority: Option<i64>,
     pub assignee: Option<String>,
     pub context: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
     pub source_session_id: String,
     pub source_file_path: String,
     pub status: TaskSyncStatus,

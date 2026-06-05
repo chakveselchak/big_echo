@@ -19,6 +19,7 @@ function preview(): TodoistTaskPreview {
         priority: 3,
         assignee: "Андрей",
         context: "Context",
+        labels: ["project/acme", "call/sales"],
         sourceSessionId: "session-1",
         sourceFilePath: "/tmp/session/summary.md",
         status: "new",
@@ -34,6 +35,7 @@ function preview(): TodoistTaskPreview {
         priority: 1,
         assignee: null,
         context: null,
+        labels: [],
         sourceSessionId: "session-1",
         sourceFilePath: "/tmp/session/summary.md",
         status: "synced",
@@ -82,7 +84,7 @@ describe("TodoistExportModal", () => {
     expect(onAddSelected).toHaveBeenCalledWith(["id-1"]);
   });
 
-  it("shows due and assignee without internal status, priority, or source path", () => {
+  it("shows due and assignee with icons without internal status, priority, or source path", () => {
     render(
       <TodoistExportModal
         preview={preview()}
@@ -94,11 +96,64 @@ describe("TodoistExportModal", () => {
     );
 
     expect(screen.getByText("Task one")).toBeInTheDocument();
-    expect(screen.getByText("Due: 2026-06-05")).toBeInTheDocument();
-    expect(screen.getByText("Ответственный: Андрей")).toBeInTheDocument();
+    expect(screen.getByLabelText("Due")).toHaveTextContent("2026-06-05");
+    expect(screen.getByLabelText("Assignee")).toHaveTextContent("Андрей");
+    expect(screen.queryByText(/Due:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ответственный:/)).not.toBeInTheDocument();
     expect(screen.queryByText("new")).not.toBeInTheDocument();
     expect(screen.queryByText("p3")).not.toBeInTheDocument();
     expect(screen.queryByText("/tmp/session/summary.md")).not.toBeInTheDocument();
+  });
+
+  it("renders action item context with an icon as secondary typography", () => {
+    render(
+      <TodoistExportModal
+        preview={preview()}
+        open
+        syncing={false}
+        onCancel={vi.fn()}
+        onAddSelected={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Context").closest(".ant-typography")).toHaveClass(
+      "ant-typography-secondary",
+    );
+    expect(document.body.querySelector(".anticon-align-left")).toBeInTheDocument();
+  });
+
+  it("renders synced status as a check icon without status text", () => {
+    render(
+      <TodoistExportModal
+        preview={preview()}
+        open
+        syncing={false}
+        onCancel={vi.fn()}
+        onAddSelected={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("synced")).not.toBeInTheDocument();
+    expect(document.body.querySelector(".anticon-check-circle")).toBeInTheDocument();
+  });
+
+  it("uses the task title as the checkbox label", async () => {
+    const onAddSelected = vi.fn();
+
+    render(
+      <TodoistExportModal
+        preview={preview()}
+        open
+        syncing={false}
+        onCancel={vi.fn()}
+        onAddSelected={onAddSelected}
+      />,
+    );
+
+    await userEvent.click(screen.getByText("Task one"));
+    await userEvent.click(screen.getByRole("button", { name: "Add selected" }));
+
+    expect(onAddSelected).toHaveBeenCalledWith(["id-1"]);
   });
 
   it("resets selected tasks when preview changes", async () => {

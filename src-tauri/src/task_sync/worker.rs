@@ -129,7 +129,7 @@ where
                     Ok(true) => {}
                     Ok(false) | Err(_) => return ClaimRunResult::LostClaim,
                 },
-            }
+            },
         }
     }
 }
@@ -139,11 +139,11 @@ mod tests {
     use super::*;
     use crate::task_sync::model::{ActionItem, TaskSyncError, TaskSyncErrorKind, TaskSyncStatus};
     use crate::task_sync::queue;
+    use rusqlite::{params, Connection};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
-    use rusqlite::{params, Connection};
     use tempfile::tempdir;
 
     fn item(id: &str) -> ActionItem {
@@ -160,6 +160,7 @@ mod tests {
             priority: Some(1),
             assignee: None,
             context: None,
+            labels: vec![],
             source_session_id: session_id.to_string(),
             source_file_path: "/tmp/session/summary.md".to_string(),
             status: TaskSyncStatus::New,

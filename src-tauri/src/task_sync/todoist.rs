@@ -14,6 +14,8 @@ pub struct TodoistCreateTaskPayload {
     pub due_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,6 +29,7 @@ pub fn build_create_task_payload(item: &ActionItem) -> TodoistCreateTaskPayload 
         description: item.description.clone(),
         due_date: item.due.clone(),
         priority: item.priority,
+        labels: item.labels.clone(),
     }
 }
 
@@ -113,6 +116,7 @@ mod tests {
             priority: Some(3),
             assignee: Some("Андрей".to_string()),
             context: Some("Context".to_string()),
+            labels: vec!["project/acme".to_string(), "call/sales".to_string()],
             source_session_id: "session-1".to_string(),
             source_file_path: "/tmp/session/summary.md".to_string(),
             status: TaskSyncStatus::Queued,
@@ -132,6 +136,10 @@ mod tests {
         assert_eq!(json["description"], "Desc");
         assert_eq!(json["due_date"], "2026-06-05");
         assert_eq!(json["priority"], 3);
+        assert_eq!(
+            json["labels"],
+            serde_json::json!(["project/acme", "call/sales"])
+        );
         assert!(json.get("project_id").is_none());
         assert!(json.get("assignee").is_none());
         assert!(json.get("assignee_id").is_none());

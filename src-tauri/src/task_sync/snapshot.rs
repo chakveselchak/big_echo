@@ -50,6 +50,7 @@ mod tests {
             priority: Some(3),
             assignee: Some("Андрей".to_string()),
             context: None,
+            labels: vec!["project/acme".to_string()],
             source_session_id: "session-1".to_string(),
             source_file_path: "/tmp/session/summary.md".to_string(),
             status: TaskSyncStatus::Queued,

@@ -32,6 +32,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
           priority INTEGER,
           assignee TEXT,
           context TEXT,
+          labels TEXT NOT NULL DEFAULT '[]',
           source_session_id TEXT NOT NULL,
           source_file_path TEXT NOT NULL,
           external_task_id TEXT,
@@ -58,6 +59,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "claimed_at", "TEXT")?;
     add_column_if_missing(conn, "claim_owner", "TEXT")?;
     add_column_if_missing(conn, "claim_token", "TEXT")?;
+    add_column_if_missing(conn, "labels", "TEXT NOT NULL DEFAULT '[]'")?;
     Ok(())
 }
 
@@ -106,8 +108,10 @@ fn status_from_str(value: &str) -> TaskSyncStatus {
 }
 
 fn row_to_action_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActionItem> {
-    let status: String = row.get(10)?;
-    let retryable: Option<i64> = row.get(14)?;
+    let labels_raw: String = row.get(8)?;
+    let labels = serde_json::from_str::<Vec<String>>(&labels_raw).unwrap_or_default();
+    let status: String = row.get(11)?;
+    let retryable: Option<i64> = row.get(15)?;
     Ok(ActionItem {
         id: row.get(0)?,
         provider: row.get(1)?,
@@ -117,12 +121,13 @@ fn row_to_action_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActionItem> {
         priority: row.get(5)?,
         assignee: row.get(6)?,
         context: row.get(7)?,
-        source_session_id: row.get(8)?,
-        source_file_path: row.get(9)?,
+        labels,
+        source_session_id: row.get(9)?,
+        source_file_path: row.get(10)?,
         status: status_from_str(&status),
-        external_task_id: row.get(11)?,
-        error: row.get(12)?,
-        error_kind: row.get(13)?,
+        external_task_id: row.get(12)?,
+        error: row.get(13)?,
+        error_kind: row.get(14)?,
         retryable: retryable.map(|value| value != 0),
     })
 }
@@ -131,15 +136,16 @@ pub fn upsert_new_tasks(app_data_dir: &Path, items: &[ActionItem]) -> Result<(),
     let mut conn = open(app_data_dir)?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     for item in items {
+        let labels = serde_json::to_string(&item.labels).map_err(|e| e.to_string())?;
         tx.execute(
             "
             INSERT INTO task_sync_queue (
-                id, provider, title, description, due, priority, assignee, context,
+                id, provider, title, description, due, priority, assignee, context, labels,
                 source_session_id, source_file_path, external_task_id, status, error,
                 error_kind, retryable, created_at, queued_at, synced_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, 'new', NULL, NULL, NULL,
-                ?11, NULL, NULL
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, 'new', NULL, NULL, NULL,
+                ?12, NULL, NULL
             )
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
@@ -149,6 +155,7 @@ pub fn upsert_new_tasks(app_data_dir: &Path, items: &[ActionItem]) -> Result<(),
                 priority = excluded.priority,
                 assignee = excluded.assignee,
                 context = excluded.context,
+                labels = excluded.labels,
                 source_session_id = excluded.source_session_id,
                 source_file_path = excluded.source_file_path
             WHERE task_sync_queue.status IN ('new', 'queued', 'failed', 'skipped')
@@ -162,6 +169,7 @@ pub fn upsert_new_tasks(app_data_dir: &Path, items: &[ActionItem]) -> Result<(),
                 item.priority,
                 item.assignee,
                 item.context,
+                labels,
                 item.source_session_id,
                 item.source_file_path,
                 Local::now().to_rfc3339(),
@@ -182,7 +190,7 @@ pub fn list_by_session(
         .prepare(
             "
             SELECT
-                id, provider, title, description, due, priority, assignee, context,
+                id, provider, title, description, due, priority, assignee, context, labels,
                 source_session_id, source_file_path, status, external_task_id, error,
                 error_kind, retryable
             FROM task_sync_queue
@@ -244,7 +252,7 @@ pub fn next_pending_batch(
         Some(_) => {
             "
             SELECT
-                id, provider, title, description, due, priority, assignee, context,
+                id, provider, title, description, due, priority, assignee, context, labels,
                 source_session_id, source_file_path, status, external_task_id, error,
                 error_kind, retryable
             FROM task_sync_queue
@@ -256,7 +264,7 @@ pub fn next_pending_batch(
         None => {
             "
             SELECT
-                id, provider, title, description, due, priority, assignee, context,
+                id, provider, title, description, due, priority, assignee, context, labels,
                 source_session_id, source_file_path, status, external_task_id, error,
                 error_kind, retryable
             FROM task_sync_queue
@@ -296,7 +304,7 @@ pub fn claim_pending_batch(
         Some(_) => {
             "
             SELECT
-                id, provider, title, description, due, priority, assignee, context,
+                id, provider, title, description, due, priority, assignee, context, labels,
                 source_session_id, source_file_path, status, external_task_id, error,
                 error_kind, retryable
             FROM task_sync_queue
@@ -308,7 +316,7 @@ pub fn claim_pending_batch(
         None => {
             "
             SELECT
-                id, provider, title, description, due, priority, assignee, context,
+                id, provider, title, description, due, priority, assignee, context, labels,
                 source_session_id, source_file_path, status, external_task_id, error,
                 error_kind, retryable
             FROM task_sync_queue
@@ -691,6 +699,7 @@ mod tests {
             priority: Some(3),
             assignee: None,
             context: None,
+            labels: vec!["project/acme".to_string(), "call/sales".to_string()],
             source_session_id: "session-1".to_string(),
             source_file_path: "/tmp/session/summary.md".to_string(),
             status: TaskSyncStatus::New,
@@ -710,6 +719,10 @@ mod tests {
         let rows = list_by_session(tmp.path(), "session-1", "todoist").expect("list");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, TaskSyncStatus::New);
+        assert_eq!(
+            rows[0].labels,
+            vec!["project/acme".to_string(), "call/sales".to_string()]
+        );
     }
 
     #[test]
@@ -737,6 +750,7 @@ mod tests {
         updated.description = Some("Updated desc".to_string());
         updated.priority = Some(4);
         updated.context = Some("Updated context".to_string());
+        updated.labels = vec!["project/beta".to_string()];
         updated.source_file_path = "/tmp/session/new-summary.md".to_string();
         upsert_new_tasks(tmp.path(), &[updated]).expect("upsert updated");
 
@@ -745,6 +759,7 @@ mod tests {
         assert_eq!(rows[0].description.as_deref(), Some("Updated desc"));
         assert_eq!(rows[0].priority, Some(4));
         assert_eq!(rows[0].context.as_deref(), Some("Updated context"));
+        assert_eq!(rows[0].labels, vec!["project/beta".to_string()]);
         assert_eq!(rows[0].source_file_path, "/tmp/session/new-summary.md");
         assert_eq!(rows[0].status, TaskSyncStatus::New);
     }
@@ -768,15 +783,18 @@ mod tests {
     fn claimed_completion_requires_matching_token() {
         let tmp = tempdir().expect("tempdir");
         upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
-        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
-            .expect("enqueue");
+        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()]).expect("enqueue");
         let claimed = claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
 
         let wrong = mark_synced_claimed(tmp.path(), "id-1", "wrong-token", "todoist-task-1")
             .expect("wrong token mark");
-        let right =
-            mark_synced_claimed(tmp.path(), "id-1", &claimed[0].claim_token, "todoist-task-1")
-                .expect("right token mark");
+        let right = mark_synced_claimed(
+            tmp.path(),
+            "id-1",
+            &claimed[0].claim_token,
+            "todoist-task-1",
+        )
+        .expect("right token mark");
 
         assert!(!wrong);
         assert!(right);
@@ -828,8 +846,7 @@ mod tests {
     fn stale_syncing_rows_become_retryable_failures() {
         let tmp = tempdir().expect("tempdir");
         upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
-        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
-            .expect("enqueue");
+        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()]).expect("enqueue");
         claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
 
         let old_claim = (Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
@@ -855,8 +872,7 @@ mod tests {
     fn fresh_syncing_rows_are_not_failed() {
         let tmp = tempdir().expect("tempdir");
         upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
-        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
-            .expect("enqueue");
+        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()]).expect("enqueue");
         claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
 
         let (updated, session_ids) =
@@ -872,8 +888,7 @@ mod tests {
     fn fresh_syncing_rows_from_another_owner_are_not_failed() {
         let tmp = tempdir().expect("tempdir");
         upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
-        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
-            .expect("enqueue");
+        enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()]).expect("enqueue");
         claim_pending_batch(tmp.path(), Some("session-1"), 1).expect("claim");
 
         let conn = open(tmp.path()).expect("open db");

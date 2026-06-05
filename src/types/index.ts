@@ -118,6 +118,7 @@ export type TodoistActionItem = {
   priority: number | null;
   assignee: string | null;
   context: string | null;
+  labels: string[];
   sourceSessionId: string;
   sourceFilePath: string;
   status: TaskSyncStatus;
