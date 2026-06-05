@@ -41,6 +41,17 @@ export function getErrorMessage(value: unknown): string {
   return String(value);
 }
 
+export function redactSensitiveText(text: string): string {
+  return text
+    .replace(/\b(Bearer\s+)([^\s,;]+)/gi, "$1[redacted]")
+    .replace(
+      /\b((?:authorization|password|secret|token)\s*[:=]\s*)([^\s,;]+)/gi,
+      "$1[redacted]",
+    )
+    .replace(/\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})?\b/g, "[redacted]")
+    .replace(/\b(?:[A-Fa-f0-9]{32,}|[A-Za-z0-9+/_=-]{20,})\b/g, "[redacted]");
+}
+
 export function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));

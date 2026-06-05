@@ -1,8 +1,8 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
-import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
-import type { PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
+import { Badge, Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
+import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, DeploymentUnitOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
+import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
 import { extractStartTimeHm, resolveSessionAudioPath } from "../../lib/appUtils";
@@ -21,6 +21,8 @@ type SessionCardProps = {
   transcriptMatch: boolean;
   summaryMatch: boolean;
   showNumSpeakers: boolean;
+  brainUploadPending: boolean;
+  brainSyncReady: boolean;
   onContextMenu: (event: ReactMouseEvent<HTMLElement>, sessionId: string) => void;
   onDetailChange: (detail: SessionMetaView) => void;
   onOpenArtifact: (sessionId: string, kind: "transcript" | "summary") => void;
@@ -31,6 +33,7 @@ type SessionCardProps = {
   onDeleteAudio: (sessionId: string) => void;
   onFieldBlur: (sessionId: string, detail?: SessionMetaView) => void;
   onOpenFolder: (sessionDir: string) => void;
+  onUploadToBrain: (sessionId: string) => void;
   onExportTodoist: (sessionId: string) => void;
   todoistPending: boolean;
   setStatus: (status: string) => void;
@@ -47,6 +50,8 @@ function SessionCardImpl({
   transcriptMatch,
   summaryMatch,
   showNumSpeakers,
+  brainUploadPending,
+  brainSyncReady,
   onContextMenu,
   onDetailChange,
   onOpenArtifact,
@@ -57,6 +62,7 @@ function SessionCardImpl({
   onDeleteAudio,
   onFieldBlur,
   onOpenFolder,
+  onUploadToBrain,
   onExportTodoist,
   todoistPending,
   setStatus,
@@ -138,6 +144,21 @@ function SessionCardImpl({
   const sessionTitleMeta = startTimeHm
     ? `(${item.audio_format}) - ${item.display_date_ru} ${startTimeHm}`
     : `(${item.audio_format}) - ${item.display_date_ru}`;
+  const brainUploadStatus = brainUploadPending
+    ? "uploading"
+    : (item.brain_upload_status ?? "not_uploaded");
+  const brainLabelByStatus = {
+    uploaded: "Brain: загружено",
+    uploading: "Brain: загрузка",
+    failed: "Brain: ошибка",
+    not_uploaded: "Brain: не загружено",
+  } satisfies Record<BrainUploadStatus, string>;
+  const showBrainUploadButton =
+    hasAudio &&
+    brainSyncReady &&
+    !(brainUploadStatus === "uploaded" && item.brain_server_ingested_once);
+  const brainUploadDisabled =
+    brainUploadPending || brainUploadStatus === "uploading" || item.status === "recording";
 
   return (
     <article
@@ -176,6 +197,41 @@ function SessionCardImpl({
                 саммари
               </Button>
             )}
+            {showBrainUploadButton && (
+              <Button
+                htmlType="button"
+                type="text"
+                size="small"
+                shape="circle"
+                className="session-brain-upload-button"
+                aria-label="Загрузить в Brain"
+                title="Загрузить в Brain"
+                disabled={brainUploadDisabled}
+                icon={
+                  <Badge
+                    dot={brainUploadStatus !== "uploaded"}
+                    color="var(--danger)"
+                  >
+                    <DeploymentUnitOutlined aria-hidden="true" style={{color: "gray"}}/>
+                  </Badge>
+                }
+                onClick={() => onUploadToBrain(item.session_id)}
+              />
+            )}
+            {item.has_summary_text && (
+              <Button
+                htmlType="button"
+                type="text"
+                size="small"
+                shape="circle"
+                className="session-todoist-export-button"
+                aria-label="Export action items to Todoist"
+                title="Export action items to Todoist"
+                loading={todoistPending}
+                icon={<CheckSquareOutlined aria-hidden="true" style={{color: "gray"}} />}
+                onClick={() => onExportTodoist(item.session_id)}
+              />
+            )}
           </div>
           <div className="session-card-icon-actions">
             <Button
@@ -200,20 +256,6 @@ function SessionCardImpl({
                 title="Удалить аудио"
                 icon={<ClearOutlined aria-hidden="true" style={{color: "gray"}}/>}
                 onClick={() => onDeleteAudio(item.session_id)}
-              />
-            )}
-            {item.has_summary_text && (
-              <Button
-                htmlType="button"
-                type="text"
-                size="small"
-                shape="circle"
-                className="session-todoist-export-button"
-                aria-label="Export action items to Todoist"
-                title="Export action items to Todoist"
-                loading={todoistPending}
-                icon={<CheckSquareOutlined aria-hidden="true" style={{color: "gray"}}/>}
-                onClick={() => onExportTodoist(item.session_id)}
               />
             )}
             <Button
@@ -442,7 +484,7 @@ function SessionCardImpl({
                 Loading summary
               </span>
             )}
-            {pipelineState && (
+            {pipelineState ? (
               <span
                 className={
                   pipelineState.kind === "error"
@@ -452,7 +494,19 @@ function SessionCardImpl({
               >
                 {pipelineState.text}
               </span>
-            )}
+            ) : hasAudio && brainUploadStatus !== "not_uploaded" ? (
+              <span
+                className={
+                  brainUploadStatus === "failed"
+                    ? "retry-state retry-state-error"
+                    : brainUploadStatus === "uploaded"
+                      ? "retry-state retry-state-success"
+                      : "retry-state"
+                }
+              >
+                {brainLabelByStatus[brainUploadStatus]}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="session-card-footer-media">

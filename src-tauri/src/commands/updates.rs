@@ -47,7 +47,9 @@ pub struct UpdateInfo {
 
 /// Strip a leading `v` or `V` from a semver-like tag.
 pub(crate) fn normalize_tag(tag: &str) -> &str {
-    tag.strip_prefix('v').or_else(|| tag.strip_prefix('V')).unwrap_or(tag)
+    tag.strip_prefix('v')
+        .or_else(|| tag.strip_prefix('V'))
+        .unwrap_or(tag)
 }
 
 /// Return true if `latest` is strictly greater than `current` per semver.
@@ -416,8 +418,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         assert!(load_cached_check(tmp.path()).is_none());
 
-        std::fs::write(cache_file_path(tmp.path()), "{not json")
-            .expect("write corrupt cache");
+        std::fs::write(cache_file_path(tmp.path()), "{not json").expect("write corrupt cache");
         assert!(load_cached_check(tmp.path()).is_none());
     }
 }

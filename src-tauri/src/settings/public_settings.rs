@@ -6,6 +6,7 @@ use url::Url;
 
 pub const NEXARA_DEFAULT_TRANSCRIPTION_URL: &str =
     "https://api.nexara.ru/api/v1/audio/transcriptions";
+pub const BRAIN_SYNC_DEFAULT_URL: &str = "https://admin.my2brain.ru/api/v1/meetings/upload";
 
 const SALUTE_SPEECH_ALLOWED_SCOPES: &[&str] = &[
     "SALUTE_SPEECH_PERS",
@@ -45,9 +46,11 @@ pub struct PublicSettings {
     pub yandex_sync_enabled: bool,
     pub yandex_sync_interval: String,
     pub yandex_sync_remote_folder: String,
-    pub show_minitray_overlay: bool,
+    pub brain_sync_enabled: bool,
+    pub brain_sync_url: String,
     pub todoist_sync_enabled: bool,
     pub todoist_auto_add: bool,
+    pub show_minitray_overlay: bool,
 }
 
 impl Default for PublicSettings {
@@ -80,9 +83,11 @@ impl Default for PublicSettings {
             yandex_sync_enabled: false,
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
-            show_minitray_overlay: false,
+            brain_sync_enabled: false,
+            brain_sync_url: BRAIN_SYNC_DEFAULT_URL.to_string(),
             todoist_sync_enabled: false,
             todoist_auto_add: false,
+            show_minitray_overlay: false,
         }
     }
 }
@@ -136,6 +141,13 @@ impl PublicSettings {
         if !self.summary_url.is_empty() {
             Self::parse_http_url(&self.summary_url, "summary")?;
         }
+        let brain_sync_url = self.brain_sync_url.trim();
+        if self.brain_sync_enabled && brain_sync_url.is_empty() {
+            return Err("Invalid Brain sync URL".to_string());
+        }
+        if !brain_sync_url.is_empty() {
+            Self::parse_http_url(brain_sync_url, "Brain sync")?;
+        }
         if self.transcription_task != "transcribe" && self.transcription_task != "diarize" {
             return Err("Invalid transcription task".to_string());
         }
@@ -183,10 +195,12 @@ pub fn load_settings(app_data_dir: &Path) -> Result<PublicSettings, String> {
 }
 
 pub fn save_settings(app_data_dir: &Path, settings: &PublicSettings) -> Result<(), String> {
-    settings.validate()?;
+    let mut normalized = settings.clone();
+    normalized.brain_sync_url = normalized.brain_sync_url.trim().to_string();
+    normalized.validate()?;
     fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
     let path = settings_file_path(app_data_dir);
-    let body = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    let body = serde_json::to_string_pretty(&normalized).map_err(|e| e.to_string())?;
     fs::write(path, body).map_err(|e| e.to_string())
 }
 
@@ -499,8 +513,7 @@ mod tests {
             "auto_run_pipeline_on_stop":false,
             "api_call_logging_enabled":false
         }"#;
-        let parsed: PublicSettings =
-            serde_json::from_str(body).expect("settings should parse");
+        let parsed: PublicSettings = serde_json::from_str(body).expect("settings should parse");
         assert!(!parsed.auto_delete_audio_enabled);
         assert_eq!(parsed.auto_delete_audio_days, 30);
     }
@@ -562,7 +575,10 @@ mod tests {
             yandex_sync_interval: "5m".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex sync interval".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex sync interval".to_string())
+        );
     }
 
     #[test]
@@ -571,7 +587,10 @@ mod tests {
             yandex_sync_remote_folder: "BigEcho/../evil".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]
@@ -580,7 +599,10 @@ mod tests {
             yandex_sync_remote_folder: "   /".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]
@@ -589,7 +611,10 @@ mod tests {
             yandex_sync_remote_folder: "Big\\Echo".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]
@@ -598,7 +623,10 @@ mod tests {
             yandex_sync_remote_folder: "Big\nEcho".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]
@@ -633,49 +661,47 @@ mod tests {
     }
 
     #[test]
-    fn todoist_settings_default_to_manual_disabled_sync() {
+    fn brain_sync_defaults_are_disabled_with_upload_url() {
         let settings = PublicSettings::default();
 
-        assert!(!settings.todoist_sync_enabled);
-        assert!(!settings.todoist_auto_add);
+        assert!(!settings.brain_sync_enabled);
+        assert_eq!(settings.brain_sync_url, BRAIN_SYNC_DEFAULT_URL);
     }
 
     #[test]
-    fn missing_todoist_settings_use_defaults() {
-        let raw = r#"{
-        "recording_root":"./recordings",
-        "artifact_open_app":"",
-        "transcription_provider":"nexara",
-        "transcription_url":"",
-        "transcription_task":"transcribe",
-        "transcription_diarization_setting":"general",
-        "salute_speech_scope":"SALUTE_SPEECH_CORP",
-        "salute_speech_model":"general",
-        "salute_speech_language":"ru-RU",
-        "salute_speech_sample_rate":48000,
-        "salute_speech_channels_count":1,
-        "apple_speech_locale":"ru_RU",
-        "summary_url":"",
-        "summary_prompt":"",
-        "openai_model":"gpt-5.1-codex-mini",
-        "audio_format":"opus",
-        "opus_bitrate_kbps":24,
-        "mic_device_name":"",
-        "system_device_name":"",
-        "artifact_opener_app":"",
-        "auto_run_pipeline_on_stop":false,
-        "api_call_logging_enabled":false,
-        "auto_delete_audio_enabled":false,
-        "auto_delete_audio_days":30,
-        "yandex_sync_enabled":false,
-        "yandex_sync_interval":"24h",
-        "yandex_sync_remote_folder":"BigEcho",
-        "show_minitray_overlay":false
-    }"#;
+    fn missing_brain_sync_fields_use_defaults() {
+        let json = serde_json::json!({
+            "transcription_provider": "nexara",
+            "transcription_url": "",
+            "transcription_task": "transcribe",
+            "transcription_diarization_setting": "general",
+        });
+        let parsed: PublicSettings =
+            serde_json::from_value(json).expect("legacy settings without Brain sync fields");
 
-        let settings: PublicSettings = serde_json::from_str(raw).expect("legacy settings");
+        assert!(!parsed.brain_sync_enabled);
+        assert_eq!(parsed.brain_sync_url, BRAIN_SYNC_DEFAULT_URL);
+    }
 
-        assert!(!settings.todoist_sync_enabled);
-        assert!(!settings.todoist_auto_add);
+    #[test]
+    fn rejects_enabled_brain_sync_with_invalid_url() {
+        let s = PublicSettings {
+            brain_sync_enabled: true,
+            brain_sync_url: "ftp://example.com/upload".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(s.validate(), Err("Invalid Brain sync URL".to_string()));
+    }
+
+    #[test]
+    fn accepts_enabled_brain_sync_with_https_url() {
+        let s = PublicSettings {
+            brain_sync_enabled: true,
+            brain_sync_url: "  https://example.com/upload  ".to_string(),
+            ..Default::default()
+        };
+
+        assert!(s.validate().is_ok());
     }
 }

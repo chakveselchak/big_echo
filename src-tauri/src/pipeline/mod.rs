@@ -1157,7 +1157,10 @@ pub(crate) fn resolve_summary_prompt<'a>(
     settings: &'a PublicSettings,
     custom_prompt: Option<&'a str>,
 ) -> &'a str {
-    if let Some(prompt) = custom_prompt.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(prompt) = custom_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         return prompt;
     }
     if settings.summary_prompt.trim().is_empty() {
@@ -1344,8 +1347,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1424,8 +1426,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1532,8 +1533,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1671,8 +1671,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1782,8 +1781,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -1910,8 +1908,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2085,8 +2082,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2160,8 +2156,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
@@ -2218,8 +2213,7 @@ mod tests {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             show_minitray_overlay: false,
-            todoist_sync_enabled: false,
-            todoist_auto_add: false,
+            ..Default::default()
         };
 
         assert_eq!(

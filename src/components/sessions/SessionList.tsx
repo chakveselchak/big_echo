@@ -39,6 +39,7 @@ type SessionListProps = {
   sessionArtifactSearchHits: Record<string, { transcript_match?: boolean; summary_match?: boolean }>;
   textPendingBySession: Record<string, boolean>;
   summaryPendingBySession: Record<string, boolean>;
+  brainUploadPendingBySession: Record<string, boolean>;
   pipelineStateBySession: Record<string, PipelineUiState>;
   deleteTarget: DeleteTarget | null;
   deletePendingSessionId: string | null;
@@ -49,6 +50,7 @@ type SessionListProps = {
   artifactPreview: SessionArtifactPreview | null;
   knownTags: string[];
   settings: PublicSettings | null;
+  brainSyncReady: boolean;
   transcriptionProvider: string | null;
   setDeleteTarget: (target: DeleteTarget | null) => void;
   setAudioDeleteTargetSessionId: (sessionId: string | null) => void;
@@ -64,6 +66,7 @@ type SessionListProps = {
   flushSessionDetails: (sessionId: string, detail?: SessionMetaView) => void;
   requestDeleteSession: (sessionId: string, isRecording: boolean) => void;
   requestDeleteAudio: (sessionId: string) => void;
+  onUploadToBrain: (sessionId: string) => void;
   setStatus: (status: string) => void;
 };
 
@@ -76,6 +79,7 @@ export function SessionList({
   sessionArtifactSearchHits,
   textPendingBySession,
   summaryPendingBySession,
+  brainUploadPendingBySession,
   pipelineStateBySession,
   deleteTarget,
   deletePendingSessionId,
@@ -86,6 +90,7 @@ export function SessionList({
   artifactPreview,
   knownTags,
   settings,
+  brainSyncReady,
   transcriptionProvider,
   setDeleteTarget,
   setAudioDeleteTargetSessionId,
@@ -101,6 +106,7 @@ export function SessionList({
   flushSessionDetails,
   requestDeleteSession,
   requestDeleteAudio,
+  onUploadToBrain,
   setStatus,
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
@@ -427,6 +433,7 @@ export function SessionList({
               const detail = getSessionDetail(item);
               const textPending = Boolean(textPendingBySession[item.session_id]);
               const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
+              const brainUploadPending = Boolean(brainUploadPendingBySession[item.session_id]);
               const pipelineState = pipelineStateBySession[item.session_id];
               const query = sessionSearchQuery.trim().toLowerCase();
               const artifactHit = sessionArtifactSearchHits[item.session_id];
@@ -446,6 +453,8 @@ export function SessionList({
                   transcriptMatch={transcriptMatch}
                   summaryMatch={summaryMatch}
                   showNumSpeakers={transcriptionProvider === "nexara"}
+                  brainUploadPending={brainUploadPending}
+                  brainSyncReady={brainSyncReady}
                   onContextMenu={openSessionContextMenu}
                   onDetailChange={(nextDetail) =>
                     setSessionDetails((prev) => ({ ...prev, [item.session_id]: nextDetail }))
@@ -458,6 +467,7 @@ export function SessionList({
                   onDeleteAudio={requestDeleteAudio}
                   onFieldBlur={flushSessionDetails}
                   onOpenFolder={openSessionFolder}
+                  onUploadToBrain={onUploadToBrain}
                   onExportTodoist={(sessionId) => void openTodoistExport(sessionId)}
                   todoistPending={todoistPendingSessionId === item.session_id}
                   setStatus={setStatus}

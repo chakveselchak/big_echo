@@ -25,9 +25,11 @@ export type PublicSettings = {
   yandex_sync_enabled: boolean;
   yandex_sync_interval: "1h" | "6h" | "24h" | "48h";
   yandex_sync_remote_folder: string;
-  show_minitray_overlay: boolean;
+  brain_sync_enabled: boolean;
+  brain_sync_url: string;
   todoist_sync_enabled: boolean;
   todoist_auto_add: boolean;
+  show_minitray_overlay: boolean;
 };
 
 export type MacosSystemAudioPermissionStatus = {
@@ -39,6 +41,16 @@ export type StartResponse = {
   session_id: string;
   session_dir: string;
   status: string;
+};
+
+export type BrainUploadStatus = "not_uploaded" | "uploading" | "uploaded" | "failed";
+
+export type BrainUploadResponse = {
+  ok: boolean;
+  job_id?: number | null;
+  status?: string | null;
+  duplicate?: boolean | null;
+  error?: string | null;
 };
 
 export type RecordingInputChannel = "mic" | "system";
@@ -60,6 +72,10 @@ export type SessionListItem = {
   audio_duration_hms: string;
   has_transcript_text: boolean;
   has_summary_text: boolean;
+  brain_upload_status: BrainUploadStatus;
+  brain_server_ingested_once?: boolean;
+  brain_upload_last_error?: string;
+  brain_upload_updated_at_iso?: string;
   meta?: SessionMetaView;
 };
 
@@ -84,7 +100,7 @@ export type UiSyncStateView = {
 export type SecretSaveState = "unknown" | "updated" | "unchanged" | "error";
 export type PipelineUiState = { kind: "success" | "error"; text: string };
 export type LiveInputLevels = { mic: number; system: number };
-export type SettingsTab = "audiototext" | "generals" | "audio" | "yandex" | "todoist";
+export type SettingsTab = "audiototext" | "generals" | "audio" | "yandex" | "brain" | "todoist";
 export type DeleteTarget = { sessionId: string; force: boolean };
 
 export type TextEditorAppOption = {

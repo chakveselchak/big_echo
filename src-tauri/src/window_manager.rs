@@ -104,13 +104,12 @@ pub(crate) fn open_settings_window_internal(app: &AppHandle) -> Result<(), Strin
         return Ok(());
     }
 
-    let window =
-        WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
-            .title("BigEcho Settings")
-            .inner_size(720.0, 620.0)
-            .resizable(true)
-            .build()
-            .map_err(|e| e.to_string())?;
+    let window = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
+        .title("BigEcho Settings")
+        .inner_size(720.0, 620.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| e.to_string())?;
     let _ = apply_app_icons_for_theme(app, resolve_system_theme(app));
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
@@ -126,14 +125,13 @@ pub(crate) fn open_tray_window_internal(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut builder =
-        WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
-            .title("BigEcho Recorder")
-            .inner_size(430.0, 200.0)
-            .resizable(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible(false);
+    let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
+        .title("BigEcho Recorder")
+        .inner_size(430.0, 200.0)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false);
 
     #[cfg(target_os = "macos")]
     {
@@ -158,14 +156,13 @@ pub(crate) fn prewarm_tray_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut builder =
-        WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
-            .title("BigEcho Recorder")
-            .inner_size(430.0, 200.0)
-            .resizable(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible(false);
+    let mut builder = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html".into()))
+        .title("BigEcho Recorder")
+        .inner_size(430.0, 200.0)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false);
 
     #[cfg(target_os = "macos")]
     {

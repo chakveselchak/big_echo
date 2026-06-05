@@ -1,8 +1,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
+use serde::Serialize;
 #[cfg(test)]
 use std::cell::RefCell;
-use serde::Serialize;
 use std::fs::{remove_file, File};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -506,11 +506,11 @@ fn start_macos_native_system_capture(
 
     #[cfg(not(test))]
     {
-    let path = temp_raw_path("sys");
-    let result = start_macos_native_system_capture_at(&path);
-    if result.is_err() {
-        cleanup_temp_capture_paths(&path, None);
-    }
+        let path = temp_raw_path("sys");
+        let result = start_macos_native_system_capture_at(&path);
+        if result.is_err() {
+            cleanup_temp_capture_paths(&path, None);
+        }
         result.map(Some)
     }
 }
@@ -1095,8 +1095,16 @@ mod tests {
         levels.update_system_meter(0.03);
 
         let snapshot = levels.snapshot();
-        assert!(snapshot.system > 0.2, "expected perceptual boost, got {}", snapshot.system);
-        assert!(snapshot.system > 0.03, "expected mapped level above raw RMS, got {}", snapshot.system);
+        assert!(
+            snapshot.system > 0.2,
+            "expected perceptual boost, got {}",
+            snapshot.system
+        );
+        assert!(
+            snapshot.system > 0.03,
+            "expected mapped level above raw RMS, got {}",
+            snapshot.system
+        );
     }
 
     #[test]
@@ -1169,7 +1177,9 @@ mod tests {
 
         let merged = merge_capture_results(
             Ok(Ok(artifacts)),
-            Some(Err("Failed to stop native macOS system audio capture".to_string())),
+            Some(Err(
+                "Failed to stop native macOS system audio capture".to_string()
+            )),
         )
         .expect("mic recording must survive system-audio failure");
 
@@ -1202,7 +1212,10 @@ mod tests {
             merged.system_path.as_deref(),
             Some(std::path::Path::new("/tmp/bigecho_sys_warn.raw"))
         );
-        assert_eq!(merged.system_finalize_warning.as_deref(), Some("teardown warning"));
+        assert_eq!(
+            merged.system_finalize_warning.as_deref(),
+            Some("teardown warning")
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1251,10 +1264,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn merge_propagates_thread_panic_as_error() {
-        let result = merge_capture_results(
-            Err("Audio capture thread panicked".to_string()),
-            None,
-        );
+        let result = merge_capture_results(Err("Audio capture thread panicked".to_string()), None);
         assert!(matches!(result, Err(ref err) if err.contains("panicked")));
     }
 }

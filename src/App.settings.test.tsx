@@ -19,7 +19,6 @@ const { invokeMock } = vi.hoisted(() => ({
         salute_speech_language: "ru-RU",
         salute_speech_sample_rate: 48000,
         salute_speech_channels_count: 1,
-        apple_speech_locale: "en-US",
         summary_url: "",
         summary_prompt: "",
         openai_model: "gpt-4.1-mini",
@@ -34,9 +33,9 @@ const { invokeMock } = vi.hoisted(() => ({
         yandex_sync_enabled: false,
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
+        brain_sync_enabled: false,
+        brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
         show_minitray_overlay: false,
-        todoist_sync_enabled: false,
-        todoist_auto_add: false,
       };
     }
     if (cmd === "detect_system_source_device") {
@@ -71,9 +70,10 @@ const { invokeMock } = vi.hoisted(() => ({
         failed: 0,
         errors: [],
       });
-    if (cmd === "todoist_sync_has_token") return Promise.resolve(false);
-    if (cmd === "todoist_sync_set_token") return Promise.resolve();
-    if (cmd === "todoist_sync_clear_token") return Promise.resolve();
+    if (cmd === "brain_sync_has_token") return Promise.resolve(false);
+    if (cmd === "brain_sync_upload_archive") {
+      return Promise.resolve({ total: 0, uploaded: 0, skipped: 0, failed: 0, errors: [] });
+    }
     return null;
   }),
 }));
@@ -92,6 +92,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { App } from "./App";
+
+const BRAIN_UNLOCK_STORAGE_KEY = "bigecho.brain_sync.unlocked";
 
 function getAntdSelect(label: string) {
   const combobox = screen.getByRole("combobox", { name: label });
@@ -145,7 +147,6 @@ function mockSettings() {
     salute_speech_language: "ru-RU",
     salute_speech_sample_rate: 48000,
     salute_speech_channels_count: 1,
-    apple_speech_locale: "en-US",
     summary_url: "",
     summary_prompt: "",
     openai_model: "gpt-4.1-mini",
@@ -160,15 +161,16 @@ function mockSettings() {
     yandex_sync_enabled: false,
     yandex_sync_interval: "24h",
     yandex_sync_remote_folder: "BigEcho",
+    brain_sync_enabled: false,
+    brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
     show_minitray_overlay: false,
-    todoist_sync_enabled: false,
-    todoist_auto_add: false,
   };
 }
 
 describe("App settings window", () => {
   beforeEach(() => {
     invokeMock.mockClear();
+    window.localStorage.clear();
   });
 
   it("loads settings and auto-detects system source", async () => {
@@ -679,53 +681,6 @@ describe("App settings window", () => {
     await screen.findByText(/Enable Yandex\.Disk sync/i);
   });
 
-  test("renders the Todoist sync tab and saves a token", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    const tab = await screen.findByRole("tab", { name: /Todoist sync/i });
-    await user.click(tab);
-    await user.type(screen.getByLabelText(/API token/i), "todoist-secret");
-    await user.click(screen.getByRole("button", { name: /Save token/i }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("todoist_sync_set_token", {
-        token: "todoist-secret",
-      });
-    });
-  });
-
-  it("normalizes Todoist auto-add when the saved token is missing", async () => {
-    invokeMock.mockImplementationOnce(async (cmd: string) => {
-      if (cmd === "get_settings") {
-        return {
-          ...mockSettings(),
-          todoist_sync_enabled: true,
-          todoist_auto_add: true,
-        };
-      }
-      return null;
-    });
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("todoist_sync_has_token");
-    });
-
-    await screen.findByRole("button", { name: "Save settings" });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
-        payload: expect.objectContaining({
-          todoist_sync_enabled: true,
-          todoist_auto_add: false,
-        }),
-      });
-    });
-  });
-
   test("shows Sync now next to Save settings only on Yandex tab, disabled without token", async () => {
     render(<App />);
     expect(screen.queryByRole("button", { name: /Sync now/i })).not.toBeInTheDocument();
@@ -736,6 +691,48 @@ describe("App settings window", () => {
     const syncNow = await screen.findByRole("button", { name: /Sync now/i });
     expect(syncNow).toBeDisabled();
     expect(screen.getByRole("button", { name: /Save settings/i })).toBeInTheDocument();
+  });
+
+  it("hides the Brain sync tab when not unlocked", async () => {
+    render(<App />);
+
+    await screen.findByRole("tab", { name: "Generals" });
+    expect(screen.queryByRole("tab", { name: /Brain sync/i })).toBeNull();
+  });
+
+  it("shows the Brain sync tab when previously unlocked", async () => {
+    window.localStorage.setItem(BRAIN_UNLOCK_STORAGE_KEY, "1");
+    render(<App />);
+
+    expect(await screen.findByRole("tab", { name: /Brain sync/i })).toBeInTheDocument();
+  });
+
+  it("renders the Brain sync tab and saves Brain sync fields", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(BRAIN_UNLOCK_STORAGE_KEY, "1");
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: /Brain sync/i }));
+
+    const enabled = await screen.findByRole("checkbox", {
+      name: "Автоматически загружать новые записи в Brain",
+    });
+    await user.click(enabled);
+
+    const url = screen.getByLabelText("URL загрузки в Brain");
+    await user.clear(url);
+    await user.type(url, "https://brain.example.test/upload");
+
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
+        payload: expect.objectContaining({
+          brain_sync_enabled: true,
+          brain_sync_url: "https://brain.example.test/upload",
+        }),
+      });
+    });
   });
 
   it("toggles show_minitray_overlay via checkbox in Generals", async () => {

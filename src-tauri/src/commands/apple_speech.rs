@@ -30,10 +30,7 @@ struct DownloadProgress {
 /// `apple-speech://download-progress` events with `{locale, progress: 0..1}`
 /// while running. Resolves on success or returns a string error.
 #[tauri::command]
-pub async fn apple_speech_download_locale(
-    app: AppHandle,
-    locale: String,
-) -> Result<(), String> {
+pub async fn apple_speech_download_locale(app: AppHandle, locale: String) -> Result<(), String> {
     let locale_clone = locale.clone();
     apple_speech::download_locale(&locale, |progress| {
         let _ = app.emit(

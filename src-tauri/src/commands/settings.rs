@@ -1,8 +1,8 @@
 use crate::app_state::{AppDirs, AppState};
 pub use crate::audio::macos_system_audio::MacosSystemAudioPermissionStatus;
+use crate::get_settings_from_dirs;
 use crate::settings::public_settings::{save_settings, PublicSettings};
 use crate::window_manager::{open_settings_window_internal, open_tray_window_internal};
-use crate::get_settings_from_dirs;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -108,8 +108,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        let _guard = minitray::TEST_LOCK.lock().unwrap();
-        minitray::hide(); // baseline
+        let _guard = minitray::acquire_test_lock();
+        minitray::reset_test_state();
 
         let show_calls = Arc::new(AtomicUsize::new(0));
         let show_for_sink = Arc::clone(&show_calls);
@@ -146,8 +146,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        let _guard = minitray::TEST_LOCK.lock().unwrap();
-        minitray::hide(); // baseline
+        let _guard = minitray::acquire_test_lock();
+        minitray::reset_test_state();
 
         let hide_calls = Arc::new(AtomicUsize::new(0));
         let hide_for_sink = Arc::clone(&hide_calls);
@@ -188,8 +188,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
-        let _guard = minitray::TEST_LOCK.lock().unwrap();
-        minitray::hide(); // baseline
+        let _guard = minitray::acquire_test_lock();
+        minitray::reset_test_state();
 
         let show_calls = Arc::new(AtomicUsize::new(0));
         let show_for_sink = Arc::clone(&show_calls);

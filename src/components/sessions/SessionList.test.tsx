@@ -1,67 +1,23 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { SessionList } from "./SessionList";
 import type { SessionListItem } from "../../types";
 
-const todoistTasksMock = vi.hoisted(() => ({
-  openPreview: vi.fn(),
-  closePreview: vi.fn(),
-  enqueueAndSync: vi.fn(),
-  state: {
-    preview: null as { sessionId: string } | null,
-    loading: false,
-    syncing: false,
-  },
-}));
-
 vi.mock("./SessionCard", () => ({
   SessionCard: ({
     item,
-    onExportTodoist,
-    todoistPending,
+    onUploadToBrain,
   }: {
     item: SessionListItem;
-    onExportTodoist: (sessionId: string) => void;
-    todoistPending: boolean;
+    onUploadToBrain: (sessionId: string) => void;
   }) => (
     <div data-testid="session-card" data-session-id={item.session_id}>
-      {item.has_summary_text && (
-        <button
-          type="button"
-          aria-label="Export action items to Todoist"
-          data-pending={todoistPending}
-          onClick={() => onExportTodoist(item.session_id)}
-        >
-          Todoist
-        </button>
-      )}
+      <button type="button" onClick={() => onUploadToBrain(item.session_id)}>
+        upload {item.session_id}
+      </button>
     </div>
   ),
-}));
-
-vi.mock("../../hooks/useTodoistTasks", () => ({
-  useTodoistTasks: () => ({
-    ...todoistTasksMock.state,
-    openPreview: todoistTasksMock.openPreview,
-    closePreview: todoistTasksMock.closePreview,
-    enqueueAndSync: todoistTasksMock.enqueueAndSync,
-  }),
-}));
-
-vi.mock("./TodoistExportModal", () => ({
-  TodoistExportModal: ({
-    open,
-    onAddSelected,
-  }: {
-    open: boolean;
-    onAddSelected: (taskIds: string[]) => void;
-  }) =>
-    open ? (
-      <button type="button" onClick={() => onAddSelected(["id-1"])}>
-        Add mocked Todoist task
-      </button>
-    ) : null,
 }));
 
 vi.mock("./DeleteConfirmModal", () => ({
@@ -108,12 +64,6 @@ class MockIntersectionObserver {
 
 beforeEach(() => {
   ioInstances.length = 0;
-  todoistTasksMock.openPreview.mockReset();
-  todoistTasksMock.closePreview.mockReset();
-  todoistTasksMock.enqueueAndSync.mockReset();
-  todoistTasksMock.state.preview = null;
-  todoistTasksMock.state.loading = false;
-  todoistTasksMock.state.syncing = false;
   vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 });
 
@@ -135,6 +85,7 @@ function makeSession(i: number): SessionListItem {
     audio_duration_hms: "00:00:00",
     has_transcript_text: false,
     has_summary_text: false,
+    brain_upload_status: "not_uploaded",
   };
 }
 
@@ -153,6 +104,7 @@ function renderList(
     sessionArtifactSearchHits: {},
     textPendingBySession: {},
     summaryPendingBySession: {},
+    brainUploadPendingBySession: {},
     pipelineStateBySession: {},
     deleteTarget: null,
     deletePendingSessionId: null,
@@ -163,7 +115,7 @@ function renderList(
     artifactPreview: null,
     knownTags: [],
     settings: null,
-    transcriptionProvider: null,
+    brainSyncReady: true,
     setDeleteTarget: noop,
     setAudioDeleteTargetSessionId: noop,
     confirmDeleteSession: noopAsync,
@@ -177,6 +129,7 @@ function renderList(
     flushSessionDetails: noop,
     requestDeleteSession: noop,
     requestDeleteAudio: noop,
+    onUploadToBrain: noop,
     setStatus: noop,
     ...overrides,
   };
@@ -184,6 +137,15 @@ function renderList(
 }
 
 describe("SessionList lazy loading", () => {
+  it("passes the Brain upload callback to session cards", () => {
+    const onUploadToBrain = vi.fn();
+    renderList([makeSession(1)], { onUploadToBrain });
+
+    fireEvent.click(screen.getByRole("button", { name: "upload s-1" }));
+
+    expect(onUploadToBrain).toHaveBeenCalledWith("s-1");
+  });
+
   it("renders only the first 20 cards when there are more than 20 sessions", () => {
     const sessions = Array.from({ length: 25 }, (_, i) => makeSession(i));
     renderList(sessions);
@@ -267,6 +229,7 @@ describe("SessionList lazy loading", () => {
         sessionArtifactSearchHits={{}}
         textPendingBySession={{}}
         summaryPendingBySession={{}}
+        brainUploadPendingBySession={{}}
         pipelineStateBySession={{}}
         deleteTarget={null}
         deletePendingSessionId={null}
@@ -277,7 +240,7 @@ describe("SessionList lazy loading", () => {
         artifactPreview={null}
         knownTags={[]}
         settings={null}
-        transcriptionProvider={null}
+        brainSyncReady={true}
         setDeleteTarget={noop}
         setAudioDeleteTargetSessionId={noop}
         confirmDeleteSession={noopAsync}
@@ -291,44 +254,11 @@ describe("SessionList lazy loading", () => {
         flushSessionDetails={noop}
         requestDeleteSession={noop}
         requestDeleteAudio={noop}
+        onUploadToBrain={noop}
         setStatus={noop}
       />,
     );
 
     expect(screen.getAllByTestId("session-card")).toHaveLength(30);
-  });
-
-  it("opens Todoist preview from a session with summary", async () => {
-    const sessions = [{ ...makeSession(1), has_summary_text: true }];
-    todoistTasksMock.openPreview.mockResolvedValue({
-      sessionId: "s-1",
-      summaryPath: "/tmp/s-1/summary.md",
-      warnings: [],
-      items: [],
-    });
-
-    renderList(sessions);
-    await act(async () => {
-      screen.getByRole("button", { name: "Export action items to Todoist" }).click();
-    });
-
-    expect(todoistTasksMock.openPreview).toHaveBeenCalledWith("s-1");
-  });
-
-  it("syncs selected Todoist task IDs from the modal", async () => {
-    const setStatus = vi.fn();
-    const sessions = [{ ...makeSession(1), has_summary_text: true }];
-    todoistTasksMock.state.preview = { sessionId: "s-1" };
-    todoistTasksMock.enqueueAndSync.mockResolvedValue({ synced: 1, failed: 0 });
-
-    renderList(sessions, { setStatus });
-    screen.getByRole("button", { name: "Add mocked Todoist task" }).click();
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(todoistTasksMock.enqueueAndSync).toHaveBeenCalledWith("s-1", ["id-1"]);
-    expect(setStatus).toHaveBeenCalledWith("todoist_synced: 1 synced, 0 failed");
   });
 });

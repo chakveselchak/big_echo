@@ -152,7 +152,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
             existing.audio_format === fresh.audio_format &&
             existing.audio_duration_hms === fresh.audio_duration_hms &&
             existing.has_transcript_text === fresh.has_transcript_text &&
-            existing.has_summary_text === fresh.has_summary_text
+            existing.has_summary_text === fresh.has_summary_text &&
+            existing.brain_upload_status === fresh.brain_upload_status &&
+            existing.brain_server_ingested_once === fresh.brain_server_ingested_once &&
+            existing.brain_upload_last_error === fresh.brain_upload_last_error &&
+            existing.brain_upload_updated_at_iso === fresh.brain_upload_updated_at_iso
           ) {
             merged.push(existing);
           } else {
@@ -703,6 +707,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     sessions,
     setAudioDeleteTargetSessionId,
     setDeleteTarget,
+    setPipelineStateBySession,
     setSessionDetails,
     setSessionSearchQuery,
     summaryPendingBySession,

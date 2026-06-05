@@ -2,18 +2,13 @@ use crate::app_state::{AppDirs, AppState};
 use crate::services::yandex_disk::runner::{execute_sync, TOKEN_KEY};
 use crate::services::yandex_disk::state::{LastRunSummary, YandexSyncStatus};
 use crate::settings::secret_store::{clear_secret, get_secret, set_secret};
+use crate::settings::token_validation::validate_secret_token;
 use tauri::{Manager, Runtime, State, WebviewWindow};
 
 #[tauri::command]
-pub async fn yandex_sync_set_token(
-    dirs: State<'_, AppDirs>,
-    token: String,
-) -> Result<(), String> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return Err("Token must not be empty".to_string());
-    }
-    set_secret(&dirs.app_data_dir, TOKEN_KEY, trimmed)
+pub async fn yandex_sync_set_token(dirs: State<'_, AppDirs>, token: String) -> Result<(), String> {
+    let validated = validate_secret_token(&token)?;
+    set_secret(&dirs.app_data_dir, TOKEN_KEY, validated)
 }
 
 #[tauri::command]

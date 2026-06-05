@@ -1,4 +1,5 @@
 pub mod apple_speech;
+pub mod brain_sync;
 pub mod nexara;
 pub mod recording;
 pub mod sessions;

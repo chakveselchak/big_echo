@@ -590,6 +590,34 @@ describe("useRecordingController", () => {
     expect(uiRecordingEmitCalls()).toHaveLength(emitCountBeforeSync);
   });
 
+  it("broadcasts recording as active from the live session instead of unrelated UI status", async () => {
+    const activeSession: StartResponse = {
+      session_id: "s-recording",
+      session_dir: "/tmp/s-recording",
+      status: "recording",
+    };
+
+    renderControllerHarness({
+      initialSession: activeSession,
+      initialStatus: "brain_uploading",
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_ui_sync_state");
+    });
+
+    await waitFor(() => {
+      expect(emitMock).toHaveBeenCalledWith("ui:recording", {
+        recording: true,
+        sessionId: "s-recording",
+      });
+    });
+    expect(emitMock).not.toHaveBeenCalledWith("ui:recording", {
+      recording: false,
+      sessionId: null,
+    });
+  });
+
   it("hydrates authoritative mute state for an active recording and toggles the correct next edge", async () => {
     const loadSessions = vi.fn(async () => undefined);
     const muteCalls: Array<{ sessionId: string; channel: string; muted: boolean }> = [];

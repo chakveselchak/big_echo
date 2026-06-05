@@ -36,6 +36,13 @@ export function validateSettings(settings: PublicSettings | null): string[] {
   if (settings.summary_url.trim() && !isValidHttpUrl(settings.summary_url.trim())) {
     errors.push("Неверный URL саммари");
   }
+  const brainSyncUrl = settings.brain_sync_url.trim();
+  if (
+    (settings.brain_sync_enabled && !brainSyncUrl) ||
+    (brainSyncUrl && !isValidHttpUrl(brainSyncUrl))
+  ) {
+    errors.push("Неверный URL Brain sync");
+  }
   if (!allowedAudioFormats.has(settings.audio_format)) {
     errors.push("Неверный формат аудио");
   }

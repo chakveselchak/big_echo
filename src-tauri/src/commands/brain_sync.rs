@@ -1,0 +1,1390 @@
+use crate::app_state::{AppDirs, AppState};
+use crate::domain::session::SessionMeta;
+use crate::services::brain_server::client::{BrainServerClient, BrainUploadResponse};
+use crate::services::brain_server::error::BrainUploadPublicError;
+use crate::services::brain_server::state::{
+    is_already_running_error, try_begin_archive_upload, try_begin_session_upload,
+    SharedBrainUploadState,
+};
+use crate::services::brain_server::upload::{
+    upload_session_after_record_even_when_disabled, upload_session_after_record_with_client,
+    validate_upload_url, UploadAudioClient,
+};
+use crate::services::brain_server::TOKEN_KEY;
+use crate::settings::public_settings::load_settings;
+use crate::settings::public_settings::PublicSettings;
+use crate::settings::secret_store::{clear_secret, get_secret, set_secret};
+use crate::settings::token_validation::validate_secret_token;
+use crate::storage::session_store::load_meta;
+use crate::storage::sqlite_repo::{
+    add_event, brain_upload_is_fresh, derive_brain_upload_state, get_meta_path, get_session_dir,
+    list_session_events, list_sessions, reconcile_stale_brain_uploads, BrainUploadState,
+    BrainUploadStatus,
+};
+use chrono::{DateTime, Local};
+use serde::Serialize;
+use std::path::{Component, Path, PathBuf};
+use tauri::{AppHandle, Emitter, State};
+
+const ARCHIVE_PROGRESS_EVENT: &str = "brain-archive-upload-progress";
+const ARCHIVE_EVENT_SESSION_ID: &str = "__brain_archive__";
+const MAX_ARCHIVE_ERRORS: usize = 20;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BrainArchiveUploadProgress {
+    pub total: usize,
+    pub processed: usize,
+    pub uploaded: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub current_session_id: Option<String>,
+    pub current_title: Option<String>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BrainArchiveUploadSummary {
+    pub total: usize,
+    pub uploaded: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub errors: Vec<String>,
+}
+
+struct ArchiveCandidate {
+    session_id: String,
+    title: String,
+    session_dir: Option<PathBuf>,
+    meta: Option<SessionMeta>,
+    audio_path: Option<PathBuf>,
+    sort_at_iso: String,
+    skip_error: Option<String>,
+}
+
+fn fresh_uploading(state: &BrainUploadState, now: DateTime<Local>) -> bool {
+    state.status == BrainUploadStatus::Uploading
+        && brain_upload_is_fresh(state.updated_at_iso.as_deref(), now)
+}
+
+fn already_running_response() -> BrainUploadResponse {
+    BrainUploadResponse {
+        ok: true,
+        job_id: None,
+        status: Some("already_running".to_string()),
+        principal_id: None,
+        workspace_id: None,
+        workspace_slug: None,
+        inbox_path: None,
+        meta_path: None,
+        duplicate: None,
+        error: Some(BrainUploadPublicError::already_running().message),
+    }
+}
+
+fn archive_error(errors: &mut Vec<String>, message: String) {
+    if errors.len() < MAX_ARCHIVE_ERRORS {
+        errors.push(message);
+    }
+}
+
+fn progress_from_summary(
+    total: usize,
+    processed: usize,
+    summary: &BrainArchiveUploadSummary,
+    current_session_id: Option<String>,
+    current_title: Option<String>,
+) -> BrainArchiveUploadProgress {
+    BrainArchiveUploadProgress {
+        total,
+        processed,
+        uploaded: summary.uploaded,
+        skipped: summary.skipped,
+        failed: summary.failed,
+        current_session_id,
+        current_title,
+        errors: summary.errors.clone(),
+    }
+}
+
+fn archive_candidates(
+    app_data_dir: &std::path::Path,
+    settings: &PublicSettings,
+    now: DateTime<Local>,
+) -> Result<Vec<ArchiveCandidate>, String> {
+    let mut candidates = Vec::new();
+    let Some(recording_root) = canonical_recording_root(app_data_dir, settings)? else {
+        return Ok(candidates);
+    };
+    for item in list_sessions(app_data_dir)? {
+        let meta_path = match get_meta_path(app_data_dir, &item.session_id) {
+            Ok(Some(path)) => path,
+            Ok(None) => continue,
+            Err(err) => {
+                candidates.push(ArchiveCandidate {
+                    session_id: item.session_id.clone(),
+                    title: item.topic.clone(),
+                    session_dir: None,
+                    meta: None,
+                    audio_path: None,
+                    sort_at_iso: item.started_at_iso.clone(),
+                    skip_error: Some(format!("{}: meta path unavailable: {err}", item.session_id)),
+                });
+                continue;
+            }
+        };
+        let meta = match load_meta(&meta_path) {
+            Ok(meta) => meta,
+            Err(err) => {
+                candidates.push(ArchiveCandidate {
+                    session_id: item.session_id.clone(),
+                    title: item.topic.clone(),
+                    session_dir: None,
+                    meta: None,
+                    audio_path: None,
+                    sort_at_iso: item.started_at_iso.clone(),
+                    skip_error: Some(format!("{}: invalid meta: {err}", item.session_id)),
+                });
+                continue;
+            }
+        };
+        let Some(session_dir) = local_session_dir(&recording_root, &item.session_dir) else {
+            continue;
+        };
+        let Some(audio_path) = local_audio_file_path(&session_dir, &meta.artifacts.audio_file)
+        else {
+            continue;
+        };
+
+        let events = match list_session_events(app_data_dir, &item.session_id) {
+            Ok(events) => events,
+            Err(err) => {
+                if item.brain_server_ingested_once {
+                    continue;
+                }
+                candidates.push(ArchiveCandidate {
+                    session_id: item.session_id.clone(),
+                    title: meta.topic.clone(),
+                    session_dir: None,
+                    meta: None,
+                    audio_path: None,
+                    sort_at_iso: meta.started_at_iso.clone(),
+                    skip_error: Some(format!("{}: events unavailable: {err}", item.session_id)),
+                });
+                continue;
+            }
+        };
+        let brain_upload_state = derive_brain_upload_state(&events);
+        if brain_upload_state.server_ingested_once || fresh_uploading(&brain_upload_state, now) {
+            continue;
+        }
+
+        let sort_at_iso = if meta.started_at_iso.trim().is_empty() {
+            meta.created_at_iso.clone()
+        } else {
+            meta.started_at_iso.clone()
+        };
+        candidates.push(ArchiveCandidate {
+            session_id: meta.session_id.clone(),
+            title: meta.topic.clone(),
+            session_dir: Some(session_dir),
+            meta: Some(meta),
+            audio_path: Some(audio_path),
+            sort_at_iso,
+            skip_error: None,
+        });
+    }
+    candidates.sort_by(|left, right| left.sort_at_iso.cmp(&right.sort_at_iso));
+    Ok(candidates)
+}
+
+fn canonical_recording_root(
+    app_data_dir: &std::path::Path,
+    settings: &PublicSettings,
+) -> Result<Option<PathBuf>, String> {
+    let root = crate::root_recordings_dir(app_data_dir, settings)?;
+    match std::fs::canonicalize(root) {
+        Ok(path) => Ok(Some(path)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn local_session_dir_path(recording_root: &Path, raw_session_dir: &Path) -> Option<PathBuf> {
+    let session_dir = std::fs::canonicalize(raw_session_dir).ok()?;
+    if session_dir.starts_with(recording_root) {
+        Some(session_dir)
+    } else {
+        None
+    }
+}
+
+fn local_session_dir(recording_root: &Path, raw_session_dir: &str) -> Option<PathBuf> {
+    local_session_dir_path(recording_root, Path::new(raw_session_dir))
+}
+
+fn local_audio_file_path(session_dir: &Path, audio_file: &str) -> Option<PathBuf> {
+    let trimmed = audio_file.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let relative_path = Path::new(trimmed);
+    if relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return None;
+    }
+
+    let audio_path = session_dir.join(relative_path);
+    let file_type = std::fs::symlink_metadata(&audio_path).ok()?.file_type();
+    if file_type.is_symlink() || !file_type.is_file() {
+        None
+    } else {
+        let canonical_audio_path = std::fs::canonicalize(&audio_path).ok()?;
+        if canonical_audio_path.starts_with(session_dir) {
+            Some(canonical_audio_path)
+        } else {
+            None
+        }
+    }
+}
+
+fn manual_upload_paths(
+    app_data_dir: &Path,
+    settings: &PublicSettings,
+    session_dir: &Path,
+    audio_file: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    let recording_root = canonical_recording_root(app_data_dir, settings)?
+        .ok_or_else(|| "Audio file is missing for this session".to_string())?;
+    let session_dir = local_session_dir_path(&recording_root, session_dir)
+        .ok_or_else(|| "Audio file is missing for this session".to_string())?;
+    let audio_path = local_audio_file_path(&session_dir, audio_file)
+        .ok_or_else(|| "Audio file is missing for this session".to_string())?;
+    Ok((session_dir, audio_path))
+}
+
+#[tauri::command]
+pub fn brain_sync_set_token(dirs: State<'_, AppDirs>, token: String) -> Result<(), String> {
+    let validated = validate_secret_token(&token)?;
+    set_secret(&dirs.app_data_dir, TOKEN_KEY, validated)
+}
+
+#[tauri::command]
+pub fn brain_sync_clear_token(dirs: State<'_, AppDirs>) -> Result<(), String> {
+    clear_secret(&dirs.app_data_dir, TOKEN_KEY)
+}
+
+#[tauri::command]
+pub fn brain_sync_has_token(dirs: State<'_, AppDirs>) -> Result<bool, String> {
+    match get_secret(&dirs.app_data_dir, TOKEN_KEY) {
+        Ok(v) => Ok(!v.is_empty()),
+        Err(_) => Ok(false),
+    }
+}
+
+#[tauri::command]
+pub async fn brain_sync_upload_session(
+    dirs: State<'_, AppDirs>,
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
+    let _session_guard =
+        match try_begin_session_upload(&dirs.app_data_dir, &state.brain_upload, &session_id) {
+            Ok(guard) => guard,
+            Err(err) if is_already_running_error(&err) => {
+                return Ok(already_running_response());
+            }
+            Err(_) => {
+                return Err(BrainUploadPublicError::configuration(
+                    "Не удалось начать загрузку Brain.",
+                ));
+            }
+        };
+    let settings = load_settings(&dirs.app_data_dir)?;
+    let session_dir = get_session_dir(&dirs.app_data_dir, &session_id)?
+        .ok_or_else(|| "Session not found".to_string())?;
+    let meta_path = get_meta_path(&dirs.app_data_dir, &session_id)?
+        .ok_or_else(|| "Session not found".to_string())?;
+    let meta = load_meta(&meta_path)?;
+    let (session_dir, audio_path) = manual_upload_paths(
+        &dirs.app_data_dir,
+        &settings,
+        &session_dir,
+        &meta.artifacts.audio_file,
+    )?;
+
+    upload_session_after_record_even_when_disabled(
+        dirs.app_data_dir.clone(),
+        session_dir,
+        meta,
+        audio_path,
+        settings,
+        &state.brain_client,
+    )
+    .await
+}
+
+pub(crate) async fn upload_archive_with_client<C, E>(
+    app_data_dir: PathBuf,
+    settings: PublicSettings,
+    client: &C,
+    emit_progress: E,
+) -> Result<BrainArchiveUploadSummary, String>
+where
+    C: UploadAudioClient + Sync,
+    E: Fn(BrainArchiveUploadProgress) -> Result<(), String>,
+{
+    upload_archive_with_client_inner(app_data_dir, settings, None, client, emit_progress).await
+}
+
+async fn upload_archive_with_client_inner<C, E>(
+    app_data_dir: PathBuf,
+    settings: PublicSettings,
+    runtime_state: Option<SharedBrainUploadState>,
+    client: &C,
+    emit_progress: E,
+) -> Result<BrainArchiveUploadSummary, String>
+where
+    C: UploadAudioClient + Sync,
+    E: Fn(BrainArchiveUploadProgress) -> Result<(), String>,
+{
+    validate_upload_url(&settings.brain_sync_url)?;
+    let token = get_secret(&app_data_dir, TOKEN_KEY)
+        .map_err(|_| "Brain sync token is not configured".to_string())?;
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Err("Brain sync token is not configured".to_string());
+    }
+
+    reconcile_stale_brain_uploads(&app_data_dir)?;
+    let candidates = archive_candidates(&app_data_dir, &settings, Local::now())?;
+    let total = candidates.len();
+    let mut diagnostics = Vec::new();
+    if let Err(err) = add_event(
+        &app_data_dir,
+        ARCHIVE_EVENT_SESSION_ID,
+        "brain_archive_upload_started",
+        &format!("Uploading {total} archived Brain sessions"),
+    ) {
+        diagnostics.push(format!("brain_archive_upload_started event failed: {err}"));
+    }
+
+    let mut summary = BrainArchiveUploadSummary {
+        total,
+        uploaded: 0,
+        skipped: 0,
+        failed: 0,
+        errors: diagnostics,
+    };
+
+    emit_progress(progress_from_summary(total, 0, &summary, None, None))?;
+
+    for candidate in candidates {
+        let processed = summary.uploaded + summary.skipped + summary.failed + 1;
+        let session_id = candidate.session_id.clone();
+        let title = if candidate.title.trim().is_empty() {
+            session_id.clone()
+        } else {
+            candidate.title.clone()
+        };
+
+        if let Some(err) = candidate.skip_error {
+            if err.contains("events unavailable") {
+                summary.skipped += 1;
+            } else {
+                summary.failed += 1;
+            }
+            archive_error(&mut summary.errors, err);
+            emit_progress(progress_from_summary(
+                total,
+                processed,
+                &summary,
+                Some(session_id),
+                Some(title),
+            ))?;
+            continue;
+        }
+
+        if get_session_dir(&app_data_dir, &session_id)?.is_none() {
+            summary.skipped += 1;
+            archive_error(
+                &mut summary.errors,
+                format!("{session_id}: session no longer exists"),
+            );
+            emit_progress(progress_from_summary(
+                total,
+                processed,
+                &summary,
+                Some(session_id),
+                Some(title),
+            ))?;
+            continue;
+        }
+
+        let _session_guard = if let Some(state) = runtime_state.as_ref() {
+            match try_begin_session_upload(&app_data_dir, state, &session_id) {
+                Ok(guard) => Some(guard),
+                Err(err) => {
+                    summary.skipped += 1;
+                    archive_error(&mut summary.errors, format!("{session_id}: {err}"));
+                    emit_progress(progress_from_summary(
+                        total,
+                        processed,
+                        &summary,
+                        Some(session_id),
+                        Some(title),
+                    ))?;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+
+        match upload_session_after_record_with_client(
+            app_data_dir.clone(),
+            candidate
+                .session_dir
+                .ok_or_else(|| format!("{session_id}: missing session directory"))?,
+            candidate
+                .meta
+                .ok_or_else(|| format!("{session_id}: missing metadata"))?,
+            candidate
+                .audio_path
+                .ok_or_else(|| format!("{session_id}: missing audio path"))?,
+            settings.clone(),
+            client,
+            false,
+        )
+        .await
+        {
+            Ok(response) if response.duplicate.unwrap_or(false) => {
+                summary.skipped += 1;
+                archive_error(
+                    &mut summary.errors,
+                    format!("{session_id}: already_uploaded"),
+                );
+            }
+            Ok(_) => {
+                summary.uploaded += 1;
+            }
+            Err(err) => {
+                summary.failed += 1;
+                archive_error(
+                    &mut summary.errors,
+                    format!("{session_id}: {}", err.message),
+                );
+            }
+        }
+
+        emit_progress(progress_from_summary(
+            total,
+            processed,
+            &summary,
+            Some(session_id),
+            Some(title),
+        ))?;
+    }
+
+    if let Err(err) = add_event(
+        &app_data_dir,
+        ARCHIVE_EVENT_SESSION_ID,
+        "brain_archive_upload_finished",
+        &format!(
+            "uploaded={}, skipped={}, failed={}",
+            summary.uploaded, summary.skipped, summary.failed
+        ),
+    ) {
+        archive_error(
+            &mut summary.errors,
+            format!("brain_archive_upload_finished event failed: {err}"),
+        );
+    }
+    Ok(summary)
+}
+
+pub(crate) async fn upload_archive_with_client_locked<C, E>(
+    app_data_dir: PathBuf,
+    settings: PublicSettings,
+    runtime_state: SharedBrainUploadState,
+    client: &C,
+    emit_progress: E,
+) -> Result<BrainArchiveUploadSummary, String>
+where
+    C: UploadAudioClient + Sync,
+    E: Fn(BrainArchiveUploadProgress) -> Result<(), String>,
+{
+    let _archive_guard = try_begin_archive_upload(&app_data_dir, &runtime_state)?;
+    upload_archive_with_client_inner(
+        app_data_dir,
+        settings,
+        Some(runtime_state),
+        client,
+        emit_progress,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn brain_sync_upload_archive(
+    app: AppHandle,
+    dirs: State<'_, AppDirs>,
+    state: State<'_, AppState>,
+) -> Result<BrainArchiveUploadSummary, String> {
+    let settings = load_settings(&dirs.app_data_dir)?;
+    upload_archive_with_client_locked(
+        dirs.app_data_dir.clone(),
+        settings,
+        state.brain_upload.clone(),
+        &state.brain_client,
+        |progress| {
+            app.emit(ARCHIVE_PROGRESS_EVENT, progress)
+                .map_err(|e| e.to_string())
+        },
+    )
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::session::{SessionMeta, SessionStatus};
+    use crate::services::brain_server::client::{
+        BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
+    };
+    use crate::services::brain_server::upload::UploadAudioClient;
+    use crate::settings::public_settings::{save_settings, PublicSettings};
+    use crate::settings::secret_store::set_secret;
+    use crate::storage::session_store::save_meta;
+    use crate::storage::sqlite_repo::{add_event, delete_session, upsert_session};
+    use async_trait::async_trait;
+    use chrono::Duration;
+    use rusqlite::{params, Connection};
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
+
+    #[test]
+    fn token_key_matches_brain_server_secret_name() {
+        assert_eq!(TOKEN_KEY, "BRAIN_SERVER_API_TOKEN");
+    }
+
+    #[test]
+    fn manual_upload_paths_reject_absolute_audio_file_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let recording_root = app_data_dir.join("recordings");
+        let session_dir = recording_root.join("manual-absolute");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let outside_audio = tmp.path().join("outside.opus");
+        std::fs::write(&outside_audio, b"OggS").expect("write outside audio");
+        let outside_audio = outside_audio.to_string_lossy().to_string();
+        let mut settings = archive_settings();
+        settings.recording_root = recording_root.to_string_lossy().to_string();
+
+        let err = manual_upload_paths(&app_data_dir, &settings, &session_dir, &outside_audio)
+            .expect_err("absolute audio path should be rejected");
+
+        assert_eq!(err, "Audio file is missing for this session");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manual_upload_paths_reject_symlink_audio_file_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let recording_root = app_data_dir.join("recordings");
+        let session_dir = recording_root.join("manual-symlink");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let outside_audio = tmp.path().join("outside.opus");
+        std::fs::write(&outside_audio, b"OggS").expect("write outside audio");
+        std::os::unix::fs::symlink(&outside_audio, session_dir.join("audio.opus"))
+            .expect("create audio symlink");
+        let mut settings = archive_settings();
+        settings.recording_root = recording_root.to_string_lossy().to_string();
+
+        let err = manual_upload_paths(&app_data_dir, &settings, &session_dir, "audio.opus")
+            .expect_err("symlink audio path should be rejected");
+
+        assert_eq!(err, "Audio file is missing for this session");
+    }
+
+    #[derive(Clone)]
+    enum UploadOutcome {
+        Success,
+        Duplicate,
+        Failure(String),
+    }
+
+    struct ArchiveUploadClient {
+        calls: Arc<Mutex<Vec<String>>>,
+        outcomes: Arc<Mutex<Vec<UploadOutcome>>>,
+    }
+
+    #[async_trait]
+    impl UploadAudioClient for ArchiveUploadClient {
+        async fn upload_audio(
+            &self,
+            _url: &str,
+            _token: &str,
+            _audio_path: &Path,
+            metadata: &BrainUploadMetadata,
+        ) -> Result<BrainUploadResponse, BrainUploadError> {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .push(metadata.session_id.clone());
+            let outcome = self.outcomes.lock().expect("outcomes lock").remove(0);
+            match outcome {
+                UploadOutcome::Success => Ok(BrainUploadResponse {
+                    ok: true,
+                    job_id: Some(1),
+                    status: Some("queued".to_string()),
+                    principal_id: None,
+                    workspace_id: None,
+                    workspace_slug: None,
+                    inbox_path: None,
+                    meta_path: None,
+                    duplicate: None,
+                    error: None,
+                }),
+                UploadOutcome::Duplicate => Ok(BrainUploadResponse {
+                    ok: true,
+                    job_id: None,
+                    status: Some("already_uploaded".to_string()),
+                    principal_id: None,
+                    workspace_id: None,
+                    workspace_slug: None,
+                    inbox_path: None,
+                    meta_path: None,
+                    duplicate: Some(true),
+                    error: None,
+                }),
+                UploadOutcome::Failure(message) => Err(BrainUploadError::Api(message)),
+            }
+        }
+    }
+
+    fn archive_settings() -> PublicSettings {
+        PublicSettings {
+            brain_sync_enabled: false,
+            brain_sync_url: "https://brain.example/upload".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn seed_archive_session(
+        app_data_dir: &Path,
+        session_id: &str,
+        started_at_iso: &str,
+        write_audio: bool,
+    ) {
+        seed_archive_session_with_audio_file(
+            app_data_dir,
+            session_id,
+            started_at_iso,
+            "audio.opus".to_string(),
+            write_audio,
+        );
+    }
+
+    fn seed_archive_session_with_audio_file(
+        app_data_dir: &Path,
+        session_id: &str,
+        started_at_iso: &str,
+        audio_file: String,
+        write_audio: bool,
+    ) {
+        let session_dir = app_data_dir.join("recordings").join(session_id);
+        seed_archive_session_at_dir(
+            app_data_dir,
+            &session_dir,
+            session_id,
+            started_at_iso,
+            audio_file,
+            write_audio,
+        );
+    }
+
+    fn seed_archive_session_at_dir(
+        app_data_dir: &Path,
+        session_dir: &Path,
+        session_id: &str,
+        started_at_iso: &str,
+        audio_file: String,
+        write_audio: bool,
+    ) {
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = SessionMeta::new(
+            session_id.to_string(),
+            "zoom".to_string(),
+            vec!["team".to_string()],
+            format!("Topic {session_id}"),
+            "notes".to_string(),
+        );
+        meta.status = SessionStatus::Done;
+        meta.started_at_iso = started_at_iso.to_string();
+        meta.created_at_iso = started_at_iso.to_string();
+        meta.artifacts.audio_file = audio_file;
+        save_meta(&meta_path, &meta).expect("save meta");
+        if write_audio {
+            std::fs::write(session_dir.join(&meta.artifacts.audio_file), b"OggS")
+                .expect("write audio");
+        }
+        upsert_session(app_data_dir, &meta, session_dir, &meta_path).expect("upsert session");
+    }
+
+    fn mark_last_event_at(app_data_dir: &Path, session_id: &str, at_iso: &str) {
+        let conn = Connection::open(app_data_dir.join("bigecho.sqlite3")).expect("open sqlite");
+        conn.execute(
+            "
+            UPDATE session_events
+            SET at_iso = ?1
+            WHERE id = (
+                SELECT id FROM session_events WHERE session_id = ?2 ORDER BY id DESC LIMIT 1
+            )
+            ",
+            params![at_iso, session_id],
+        )
+        .expect("update event time");
+    }
+
+    fn archive_client(
+        outcomes: Vec<UploadOutcome>,
+    ) -> (ArchiveUploadClient, Arc<Mutex<Vec<String>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        (
+            ArchiveUploadClient {
+                calls: Arc::clone(&calls),
+                outcomes: Arc::new(Mutex::new(outcomes)),
+            },
+            calls,
+        )
+    }
+
+    #[tokio::test]
+    async fn archive_upload_ignores_sessions_without_audio() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(
+            &app_data_dir,
+            "without-audio",
+            "2026-05-28T10:00:00+03:00",
+            false,
+        );
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert_eq!(summary.uploaded, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_empty_audio_file_name() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_with_audio_file(
+            &app_data_dir,
+            "empty-audio",
+            "2026-05-28T10:00:00+03:00",
+            "   ".to_string(),
+            false,
+        );
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_directory_audio_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_with_audio_file(
+            &app_data_dir,
+            "directory-audio",
+            "2026-05-28T10:00:00+03:00",
+            "audio-dir".to_string(),
+            false,
+        );
+        std::fs::create_dir_all(
+            app_data_dir
+                .join("recordings")
+                .join("directory-audio")
+                .join("audio-dir"),
+        )
+        .expect("create audio dir");
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_absolute_audio_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        let outside_audio = tmp.path().join("outside.opus");
+        std::fs::write(&outside_audio, b"OggS").expect("write outside audio");
+        seed_archive_session_with_audio_file(
+            &app_data_dir,
+            "absolute-audio",
+            "2026-05-28T10:00:00+03:00",
+            outside_audio.to_string_lossy().to_string(),
+            false,
+        );
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn archive_upload_skips_symlink_audio_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_with_audio_file(
+            &app_data_dir,
+            "symlink-audio",
+            "2026-05-28T10:00:00+03:00",
+            "audio.opus".to_string(),
+            false,
+        );
+        let outside_audio = tmp.path().join("outside.opus");
+        std::fs::write(&outside_audio, b"OggS").expect("write outside audio");
+        std::os::unix::fs::symlink(
+            &outside_audio,
+            app_data_dir
+                .join("recordings")
+                .join("symlink-audio")
+                .join("audio.opus"),
+        )
+        .expect("create audio symlink");
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn archive_upload_skips_symlinked_parent_audio_path() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_with_audio_file(
+            &app_data_dir,
+            "symlink-parent-audio",
+            "2026-05-28T10:00:00+03:00",
+            "linkdir/audio.opus".to_string(),
+            false,
+        );
+        let outside_dir = tmp.path().join("outside-dir");
+        std::fs::create_dir_all(&outside_dir).expect("create outside dir");
+        std::fs::write(outside_dir.join("audio.opus"), b"OggS").expect("write outside audio");
+        std::os::unix::fs::symlink(
+            &outside_dir,
+            app_data_dir
+                .join("recordings")
+                .join("symlink-parent-audio")
+                .join("linkdir"),
+        )
+        .expect("create parent dir symlink");
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_session_dir_outside_recording_root() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let recording_root = app_data_dir.join("recordings");
+        let outside_session_dir = tmp.path().join("forged-session");
+        let mut settings = archive_settings();
+        settings.recording_root = recording_root.to_string_lossy().to_string();
+        save_settings(&app_data_dir, &settings).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session_at_dir(
+            &app_data_dir,
+            &outside_session_dir,
+            "forged-session",
+            "2026-05-28T10:00:00+03:00",
+            "audio.opus".to_string(),
+            true,
+        );
+        let (client, calls) = archive_client(vec![]);
+
+        let summary = upload_archive_with_client(app_data_dir, settings, &client, |_| Ok(()))
+            .await
+            .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_uploaded_sessions() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "uploaded", "2026-05-28T10:00:00+03:00", true);
+        add_event(&app_data_dir, "uploaded", "brain_upload_succeeded", "ok").expect("add event");
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert_eq!(summary.skipped, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_includes_failed_and_not_uploaded_sessions_oldest_first() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(
+            &app_data_dir,
+            "new-not-uploaded",
+            "2026-05-28T12:00:00+03:00",
+            true,
+        );
+        seed_archive_session(
+            &app_data_dir,
+            "old-failed",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
+        add_event(
+            &app_data_dir,
+            "old-failed",
+            "brain_upload_failed",
+            "network",
+        )
+        .expect("add event");
+        let (client, calls) = archive_client(vec![UploadOutcome::Success, UploadOutcome::Success]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 2);
+        assert_eq!(summary.uploaded, 2);
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["old-failed".to_string(), "new-not-uploaded".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_upload_continues_after_one_upload_failure() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "first", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(&app_data_dir, "second", "2026-05-28T10:00:00+03:00", true);
+        let (client, calls) = archive_client(vec![
+            UploadOutcome::Failure("server echoed secret-token".to_string()),
+            UploadOutcome::Success,
+        ]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 2);
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.errors.len(), 1);
+        assert!(!summary.errors[0].contains("secret-token"));
+        assert_eq!(calls.lock().expect("calls lock").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn archive_upload_counts_duplicate_response_as_skipped() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "dupe", "2026-05-28T09:00:00+03:00", true);
+        let (client, _calls) = archive_client(vec![UploadOutcome::Duplicate]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.uploaded, 0);
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.errors, vec!["dupe: already_uploaded".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_fresh_uploading_session() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(
+            &app_data_dir,
+            "fresh-uploading",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
+        add_event(
+            &app_data_dir,
+            "fresh-uploading",
+            "brain_upload_started",
+            "Uploading audio to Brain",
+        )
+        .expect("add event");
+        let (client, calls) = archive_client(vec![]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 0);
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_includes_stale_uploading_session() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(
+            &app_data_dir,
+            "stale-uploading",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
+        add_event(
+            &app_data_dir,
+            "stale-uploading",
+            "brain_upload_started",
+            "Uploading audio to Brain",
+        )
+        .expect("add event");
+        let stale_at = (Local::now() - Duration::minutes(31)).to_rfc3339();
+        mark_last_event_at(&app_data_dir, "stale-uploading", &stale_at);
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["stale-uploading".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_upload_includes_uploading_session_with_future_started_event() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(
+            &app_data_dir,
+            "future-uploading",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
+        add_event(
+            &app_data_dir,
+            "future-uploading",
+            "brain_upload_started",
+            "Uploading audio to Brain",
+        )
+        .expect("add event");
+        let future_at = (Local::now() + Duration::hours(2)).to_rfc3339();
+        mark_last_event_at(&app_data_dir, "future-uploading", &future_at);
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["future-uploading".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_upload_reports_corrupt_meta_and_continues_with_valid_sessions() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "bad-meta", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(
+            &app_data_dir,
+            "good-meta",
+            "2026-05-28T10:00:00+03:00",
+            true,
+        );
+        std::fs::write(
+            app_data_dir
+                .join("recordings")
+                .join("bad-meta")
+                .join("meta.json"),
+            "{not-json",
+        )
+        .expect("corrupt meta");
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 2);
+        assert_eq!(summary.uploaded, 1);
+        assert_eq!(summary.failed, 1);
+        assert!(summary
+            .errors
+            .iter()
+            .any(|err| err.contains("bad-meta: invalid meta")));
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["good-meta".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_upload_skips_session_deleted_after_candidate_snapshot() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(
+            &app_data_dir,
+            "delete-me",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+        let deleted = Arc::new(Mutex::new(false));
+        let deleted_for_progress = Arc::clone(&deleted);
+        let app_data_for_progress = app_data_dir.clone();
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            move |progress| {
+                if progress.processed == 0 && !*deleted_for_progress.lock().expect("delete lock") {
+                    *deleted_for_progress.lock().expect("delete lock") = true;
+                    delete_session(&app_data_for_progress, "delete-me").expect("delete session");
+                }
+                Ok(())
+            },
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.skipped, 1);
+        assert!(summary
+            .errors
+            .iter()
+            .any(|err| err.contains("delete-me: session no longer exists")));
+        assert!(calls.lock().expect("calls lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_missing_token_aborts_before_processing() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        seed_archive_session(
+            &app_data_dir,
+            "needs-token",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+        let progress_events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&progress_events);
+
+        let err = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            move |progress| {
+                captured.lock().expect("progress lock").push(progress);
+                Ok(())
+            },
+        )
+        .await
+        .expect_err("missing token aborts");
+
+        assert_eq!(err, "Brain sync token is not configured");
+        assert!(calls.lock().expect("calls lock").is_empty());
+        assert!(progress_events.lock().expect("progress lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_invalid_url_aborts_before_processing() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "bad-url", "2026-05-28T09:00:00+03:00", true);
+        let (client, calls) = archive_client(vec![UploadOutcome::Success]);
+        let mut settings = archive_settings();
+        settings.brain_sync_url = "not-a-url".to_string();
+        let progress_events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&progress_events);
+
+        let err = upload_archive_with_client(app_data_dir, settings, &client, move |progress| {
+            captured.lock().expect("progress lock").push(progress);
+            Ok(())
+        })
+        .await
+        .expect_err("invalid url aborts");
+
+        assert_eq!(err, "Invalid Brain sync URL");
+        assert!(calls.lock().expect("calls lock").is_empty());
+        assert!(progress_events.lock().expect("progress lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn archive_upload_caps_errors() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        let mut outcomes = Vec::new();
+        for idx in 0..(MAX_ARCHIVE_ERRORS + 5) {
+            seed_archive_session(
+                &app_data_dir,
+                &format!("failed-{idx:02}"),
+                &format!("2026-05-28T09:{idx:02}:00+03:00"),
+                true,
+            );
+            outcomes.push(UploadOutcome::Failure(format!("network-{idx}")));
+        }
+        let (client, calls) = archive_client(outcomes);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, MAX_ARCHIVE_ERRORS + 5);
+        assert_eq!(summary.failed, MAX_ARCHIVE_ERRORS + 5);
+        assert_eq!(summary.errors.len(), MAX_ARCHIVE_ERRORS);
+        assert_eq!(
+            calls.lock().expect("calls lock").len(),
+            MAX_ARCHIVE_ERRORS + 5
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_upload_progress_includes_counters() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        save_settings(&app_data_dir, &archive_settings()).expect("save settings");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        seed_archive_session(&app_data_dir, "ok", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(&app_data_dir, "dupe", "2026-05-28T10:00:00+03:00", true);
+        seed_archive_session(&app_data_dir, "bad", "2026-05-28T11:00:00+03:00", true);
+        let (client, _calls) = archive_client(vec![
+            UploadOutcome::Success,
+            UploadOutcome::Duplicate,
+            UploadOutcome::Failure("network".to_string()),
+        ]);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+
+        let summary = upload_archive_with_client(
+            app_data_dir,
+            archive_settings(),
+            &client,
+            move |progress| {
+                captured.lock().expect("events lock").push(progress);
+                Ok(())
+            },
+        )
+        .await
+        .expect("archive upload succeeds");
+
+        assert_eq!(summary.total, 3);
+        let events = events.lock().expect("events lock");
+        let final_progress = events.last().expect("final progress");
+        assert_eq!(final_progress.total, 3);
+        assert_eq!(final_progress.processed, 3);
+        assert_eq!(final_progress.uploaded, 1);
+        assert_eq!(final_progress.skipped, 1);
+        assert_eq!(final_progress.failed, 1);
+    }
+}

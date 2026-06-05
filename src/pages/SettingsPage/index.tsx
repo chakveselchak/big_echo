@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert, Button, Flex, Tabs } from "antd";
+import { readBrainSyncUnlocked } from "../../lib/brainSyncUnlock";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
-import { useTodoistSync } from "../../hooks/useTodoistSync";
 import { useYandexSync } from "../../hooks/useYandexSync";
+import { useTodoistSync } from "../../hooks/useTodoistSync";
 import type { PublicSettings, SettingsTab } from "../../types";
 import { tauriInvoke } from "../../lib/tauri";
 import { getErrorMessage } from "../../lib/appUtils";
 import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
-import { TodoistSyncSettings } from "../../components/settings/TodoistSyncSettings";
 import { YandexSyncSettings } from "../../components/settings/YandexSyncSettings";
+import { TodoistSyncSettings } from "../../components/settings/TodoistSyncSettings";
+import { BrainSyncSettings } from "../../components/settings/BrainSyncSettings";
 import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
 
 type SyncSessionsResult = {
@@ -18,7 +20,7 @@ type SyncSessionsResult = {
   removed: number;
 };
 
-export function SettingsPage() {
+export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}) {
   const [status, setStatus] = useState("idle");
   const [isSyncingSessions, setIsSyncingSessions] = useState(false);
 
@@ -65,16 +67,11 @@ export function SettingsPage() {
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
 
   const yandexSync = useYandexSync(settingsTab === "yandex");
-  const todoistSync = useTodoistSync(true);
+  const todoistSync = useTodoistSync(settingsTab === "todoist");
 
-  useEffect(() => {
-    if (!settings || !settings.todoist_auto_add) return;
-    const shouldDisableAutoAdd =
-      !settings.todoist_sync_enabled || (todoistSync.tokenLoaded && !todoistSync.hasToken);
-    if (shouldDisableAutoAdd) {
-      setSettings({ ...settings, todoist_auto_add: false });
-    }
-  }, [settings, setSettings, todoistSync.hasToken, todoistSync.tokenLoaded]);
+  // When embedded in the main window the unlock flag is owned by MainPage and
+  // passed in; the standalone settings window falls back to reading storage.
+  const isBrainUnlocked = brainUnlocked ?? readBrainSyncUnlocked();
 
   if (!settings) {
     return (
@@ -122,7 +119,12 @@ export function SettingsPage() {
       isDirty("yandex_sync_enabled") ||
       isDirty("yandex_sync_interval") ||
       isDirty("yandex_sync_remote_folder"),
-    todoist: isDirty("todoist_sync_enabled") || isDirty("todoist_auto_add"),
+    todoist:
+      isDirty("todoist_sync_enabled") ||
+      isDirty("todoist_auto_add"),
+    brain:
+      isDirty("brain_sync_enabled") ||
+      isDirty("brain_sync_url"),
   };
 
   const dirtyDot = (
@@ -239,6 +241,25 @@ export function SettingsPage() {
         />
       ),
     },
+    ...(isBrainUnlocked
+      ? [
+          {
+            key: "brain" as SettingsTab,
+            label: (
+              <>
+                Brain sync{dirtyByTab.brain && dirtyDot}
+              </>
+            ),
+            children: (
+              <BrainSyncSettings
+                settings={settings}
+                setSettings={setSettings}
+                isDirty={isDirty}
+              />
+            ),
+          },
+        ]
+      : []),
   ];
 
   return (

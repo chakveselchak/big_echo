@@ -161,7 +161,10 @@ mod tests {
         let loaded = load_meta(&path).expect("load legacy meta");
         assert_eq!(loaded.session_id, "legacy-1");
         assert_eq!(loaded.primary_tag, "slack");
-        assert_eq!(loaded.source, "slack", "source must fall back to primary_tag");
+        assert_eq!(
+            loaded.source, "slack",
+            "source must fall back to primary_tag"
+        );
         assert!(loaded.tags.is_empty(), "tags must default to empty vec");
         assert_eq!(loaded.notes, "", "notes must default to empty string");
         assert_eq!(loaded.artifacts.audio_file, "audio.opus");

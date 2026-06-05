@@ -174,10 +174,7 @@ fn optional_cell(cells: &[String], index: Option<usize>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn action_item_from_table_row(
-    headers: &[String],
-    cells: &[String],
-) -> Option<ExtractedActionItem> {
+fn action_item_from_table_row(headers: &[String], cells: &[String]) -> Option<ExtractedActionItem> {
     let title_index = find_column(headers, &["задач", "task"])?;
     let title = optional_cell(cells, Some(title_index))?;
     let assignee = optional_cell(
@@ -212,10 +209,7 @@ fn is_action_heading(heading: &str) -> bool {
         .filter(|word| !word.is_empty())
         .collect::<Vec<_>>();
 
-    words.contains(&"actions")
-        || words
-            .windows(2)
-            .any(|window| window == ["action", "items"])
+    words.contains(&"actions") || words.windows(2).any(|window| window == ["action", "items"])
 }
 
 #[cfg(test)]
