@@ -157,6 +157,9 @@ fn is_markdown_table_separator(cells: &[String]) -> bool {
 
 fn is_action_table_header(cells: &[String]) -> bool {
     find_column(cells, &["задач", "task"]).is_some()
+        && (find_column(cells, &["ответ", "исполн", "assignee", "owner"]).is_some()
+            || find_column(cells, &["срок", "due"]).is_some()
+            || find_column(cells, &["комментар", "comment", "context"]).is_some())
 }
 
 fn find_column(headers: &[String], needles: &[&str]) -> Option<usize> {
@@ -298,6 +301,44 @@ mod tests {
         assert_eq!(
             result.items[1].context.as_deref(),
             Some("Для Alpha — нужно; для Sber — пока пауза; для белорусских проектов — актуально")
+        );
+    }
+
+    #[test]
+    fn extractor_does_not_treat_task_rows_containing_task_word_as_headers() {
+        let tmp = tempdir().expect("tempdir");
+        let summary_md = tmp.path().join("summary.md");
+        std::fs::write(
+            &summary_md,
+            r#"## 6. Задачи и ответственные (Action Items)
+
+| Задача | Ответственный | Срок | Комментарий |
+|--------|---------------|------|-------------|
+| Завести задачу по Статуму и скинуть тимлиду | Руководитель | Ближайшее время | Склонировать пример задачи, прилинковать |
+| Найти X-Bank ID для Статума (роутер) | Тимлид | Не указан | Артём Позняков не помог, нужно копать дальше |
+"#,
+        )
+        .expect("summary md");
+
+        let result = extract_action_items(&summary_md).expect("extract");
+
+        assert_eq!(result.items.len(), 2);
+        assert_eq!(
+            result.items[0].title,
+            "Завести задачу по Статуму и скинуть тимлиду"
+        );
+        assert_eq!(result.items[0].assignee.as_deref(), Some("Руководитель"));
+        assert_eq!(result.items[0].due.as_deref(), Some("Ближайшее время"));
+        assert_eq!(
+            result.items[0].context.as_deref(),
+            Some("Склонировать пример задачи, прилинковать")
+        );
+        assert_eq!(result.items[1].title, "Найти X-Bank ID для Статума (роутер)");
+        assert_eq!(result.items[1].assignee.as_deref(), Some("Тимлид"));
+        assert_eq!(result.items[1].due.as_deref(), Some("Не указан"));
+        assert_eq!(
+            result.items[1].context.as_deref(),
+            Some("Артём Позняков не помог, нужно копать дальше")
         );
     }
 

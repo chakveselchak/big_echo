@@ -49,6 +49,40 @@ fn quarter_due_date(today: NaiveDate, offset: u32) -> NaiveDate {
     quarter_end(year, quarter) - Duration::days(10)
 }
 
+fn named_quarter_due_date(today: NaiveDate, quarter: u32) -> NaiveDate {
+    let mut due = quarter_end(today.year(), quarter) - Duration::days(10);
+    if due < today {
+        due = quarter_end(today.year() + 1, quarter) - Duration::days(10);
+    }
+    due
+}
+
+fn max_number_in_text(value: &str) -> Option<i64> {
+    let mut numbers = Vec::new();
+    let mut current = String::new();
+
+    for ch in value.chars() {
+        if ch.is_ascii_digit() {
+            current.push(ch);
+            continue;
+        }
+        if !current.is_empty() {
+            if let Ok(number) = current.parse::<i64>() {
+                numbers.push(number);
+            }
+            current.clear();
+        }
+    }
+
+    if !current.is_empty() {
+        if let Ok(number) = current.parse::<i64>() {
+            numbers.push(number);
+        }
+    }
+
+    numbers.into_iter().max()
+}
+
 fn normalize_due_date(value: &str, today: NaiveDate) -> Option<String> {
     let trimmed = value.trim();
     if is_unspecified_due(trimmed) {
@@ -59,11 +93,19 @@ fn normalize_due_date(value: &str, today: NaiveDate) -> Option<String> {
     }
 
     let normalized = collapse_ws(&trimmed.to_lowercase());
+    let normalized = normalized.trim_start_matches('~').trim();
     if normalized == "сегодня" {
         return Some(format_date(today));
     }
     if normalized == "завтра" {
         return Some(format_date(today + Duration::days(1)));
+    }
+    if normalized.contains("ближайш") && normalized.contains("врем") {
+        return Some(format_date(today + Duration::days(3)));
+    }
+    if normalized.contains("через") && normalized.contains("недел") {
+        let weeks = max_number_in_text(normalized).unwrap_or(1);
+        return Some(format_date(today + Duration::days(weeks * 7)));
     }
     if normalized.contains("следующ") && normalized.contains("недел") {
         return Some(format_date(friday_of_week(today) + Duration::days(7)));
@@ -77,6 +119,20 @@ fn normalize_due_date(value: &str, today: NaiveDate) -> Option<String> {
     if (normalized.contains("эт") || normalized.contains("текущ")) && normalized.contains("кварт")
     {
         return Some(format_date(quarter_due_date(today, 0)));
+    }
+    if normalized.contains("перв") && normalized.contains("кварт") {
+        return Some(format_date(named_quarter_due_date(today, 1)));
+    }
+    if normalized.contains("втор") && normalized.contains("кварт") {
+        return Some(format_date(named_quarter_due_date(today, 2)));
+    }
+    if normalized.contains("трет") && normalized.contains("кварт") {
+        return Some(format_date(named_quarter_due_date(today, 3)));
+    }
+    if (normalized.contains("четвер") || normalized.contains("четвёр"))
+        && normalized.contains("кварт")
+    {
+        return Some(format_date(named_quarter_due_date(today, 4)));
     }
 
     None
@@ -294,6 +350,48 @@ mod tests {
         assert_eq!(
             normalize_due_date("в следующем квартале", today).as_deref(),
             Some("2026-09-20")
+        );
+    }
+
+    #[test]
+    fn normalizer_resolves_approximate_week_and_named_quarter_due_dates() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 6, 5).expect("today");
+
+        assert_eq!(
+            normalize_due_date("~через неделю", today).as_deref(),
+            Some("2026-06-12")
+        );
+        assert_eq!(
+            normalize_due_date("через неделю", today).as_deref(),
+            Some("2026-06-12")
+        );
+        assert_eq!(
+            normalize_due_date("~через 1–2 недели", today).as_deref(),
+            Some("2026-06-19")
+        );
+        assert_eq!(
+            normalize_due_date("через 1-2 недели", today).as_deref(),
+            Some("2026-06-19")
+        );
+        assert_eq!(
+            normalize_due_date("Ближайшее время", today).as_deref(),
+            Some("2026-06-08")
+        );
+        assert_eq!(
+            normalize_due_date("в первом квартале", today).as_deref(),
+            Some("2027-03-21")
+        );
+        assert_eq!(
+            normalize_due_date("во втором квартале", today).as_deref(),
+            Some("2026-06-20")
+        );
+        assert_eq!(
+            normalize_due_date("в третьем квартале", today).as_deref(),
+            Some("2026-09-20")
+        );
+        assert_eq!(
+            normalize_due_date("в четвертом квартале", today).as_deref(),
+            Some("2026-12-21")
         );
     }
 
