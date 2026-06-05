@@ -48,15 +48,9 @@ pub enum BrainUploadError {
     #[error("unsupported media type (415): {body_preview}")]
     UnsupportedMediaType { body_preview: String },
     #[error("server error ({status}): {body_preview}")]
-    Server {
-        status: u16,
-        body_preview: String,
-    },
+    Server { status: u16, body_preview: String },
     #[error("http error ({status}): {body_preview}")]
-    Http {
-        status: u16,
-        body_preview: String,
-    },
+    Http { status: u16, body_preview: String },
     #[error("network error: {0}")]
     Network(String),
     #[error("io error: {0}")]
@@ -106,7 +100,10 @@ fn body_preview(raw: &str, token: &str) -> String {
     }
 
     let collapsed = sanitized.join(" ");
-    let mut preview = collapsed.chars().take(MAX_PREVIEW_CHARS).collect::<String>();
+    let mut preview = collapsed
+        .chars()
+        .take(MAX_PREVIEW_CHARS)
+        .collect::<String>();
     if collapsed.chars().count() > MAX_PREVIEW_CHARS {
         preview.push_str("...");
     }
@@ -190,7 +187,9 @@ impl BrainServerClient {
                     Ok(parsed)
                 } else {
                     Err(BrainUploadError::Api(
-                        parsed.error.unwrap_or_else(|| "upload was not accepted".to_string()),
+                        parsed
+                            .error
+                            .unwrap_or_else(|| "upload was not accepted".to_string()),
                     ))
                 }
             }
@@ -423,18 +422,16 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = BrainServerClient::with_timeouts(
-            Duration::from_millis(50),
-            Duration::from_millis(50),
-        )
-        .upload_audio(
-            &format!("{}/upload", server.uri()),
-            "secret-token",
-            &audio_path,
-            &sample_metadata(),
-        )
-        .await
-        .expect_err("slow response should time out");
+        let err =
+            BrainServerClient::with_timeouts(Duration::from_millis(50), Duration::from_millis(50))
+                .upload_audio(
+                    &format!("{}/upload", server.uri()),
+                    "secret-token",
+                    &audio_path,
+                    &sample_metadata(),
+                )
+                .await
+                .expect_err("slow response should time out");
 
         assert!(matches!(err, BrainUploadError::Network(_)));
     }

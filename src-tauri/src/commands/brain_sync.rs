@@ -6,11 +6,11 @@ use crate::services::brain_server::state::{
     is_already_running_error, try_begin_archive_upload, try_begin_session_upload,
     SharedBrainUploadState,
 };
-use crate::services::brain_server::TOKEN_KEY;
 use crate::services::brain_server::upload::{
-    upload_session_after_record_even_when_disabled,
-    upload_session_after_record_with_client, validate_upload_url, UploadAudioClient,
+    upload_session_after_record_even_when_disabled, upload_session_after_record_with_client,
+    validate_upload_url, UploadAudioClient,
 };
+use crate::services::brain_server::TOKEN_KEY;
 use crate::settings::public_settings::load_settings;
 use crate::settings::public_settings::PublicSettings;
 use crate::settings::secret_store::{clear_secret, get_secret, set_secret};
@@ -127,10 +127,7 @@ fn archive_candidates(
                     meta: None,
                     audio_path: None,
                     sort_at_iso: item.started_at_iso.clone(),
-                    skip_error: Some(format!(
-                        "{}: meta path unavailable: {err}",
-                        item.session_id
-                    )),
+                    skip_error: Some(format!("{}: meta path unavailable: {err}", item.session_id)),
                 });
                 continue;
             }
@@ -171,18 +168,13 @@ fn archive_candidates(
                     meta: None,
                     audio_path: None,
                     sort_at_iso: meta.started_at_iso.clone(),
-                    skip_error: Some(format!(
-                        "{}: events unavailable: {err}",
-                        item.session_id
-                    )),
+                    skip_error: Some(format!("{}: events unavailable: {err}", item.session_id)),
                 });
                 continue;
             }
         };
         let brain_upload_state = derive_brain_upload_state(&events);
-        if brain_upload_state.server_ingested_once
-            || fresh_uploading(&brain_upload_state, now)
-        {
+        if brain_upload_state.server_ingested_once || fresh_uploading(&brain_upload_state, now) {
             continue;
         }
 
@@ -299,21 +291,18 @@ pub async fn brain_sync_upload_session(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<BrainUploadResponse, BrainUploadPublicError> {
-    let _session_guard = match try_begin_session_upload(
-        &dirs.app_data_dir,
-        &state.brain_upload,
-        &session_id,
-    ) {
-        Ok(guard) => guard,
-        Err(err) if is_already_running_error(&err) => {
-            return Ok(already_running_response());
-        }
-        Err(_) => {
-            return Err(BrainUploadPublicError::configuration(
-                "Не удалось начать загрузку Brain.",
-            ));
-        }
-    };
+    let _session_guard =
+        match try_begin_session_upload(&dirs.app_data_dir, &state.brain_upload, &session_id) {
+            Ok(guard) => guard,
+            Err(err) if is_already_running_error(&err) => {
+                return Ok(already_running_response());
+            }
+            Err(_) => {
+                return Err(BrainUploadPublicError::configuration(
+                    "Не удалось начать загрузку Brain.",
+                ));
+            }
+        };
     let settings = load_settings(&dirs.app_data_dir)?;
     let session_dir = get_session_dir(&dirs.app_data_dir, &session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
@@ -421,7 +410,10 @@ where
 
         if get_session_dir(&app_data_dir, &session_id)?.is_none() {
             summary.skipped += 1;
-            archive_error(&mut summary.errors, format!("{session_id}: session no longer exists"));
+            archive_error(
+                &mut summary.errors,
+                format!("{session_id}: session no longer exists"),
+            );
             emit_progress(progress_from_summary(
                 total,
                 processed,
@@ -471,7 +463,10 @@ where
         {
             Ok(response) if response.duplicate.unwrap_or(false) => {
                 summary.skipped += 1;
-                archive_error(&mut summary.errors, format!("{session_id}: already_uploaded"));
+                archive_error(
+                    &mut summary.errors,
+                    format!("{session_id}: already_uploaded"),
+                );
             }
             Ok(_) => {
                 summary.uploaded += 1;
@@ -545,7 +540,10 @@ pub async fn brain_sync_upload_archive(
         settings,
         state.brain_upload.clone(),
         &state.brain_client,
-        |progress| app.emit(ARCHIVE_PROGRESS_EVENT, progress).map_err(|e| e.to_string()),
+        |progress| {
+            app.emit(ARCHIVE_PROGRESS_EVENT, progress)
+                .map_err(|e| e.to_string())
+        },
     )
     .await
 }
@@ -553,7 +551,6 @@ pub async fn brain_sync_upload_archive(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration;
     use crate::domain::session::{SessionMeta, SessionStatus};
     use crate::services::brain_server::client::{
         BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
@@ -564,6 +561,7 @@ mod tests {
     use crate::storage::session_store::save_meta;
     use crate::storage::sqlite_repo::{add_event, delete_session, upsert_session};
     use async_trait::async_trait;
+    use chrono::Duration;
     use rusqlite::{params, Connection};
     use std::path::Path;
     use std::sync::{Arc, Mutex};
@@ -639,11 +637,7 @@ mod tests {
                 .lock()
                 .expect("calls lock")
                 .push(metadata.session_id.clone());
-            let outcome = self
-                .outcomes
-                .lock()
-                .expect("outcomes lock")
-                .remove(0);
+            let outcome = self.outcomes.lock().expect("outcomes lock").remove(0);
             match outcome {
                 UploadOutcome::Success => Ok(BrainUploadResponse {
                     ok: true,
@@ -778,17 +772,18 @@ mod tests {
         let app_data_dir = tmp.path().join("app-data");
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
         set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
-        seed_archive_session(&app_data_dir, "without-audio", "2026-05-28T10:00:00+03:00", false);
+        seed_archive_session(
+            &app_data_dir,
+            "without-audio",
+            "2026-05-28T10:00:00+03:00",
+            false,
+        );
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert_eq!(summary.uploaded, 0);
@@ -810,14 +805,10 @@ mod tests {
         );
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert!(calls.lock().expect("calls lock").is_empty());
@@ -845,14 +836,10 @@ mod tests {
         .expect("create audio dir");
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert!(calls.lock().expect("calls lock").is_empty());
@@ -875,14 +862,10 @@ mod tests {
         );
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert!(calls.lock().expect("calls lock").is_empty());
@@ -914,14 +897,10 @@ mod tests {
         .expect("create audio symlink");
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert!(calls.lock().expect("calls lock").is_empty());
@@ -954,14 +933,10 @@ mod tests {
         .expect("create parent dir symlink");
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert!(calls.lock().expect("calls lock").is_empty());
@@ -987,14 +962,9 @@ mod tests {
         );
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            settings,
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary = upload_archive_with_client(app_data_dir, settings, &client, |_| Ok(()))
+            .await
+            .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert!(calls.lock().expect("calls lock").is_empty());
@@ -1010,14 +980,10 @@ mod tests {
         add_event(&app_data_dir, "uploaded", "brain_upload_succeeded", "ok").expect("add event");
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert_eq!(summary.skipped, 0);
@@ -1030,21 +996,31 @@ mod tests {
         let app_data_dir = tmp.path().join("app-data");
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
         set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
-        seed_archive_session(&app_data_dir, "new-not-uploaded", "2026-05-28T12:00:00+03:00", true);
-        seed_archive_session(&app_data_dir, "old-failed", "2026-05-28T09:00:00+03:00", true);
-        add_event(&app_data_dir, "old-failed", "brain_upload_failed", "network")
-            .expect("add event");
-        let (client, calls) =
-            archive_client(vec![UploadOutcome::Success, UploadOutcome::Success]);
-
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
+        seed_archive_session(
+            &app_data_dir,
+            "new-not-uploaded",
+            "2026-05-28T12:00:00+03:00",
+            true,
+        );
+        seed_archive_session(
+            &app_data_dir,
+            "old-failed",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
+        add_event(
+            &app_data_dir,
+            "old-failed",
+            "brain_upload_failed",
+            "network",
         )
-        .await
-        .expect("archive upload succeeds");
+        .expect("add event");
+        let (client, calls) = archive_client(vec![UploadOutcome::Success, UploadOutcome::Success]);
+
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 2);
         assert_eq!(summary.uploaded, 2);
@@ -1067,14 +1043,10 @@ mod tests {
             UploadOutcome::Success,
         ]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 2);
         assert_eq!(summary.uploaded, 1);
@@ -1093,14 +1065,10 @@ mod tests {
         seed_archive_session(&app_data_dir, "dupe", "2026-05-28T09:00:00+03:00", true);
         let (client, _calls) = archive_client(vec![UploadOutcome::Duplicate]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 1);
         assert_eq!(summary.uploaded, 0);
@@ -1114,7 +1082,12 @@ mod tests {
         let app_data_dir = tmp.path().join("app-data");
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
         set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
-        seed_archive_session(&app_data_dir, "fresh-uploading", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(
+            &app_data_dir,
+            "fresh-uploading",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
         add_event(
             &app_data_dir,
             "fresh-uploading",
@@ -1124,14 +1097,10 @@ mod tests {
         .expect("add event");
         let (client, calls) = archive_client(vec![]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 0);
         assert!(calls.lock().expect("calls lock").is_empty());
@@ -1143,7 +1112,12 @@ mod tests {
         let app_data_dir = tmp.path().join("app-data");
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
         set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
-        seed_archive_session(&app_data_dir, "stale-uploading", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(
+            &app_data_dir,
+            "stale-uploading",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
         add_event(
             &app_data_dir,
             "stale-uploading",
@@ -1155,14 +1129,10 @@ mod tests {
         mark_last_event_at(&app_data_dir, "stale-uploading", &stale_at);
         let (client, calls) = archive_client(vec![UploadOutcome::Success]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 1);
         assert_eq!(summary.uploaded, 1);
@@ -1178,7 +1148,12 @@ mod tests {
         let app_data_dir = tmp.path().join("app-data");
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
         set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
-        seed_archive_session(&app_data_dir, "future-uploading", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(
+            &app_data_dir,
+            "future-uploading",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
         add_event(
             &app_data_dir,
             "future-uploading",
@@ -1190,14 +1165,10 @@ mod tests {
         mark_last_event_at(&app_data_dir, "future-uploading", &future_at);
         let (client, calls) = archive_client(vec![UploadOutcome::Success]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 1);
         assert_eq!(summary.uploaded, 1);
@@ -1214,7 +1185,12 @@ mod tests {
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
         set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
         seed_archive_session(&app_data_dir, "bad-meta", "2026-05-28T09:00:00+03:00", true);
-        seed_archive_session(&app_data_dir, "good-meta", "2026-05-28T10:00:00+03:00", true);
+        seed_archive_session(
+            &app_data_dir,
+            "good-meta",
+            "2026-05-28T10:00:00+03:00",
+            true,
+        );
         std::fs::write(
             app_data_dir
                 .join("recordings")
@@ -1225,20 +1201,22 @@ mod tests {
         .expect("corrupt meta");
         let (client, calls) = archive_client(vec![UploadOutcome::Success]);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, 2);
         assert_eq!(summary.uploaded, 1);
         assert_eq!(summary.failed, 1);
-        assert!(summary.errors.iter().any(|err| err.contains("bad-meta: invalid meta")));
-        assert_eq!(calls.lock().expect("calls lock").as_slice(), &["good-meta".to_string()]);
+        assert!(summary
+            .errors
+            .iter()
+            .any(|err| err.contains("bad-meta: invalid meta")));
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["good-meta".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -1247,7 +1225,12 @@ mod tests {
         let app_data_dir = tmp.path().join("app-data");
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
         set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
-        seed_archive_session(&app_data_dir, "delete-me", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(
+            &app_data_dir,
+            "delete-me",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
         let (client, calls) = archive_client(vec![UploadOutcome::Success]);
         let deleted = Arc::new(Mutex::new(false));
         let deleted_for_progress = Arc::clone(&deleted);
@@ -1270,7 +1253,10 @@ mod tests {
 
         assert_eq!(summary.total, 1);
         assert_eq!(summary.skipped, 1);
-        assert!(summary.errors.iter().any(|err| err.contains("delete-me: session no longer exists")));
+        assert!(summary
+            .errors
+            .iter()
+            .any(|err| err.contains("delete-me: session no longer exists")));
         assert!(calls.lock().expect("calls lock").is_empty());
     }
 
@@ -1279,7 +1265,12 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let app_data_dir = tmp.path().join("app-data");
         save_settings(&app_data_dir, &archive_settings()).expect("save settings");
-        seed_archive_session(&app_data_dir, "needs-token", "2026-05-28T09:00:00+03:00", true);
+        seed_archive_session(
+            &app_data_dir,
+            "needs-token",
+            "2026-05-28T09:00:00+03:00",
+            true,
+        );
         let (client, calls) = archive_client(vec![UploadOutcome::Success]);
         let progress_events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&progress_events);
@@ -1314,15 +1305,10 @@ mod tests {
         let progress_events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&progress_events);
 
-        let err = upload_archive_with_client(
-            app_data_dir,
-            settings,
-            &client,
-            move |progress| {
-                captured.lock().expect("progress lock").push(progress);
-                Ok(())
-            },
-        )
+        let err = upload_archive_with_client(app_data_dir, settings, &client, move |progress| {
+            captured.lock().expect("progress lock").push(progress);
+            Ok(())
+        })
         .await
         .expect_err("invalid url aborts");
 
@@ -1349,19 +1335,18 @@ mod tests {
         }
         let (client, calls) = archive_client(outcomes);
 
-        let summary = upload_archive_with_client(
-            app_data_dir,
-            archive_settings(),
-            &client,
-            |_| Ok(()),
-        )
-        .await
-        .expect("archive upload succeeds");
+        let summary =
+            upload_archive_with_client(app_data_dir, archive_settings(), &client, |_| Ok(()))
+                .await
+                .expect("archive upload succeeds");
 
         assert_eq!(summary.total, MAX_ARCHIVE_ERRORS + 5);
         assert_eq!(summary.failed, MAX_ARCHIVE_ERRORS + 5);
         assert_eq!(summary.errors.len(), MAX_ARCHIVE_ERRORS);
-        assert_eq!(calls.lock().expect("calls lock").len(), MAX_ARCHIVE_ERRORS + 5);
+        assert_eq!(
+            calls.lock().expect("calls lock").len(),
+            MAX_ARCHIVE_ERRORS + 5
+        );
     }
 
     #[tokio::test]

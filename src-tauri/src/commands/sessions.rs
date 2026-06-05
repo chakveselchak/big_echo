@@ -209,6 +209,7 @@ fn import_audio_session_from_path(
         transcript_file: transcript_name(now),
         summary_file: summary_name(now),
         meta_file: "meta.json".to_string(),
+        tasks_sync_file: "tasks_sync.json".to_string(),
     };
 
     let audio_dst = session_dir.join(&meta.artifacts.audio_file);
@@ -554,10 +555,7 @@ pub struct AutoDeleteSummary {
 /// so the frontend hides the audio player on next list refresh. Pure file +
 /// metadata work — does NOT check whether the session is currently being
 /// recorded; the caller is responsible for that guard.
-pub fn wipe_session_audio_file(
-    app_data_dir: &Path,
-    session_id: &str,
-) -> Result<(), String> {
+pub fn wipe_session_audio_file(app_data_dir: &Path, session_id: &str) -> Result<(), String> {
     let session_dir = get_session_dir(app_data_dir, session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
     let meta_path = get_meta_path(app_data_dir, session_id)?
@@ -870,7 +868,10 @@ pub(crate) fn run_auto_delete_audio_sweep(
     active_session_id: Option<&str>,
 ) -> Result<AutoDeleteSummary, String> {
     let sessions = repo_list_sessions(app_data_dir)?;
-    let mut summary = AutoDeleteSummary { deleted: 0, scanned: 0 };
+    let mut summary = AutoDeleteSummary {
+        deleted: 0,
+        scanned: 0,
+    };
     for session in sessions {
         summary.scanned += 1;
         if active_session_id == Some(session.session_id.as_str()) {
@@ -935,11 +936,17 @@ pub fn auto_delete_old_session_audio(
 ) -> Result<AutoDeleteSummary, String> {
     let settings = get_settings_from_dirs(dirs.inner())?;
     if !settings.auto_delete_audio_enabled {
-        return Ok(AutoDeleteSummary { deleted: 0, scanned: 0 });
+        return Ok(AutoDeleteSummary {
+            deleted: 0,
+            scanned: 0,
+        });
     }
     let days = settings.auto_delete_audio_days as i64;
     if days <= 0 {
-        return Ok(AutoDeleteSummary { deleted: 0, scanned: 0 });
+        return Ok(AutoDeleteSummary {
+            deleted: 0,
+            scanned: 0,
+        });
     }
     let cutoff = Utc::now() - Duration::days(days);
 
@@ -950,11 +957,7 @@ pub fn auto_delete_old_session_audio(
         .as_ref()
         .map(|meta| meta.session_id.clone());
 
-    run_auto_delete_audio_sweep(
-        &dirs.app_data_dir,
-        cutoff,
-        active_session_id.as_deref(),
-    )
+    run_auto_delete_audio_sweep(&dirs.app_data_dir, cutoff, active_session_id.as_deref())
 }
 
 #[cfg(test)]
@@ -982,6 +985,7 @@ mod tests {
             transcript_file: "transcript.txt".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
+            tasks_sync_file: "tasks_sync.json".to_string(),
         };
         meta
     }
@@ -1307,11 +1311,11 @@ mod tests {
             transcript_file: "transcript.md".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
+            tasks_sync_file: "tasks_sync.json".to_string(),
         };
         let meta_path = session_dir.join("meta.json");
         save_meta(&meta_path, &meta).expect("save meta");
-        upsert_session(app_data_dir, &meta, &session_dir, &meta_path)
-            .expect("upsert session");
+        upsert_session(app_data_dir, &meta, &session_dir, &meta_path).expect("upsert session");
     }
 
     fn fixture_dirs() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -1368,12 +1372,20 @@ mod tests {
         );
 
         let cutoff = Utc::now() - ChronoDuration::days(7);
-        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
-            .expect("sweep ok");
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None).expect("sweep ok");
 
-        assert_eq!(summary, AutoDeleteSummary { deleted: 1, scanned: 2 });
+        assert_eq!(
+            summary,
+            AutoDeleteSummary {
+                deleted: 1,
+                scanned: 2
+            }
+        );
         assert!(!recording_root.join("s-old").join("audio-old.opus").exists());
-        assert!(recording_root.join("s-fresh").join("audio-fresh.opus").exists());
+        assert!(recording_root
+            .join("s-fresh")
+            .join("audio-fresh.opus")
+            .exists());
 
         let old_meta = load_meta(
             &get_meta_path(&app_data_dir, "s-old")
@@ -1397,11 +1409,19 @@ mod tests {
         );
 
         let cutoff = Utc::now() - ChronoDuration::days(7);
-        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
-            .expect("sweep ok");
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None).expect("sweep ok");
 
-        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
-        assert!(recording_root.join("s-recording-old").join("audio.opus").exists());
+        assert_eq!(
+            summary,
+            AutoDeleteSummary {
+                deleted: 0,
+                scanned: 1
+            }
+        );
+        assert!(recording_root
+            .join("s-recording-old")
+            .join("audio.opus")
+            .exists());
     }
 
     #[test]
@@ -1418,10 +1438,15 @@ mod tests {
 
         let cutoff = Utc::now() - ChronoDuration::days(7);
         let summary =
-            run_auto_delete_audio_sweep(&app_data_dir, cutoff, Some("s-active"))
-                .expect("sweep ok");
+            run_auto_delete_audio_sweep(&app_data_dir, cutoff, Some("s-active")).expect("sweep ok");
 
-        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert_eq!(
+            summary,
+            AutoDeleteSummary {
+                deleted: 0,
+                scanned: 1
+            }
+        );
         assert!(recording_root.join("s-active").join("audio.opus").exists());
     }
 
@@ -1446,10 +1471,15 @@ mod tests {
         upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
 
         let cutoff = Utc::now() - ChronoDuration::days(7);
-        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
-            .expect("sweep ok");
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None).expect("sweep ok");
 
-        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert_eq!(
+            summary,
+            AutoDeleteSummary {
+                deleted: 0,
+                scanned: 1
+            }
+        );
     }
 
     #[test]
@@ -1474,10 +1504,15 @@ mod tests {
         upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
 
         let cutoff = Utc::now() - ChronoDuration::days(7);
-        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
-            .expect("sweep ok");
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None).expect("sweep ok");
 
-        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert_eq!(
+            summary,
+            AutoDeleteSummary {
+                deleted: 0,
+                scanned: 1
+            }
+        );
         assert!(session_dir.join("audio.opus").exists());
     }
 
@@ -1503,10 +1538,15 @@ mod tests {
         upsert_session(&app_data_dir, &meta, &session_dir, &meta_path).expect("upsert");
 
         let cutoff = Utc::now() - ChronoDuration::days(7);
-        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None)
-            .expect("sweep ok");
+        let summary = run_auto_delete_audio_sweep(&app_data_dir, cutoff, None).expect("sweep ok");
 
-        assert_eq!(summary, AutoDeleteSummary { deleted: 0, scanned: 1 });
+        assert_eq!(
+            summary,
+            AutoDeleteSummary {
+                deleted: 0,
+                scanned: 1
+            }
+        );
         assert!(session_dir.join("audio.opus").exists());
     }
 }

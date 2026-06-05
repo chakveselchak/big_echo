@@ -1,0 +1,322 @@
+use crate::task_sync::model::{ActionItem, TaskSyncError};
+use crate::task_sync::{queue, todoist};
+use serde::Serialize;
+use std::future::Future;
+use std::path::Path;
+use std::time::Duration;
+use tokio::time;
+
+const STALE_SYNCING_SECONDS: i64 = 15 * 60;
+const CLAIM_RENEW_SECONDS: u64 = 30;
+const CREATE_TASK_DEADLINE_SECONDS: u64 = 90;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSyncResult {
+    pub synced: usize,
+    pub failed: usize,
+    pub session_ids: Vec<String>,
+}
+
+pub async fn sync_queued(
+    app_data_dir: &Path,
+    session_id: Option<&str>,
+    token: &str,
+) -> Result<TaskSyncResult, String> {
+    sync_queued_with(app_data_dir, session_id, |item| async move {
+        todoist::create_task(token, &item).await
+    })
+    .await
+}
+
+pub async fn sync_queued_with<F, Fut>(
+    app_data_dir: &Path,
+    session_id: Option<&str>,
+    create: F,
+) -> Result<TaskSyncResult, String>
+where
+    F: Fn(ActionItem) -> Fut,
+    Fut: Future<Output = Result<String, TaskSyncError>>,
+{
+    let (recovered_failed, recovered_session_ids) =
+        queue::fail_stale_syncing(app_data_dir, session_id, STALE_SYNCING_SECONDS)?;
+    let batch = queue::claim_pending_batch(app_data_dir, session_id, 50)?;
+    let mut result = TaskSyncResult {
+        synced: 0,
+        failed: recovered_failed,
+        session_ids: recovered_session_ids,
+    };
+
+    for claimed in batch {
+        let item = claimed.item;
+        if !result.session_ids.contains(&item.source_session_id) {
+            result.session_ids.push(item.source_session_id.clone());
+        }
+        match run_with_claim_renewal(
+            app_data_dir,
+            &item.id,
+            &claimed.claim_token,
+            create(item.clone()),
+        )
+        .await
+        {
+            ClaimRunResult::Completed(Ok(external_id)) => {
+                if queue::mark_synced_claimed(
+                    app_data_dir,
+                    &item.id,
+                    &claimed.claim_token,
+                    &external_id,
+                )? {
+                    result.synced += 1;
+                }
+            }
+            ClaimRunResult::Completed(Err(err)) => {
+                if queue::mark_failed_with_kind_claimed(
+                    app_data_dir,
+                    &item.id,
+                    &claimed.claim_token,
+                    &err.message,
+                    err.kind.as_str(),
+                    err.retryable,
+                )? {
+                    result.failed += 1;
+                }
+            }
+            ClaimRunResult::TimedOut => {
+                if queue::mark_failed_with_kind_claimed(
+                    app_data_dir,
+                    &item.id,
+                    &claimed.claim_token,
+                    "Todoist request timed out",
+                    "network",
+                    true,
+                )? {
+                    result.failed += 1;
+                }
+            }
+            ClaimRunResult::LostClaim => {}
+        }
+    }
+
+    Ok(result)
+}
+
+enum ClaimRunResult {
+    Completed(Result<String, TaskSyncError>),
+    TimedOut,
+    LostClaim,
+}
+
+async fn run_with_claim_renewal<Fut>(
+    app_data_dir: &Path,
+    task_id: &str,
+    claim_token: &str,
+    create: Fut,
+) -> ClaimRunResult
+where
+    Fut: Future<Output = Result<String, TaskSyncError>>,
+{
+    tokio::pin!(create);
+    let deadline = time::sleep(Duration::from_secs(CREATE_TASK_DEADLINE_SECONDS));
+    tokio::pin!(deadline);
+
+    loop {
+        match time::timeout(Duration::from_secs(CLAIM_RENEW_SECONDS), &mut create).await {
+            Ok(result) => return ClaimRunResult::Completed(result),
+            Err(_) => match time::timeout(Duration::from_millis(0), &mut deadline).await {
+                Ok(_) => return ClaimRunResult::TimedOut,
+                Err(_) => match queue::renew_claim(app_data_dir, task_id, claim_token) {
+                    Ok(true) => {}
+                    Ok(false) | Err(_) => return ClaimRunResult::LostClaim,
+                },
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task_sync::model::{ActionItem, TaskSyncError, TaskSyncErrorKind, TaskSyncStatus};
+    use crate::task_sync::queue;
+    use rusqlite::{params, Connection};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tempfile::tempdir;
+
+    fn item(id: &str) -> ActionItem {
+        item_with_session(id, "session-1")
+    }
+
+    fn item_with_session(id: &str, session_id: &str) -> ActionItem {
+        ActionItem {
+            id: id.to_string(),
+            provider: "todoist".to_string(),
+            title: "Task".to_string(),
+            description: None,
+            due: None,
+            priority: Some(1),
+            assignee: None,
+            context: None,
+            labels: vec![],
+            source_session_id: session_id.to_string(),
+            source_file_path: "/tmp/session/summary.md".to_string(),
+            status: TaskSyncStatus::New,
+            external_task_id: None,
+            error: None,
+            error_kind: None,
+            retryable: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_marks_successful_tasks_synced() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        queue::enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+
+        let result = sync_queued_with(tmp.path(), Some("session-1"), |_item| async {
+            Ok("todoist-1".to_string())
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.synced, 1);
+        assert_eq!(result.session_ids, vec!["session-1"]);
+        let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Synced);
+        assert_eq!(rows[0].external_task_id.as_deref(), Some("todoist-1"));
+    }
+
+    #[tokio::test]
+    async fn worker_marks_failed_tasks_failed() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        queue::enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+
+        let result = sync_queued_with(tmp.path(), Some("session-1"), |_item| async {
+            Err(TaskSyncError::new(
+                TaskSyncErrorKind::RateLimit,
+                "rate limited",
+                true,
+            ))
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.session_ids, vec!["session-1"]);
+        let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Failed);
+        assert_eq!(rows[0].error.as_deref(), Some("rate limited"));
+        assert_eq!(rows[0].error_kind.as_deref(), Some("rate_limit"));
+        assert_eq!(rows[0].retryable, Some(true));
+    }
+
+    #[tokio::test]
+    async fn worker_reports_unique_session_ids_for_processed_batch() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(
+            tmp.path(),
+            &[
+                item_with_session("id-1", "session-1"),
+                item_with_session("id-2", "session-1"),
+                item_with_session("id-3", "session-2"),
+            ],
+        )
+        .expect("insert");
+        queue::enqueue_tasks(
+            tmp.path(),
+            "session-1",
+            "todoist",
+            &["id-1".to_string(), "id-2".to_string()],
+        )
+        .expect("enqueue session 1");
+        queue::enqueue_tasks(tmp.path(), "session-2", "todoist", &["id-3".to_string()])
+            .expect("enqueue session 2");
+
+        let result = sync_queued_with(tmp.path(), None, |item| async move {
+            Ok(format!("todoist-{}", item.id))
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.synced, 3);
+        assert_eq!(result.session_ids, vec!["session-1", "session-2"]);
+    }
+
+    #[tokio::test]
+    async fn worker_skips_rows_already_claimed_by_another_sync() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        queue::enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+        queue::claim_pending_batch(tmp.path(), Some("session-1"), 50).expect("claim");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let result = sync_queued_with(tmp.path(), Some("session-1"), {
+            let calls = Arc::clone(&calls);
+            move |_item| {
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok("todoist-1".to_string())
+                }
+            }
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.synced, 0);
+        assert_eq!(result.failed, 0);
+        assert!(result.session_ids.is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Syncing);
+    }
+
+    #[tokio::test]
+    async fn worker_reports_recovered_stale_syncing_sessions() {
+        let tmp = tempdir().expect("tempdir");
+        queue::upsert_new_tasks(tmp.path(), &[item("id-1")]).expect("insert");
+        queue::enqueue_tasks(tmp.path(), "session-1", "todoist", &["id-1".to_string()])
+            .expect("enqueue");
+        queue::claim_pending_batch(tmp.path(), Some("session-1"), 50).expect("claim");
+
+        let old_claim = (chrono::Local::now() - chrono::Duration::seconds(60 * 60)).to_rfc3339();
+        let conn = Connection::open(tmp.path().join("bigecho.sqlite3")).expect("open db");
+        conn.execute(
+            "UPDATE task_sync_queue SET claimed_at = ?1, claim_owner = 'previous-owner' WHERE id = 'id-1'",
+            params![old_claim],
+        )
+        .expect("age claim");
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let result = sync_queued_with(tmp.path(), Some("session-1"), {
+            let calls = Arc::clone(&calls);
+            move |_item| {
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok("todoist-1".to_string())
+                }
+            }
+        })
+        .await
+        .expect("sync");
+
+        assert_eq!(result.synced, 0);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.session_ids, vec!["session-1"]);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+        let rows = queue::list_by_session(tmp.path(), "session-1", "todoist").expect("rows");
+        assert_eq!(rows[0].status, TaskSyncStatus::Failed);
+        assert_eq!(rows[0].error_kind.as_deref(), Some("sync_interrupted"));
+    }
+}

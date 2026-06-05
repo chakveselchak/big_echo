@@ -6,10 +6,7 @@ use crate::settings::token_validation::validate_secret_token;
 use tauri::{Manager, Runtime, State, WebviewWindow};
 
 #[tauri::command]
-pub async fn yandex_sync_set_token(
-    dirs: State<'_, AppDirs>,
-    token: String,
-) -> Result<(), String> {
+pub async fn yandex_sync_set_token(dirs: State<'_, AppDirs>, token: String) -> Result<(), String> {
     let validated = validate_secret_token(&token)?;
     set_secret(&dirs.app_data_dir, TOKEN_KEY, validated)
 }

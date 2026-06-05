@@ -33,9 +33,7 @@ pub(crate) fn app_icon_bytes(theme: Theme) -> &'static [u8] {
     }
 }
 
-pub(crate) fn load_png_icon(
-    bytes: &'static [u8],
-) -> Result<tauri::image::Image<'static>, String> {
+pub(crate) fn load_png_icon(bytes: &'static [u8]) -> Result<tauri::image::Image<'static>, String> {
     tauri::image::Image::from_bytes(bytes)
         .map(|image| image.to_owned())
         .map_err(|e| format!("failed to decode icon: {e}"))
@@ -368,16 +366,12 @@ pub(crate) fn parse_recording_flag(payload: &str) -> bool {
 
     let parsed = serde_json::from_str::<serde_json::Value>(payload).ok();
     match parsed {
-        Some(serde_json::Value::Object(_)) => {
-            parsed.as_ref().and_then(from_value).unwrap_or(false)
-        }
-        Some(serde_json::Value::String(inner)) => {
-            serde_json::from_str::<serde_json::Value>(&inner)
-                .ok()
-                .as_ref()
-                .and_then(from_value)
-                .unwrap_or(false)
-        }
+        Some(serde_json::Value::Object(_)) => parsed.as_ref().and_then(from_value).unwrap_or(false),
+        Some(serde_json::Value::String(inner)) => serde_json::from_str::<serde_json::Value>(&inner)
+            .ok()
+            .as_ref()
+            .and_then(from_value)
+            .unwrap_or(false),
         _ => false,
     }
 }

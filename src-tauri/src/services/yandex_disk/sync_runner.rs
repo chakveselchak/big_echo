@@ -23,8 +23,15 @@ pub enum SyncProgress {
     /// about to start. `total_objects` is the count of local files considered
     /// (after `.DS_Store` filtering); `not_synced` is the subset that needs
     /// upload (missing remotely or remote size differs).
-    Started { total_objects: u32, not_synced: u32 },
-    Item { current: u32, total: u32, rel_path: String },
+    Started {
+        total_objects: u32,
+        not_synced: u32,
+    },
+    Item {
+        current: u32,
+        total: u32,
+        rel_path: String,
+    },
     Finished(LastRunSummary),
 }
 
@@ -184,9 +191,7 @@ pub async fn run(
             let listing = api.list_dir(&remote_dir).await.unwrap_or_default();
             listing_cache.insert(remote_dir.clone(), listing);
         }
-        let remote_map = listing_cache
-            .get(&remote_dir)
-            .expect("just inserted");
+        let remote_map = listing_cache.get(&remote_dir).expect("just inserted");
 
         let name = lf.rel_path.rsplit('/').next().unwrap_or(&lf.rel_path);
         if remote_map.get(name).copied() == Some(lf.size) {
@@ -342,7 +347,10 @@ mod tests {
         std::fs::write(&p, bytes).unwrap();
     }
 
-    fn record_progress() -> (Arc<Mutex<Vec<SyncProgress>>>, impl Fn(SyncProgress) + Send + Sync) {
+    fn record_progress() -> (
+        Arc<Mutex<Vec<SyncProgress>>>,
+        impl Fn(SyncProgress) + Send + Sync,
+    ) {
         let events = Arc::new(Mutex::new(Vec::<SyncProgress>::new()));
         let recorder = events.clone();
         let emit = move |p: SyncProgress| recorder.lock().unwrap().push(p);
@@ -381,7 +389,11 @@ mod tests {
     #[tokio::test]
     async fn uploads_file_when_absent_on_remote() {
         let tmp = tempdir().unwrap();
-        write_file(tmp.path(), "10.04.2026/meeting_15-06-07/audio.opus", b"hello");
+        write_file(
+            tmp.path(),
+            "10.04.2026/meeting_15-06-07/audio.opus",
+            b"hello",
+        );
         let api = Arc::new(FakeApi::new());
         let api_dyn: Arc<dyn YandexDiskApi> = api.clone();
         let (_events, emit) = record_progress();
@@ -395,12 +407,13 @@ mod tests {
     #[tokio::test]
     async fn skips_file_when_remote_size_matches() {
         let tmp = tempdir().unwrap();
-        write_file(tmp.path(), "10.04.2026/meeting_15-06-07/audio.opus", b"hello");
-        let api = Arc::new(FakeApi::new());
-        api.preload_file(
-            "disk:/BigEcho/10.04.2026/meeting_15-06-07/audio.opus",
-            5,
+        write_file(
+            tmp.path(),
+            "10.04.2026/meeting_15-06-07/audio.opus",
+            b"hello",
         );
+        let api = Arc::new(FakeApi::new());
+        api.preload_file("disk:/BigEcho/10.04.2026/meeting_15-06-07/audio.opus", 5);
         let api_dyn: Arc<dyn YandexDiskApi> = api.clone();
         let (_events, emit) = record_progress();
         let summary = run(&params(tmp.path()), api_dyn, &emit).await;
@@ -486,7 +499,11 @@ mod tests {
             }
         ));
         match &evs[1] {
-            SyncProgress::Item { current, total, rel_path } => {
+            SyncProgress::Item {
+                current,
+                total,
+                rel_path,
+            } => {
                 assert_eq!(*current, 1);
                 assert_eq!(*total, 2);
                 assert_eq!(rel_path, "a.opus");
@@ -494,7 +511,11 @@ mod tests {
             other => panic!("expected Item, got {:?}", other),
         }
         match &evs[2] {
-            SyncProgress::Item { current, total, rel_path } => {
+            SyncProgress::Item {
+                current,
+                total,
+                rel_path,
+            } => {
                 assert_eq!(*current, 2);
                 assert_eq!(*total, 2);
                 assert_eq!(rel_path, "b.opus");
@@ -519,8 +540,7 @@ mod tests {
         assert_eq!(summary.not_synced, 1);
         assert_eq!(summary.uploaded, 1);
         assert_eq!(api.upload_call_count(), 1);
-        let uploaded_paths: Vec<String> =
-            api.inner.lock().unwrap().files.keys().cloned().collect();
+        let uploaded_paths: Vec<String> = api.inner.lock().unwrap().files.keys().cloned().collect();
         assert!(
             !uploaded_paths.iter().any(|p| p.ends_with("/.DS_Store")),
             ".DS_Store should not be uploaded; got {uploaded_paths:?}"

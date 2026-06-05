@@ -18,6 +18,12 @@ pub struct SessionArtifacts {
     pub transcript_file: String,
     pub summary_file: String,
     pub meta_file: String,
+    #[serde(default = "default_tasks_sync_file")]
+    pub tasks_sync_file: String,
+}
+
+fn default_tasks_sync_file() -> String {
+    "tasks_sync.json".to_string()
 }
 
 impl Default for SessionArtifacts {
@@ -27,6 +33,7 @@ impl Default for SessionArtifacts {
             transcript_file: "transcript.md".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
+            tasks_sync_file: default_tasks_sync_file(),
         }
     }
 }
@@ -118,5 +125,25 @@ mod tests {
         );
         assert_eq!(meta.notes, "Check contract renewal");
         assert_eq!(meta.primary_tag, "zoom");
+    }
+
+    #[test]
+    fn session_artifacts_default_includes_tasks_sync_file() {
+        let artifacts = SessionArtifacts::default();
+        assert_eq!(artifacts.tasks_sync_file, "tasks_sync.json");
+    }
+
+    #[test]
+    fn session_artifacts_deserializes_legacy_json_without_tasks_sync_file() {
+        let raw = r#"{
+        "audio_file": "audio.opus",
+        "transcript_file": "transcript.md",
+        "summary_file": "summary.md",
+        "meta_file": "meta.json"
+    }"#;
+
+        let artifacts: SessionArtifacts = serde_json::from_str(raw).expect("legacy artifacts");
+
+        assert_eq!(artifacts.tasks_sync_file, "tasks_sync.json");
     }
 }

@@ -122,9 +122,10 @@ mod tests {
 
     #[test]
     fn public_error_from_unauthorized_never_includes_body_preview() {
-        let public = BrainUploadPublicError::from_brain_upload_error(&BrainUploadError::Unauthorized {
-            body_preview: "Bearer secret-token-was-here".to_string(),
-        });
+        let public =
+            BrainUploadPublicError::from_brain_upload_error(&BrainUploadError::Unauthorized {
+                body_preview: "Bearer secret-token-was-here".to_string(),
+            });
         assert_eq!(public.code, BrainUploadErrorCode::Unauthorized);
         assert!(!public.message.contains("secret-token"));
         assert!(!public.message.contains("Bearer"));

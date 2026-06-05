@@ -430,7 +430,11 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
 
         let n = pushes.load(Ordering::SeqCst);
-        assert!(n >= 2, "expected at least 2 level pushes within 120ms, got {}", n);
+        assert!(
+            n >= 2,
+            "expected at least 2 level pushes within 120ms, got {}",
+            n
+        );
 
         hide();
         let after_hide = pushes.load(Ordering::SeqCst);

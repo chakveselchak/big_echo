@@ -8,6 +8,7 @@ mod pipeline;
 mod services;
 mod settings;
 mod storage;
+mod task_sync;
 mod text_editors;
 mod tray_manager;
 mod window_manager;
@@ -42,6 +43,10 @@ use commands::settings::{
     open_macos_system_audio_settings, open_settings_window, open_tray_window, pick_recording_root,
     save_public_settings,
 };
+use commands::task_sync::{
+    enqueue_todoist_tasks, get_todoist_sync_status, preview_todoist_tasks, sync_todoist_tasks,
+    todoist_sync_clear_token, todoist_sync_has_token, todoist_sync_set_token,
+};
 use commands::updates::{check_for_update, open_external_url};
 use commands::yandex_sync::{
     yandex_sync_clear_token, yandex_sync_has_token, yandex_sync_now, yandex_sync_set_token,
@@ -50,8 +55,10 @@ use commands::yandex_sync::{
 #[cfg(test)]
 use domain::session::SessionMeta;
 use domain::session::SessionStatus;
-use services::brain_server::upload::{upload_session_after_record_with_shared_client, validate_upload_url};
 use services::brain_server::state::try_begin_session_upload;
+use services::brain_server::upload::{
+    upload_session_after_record_with_shared_client, validate_upload_url,
+};
 use services::pipeline_runner::{run_pipeline_core, spawn_retry_worker, PipelineMode};
 #[cfg(test)]
 use settings::public_settings::save_settings;
@@ -439,11 +446,8 @@ fn main() {
         let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)
             .map_err(|e| e.to_string())?;
 
-        let menu = Menu::with_items(
-            app,
-            &[&open_item, &settings_item, &quit_item],
-        )
-        .map_err(|e| e.to_string())?;
+        let menu = Menu::with_items(app, &[&open_item, &settings_item, &quit_item])
+            .map_err(|e| e.to_string())?;
 
         let initial_tray_icon = tray_manager::load_png_icon(tray_manager::tray_icon_bytes(
             tray_manager::choose_tray_icon_variant(
@@ -454,8 +458,7 @@ fn main() {
         let left_click_context_menu =
             tray_manager::should_show_context_menu_on_left_click(std::env::consts::OS);
 
-        let tray_hover_generation =
-            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let tray_hover_generation = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let tray_hover_generation_for_events = tray_hover_generation.clone();
 
         TrayIconBuilder::with_id(tray_manager::TRAY_ICON_ID)
@@ -624,6 +627,13 @@ fn main() {
             yandex_sync_has_token,
             yandex_sync_status,
             yandex_sync_now,
+            todoist_sync_set_token,
+            todoist_sync_clear_token,
+            todoist_sync_has_token,
+            preview_todoist_tasks,
+            enqueue_todoist_tasks,
+            sync_todoist_tasks,
+            get_todoist_sync_status,
             brain_sync_set_token,
             brain_sync_clear_token,
             brain_sync_has_token,
@@ -857,6 +867,13 @@ mod ipc_runtime_tests {
                 yandex_sync_has_token,
                 yandex_sync_status,
                 yandex_sync_now,
+                todoist_sync_set_token,
+                todoist_sync_clear_token,
+                todoist_sync_has_token,
+                preview_todoist_tasks,
+                enqueue_todoist_tasks,
+                sync_todoist_tasks,
+                get_todoist_sync_status,
                 brain_sync_set_token,
                 brain_sync_clear_token,
                 brain_sync_has_token,
@@ -945,10 +962,7 @@ mod ipc_runtime_tests {
                 .lock()
                 .expect("lock requests")
                 .push(request);
-            write_http_json_response(
-                &mut stream,
-                r#"{"ok":true,"job_id":91,"status":"queued"}"#,
-            );
+            write_http_json_response(&mut stream, r#"{"ok":true,"job_id":91,"status":"queued"}"#);
         });
         (format!("http://{addr}/upload"), requests)
     }
@@ -1881,8 +1895,10 @@ mod ipc_runtime_tests {
             let mut g = state.yandex_sync.lock().expect("yandex_sync lock");
             g.is_running = true;
         }
-        let response =
-            get_ipc_response(&webview, invoke_request("yandex_sync_now", serde_json::json!({})));
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("yandex_sync_now", serde_json::json!({})),
+        );
         let err = response.expect_err("should fail");
         assert_eq!(extract_err_string(err), "Yandex sync already running");
     }
@@ -1926,7 +1942,10 @@ mod ipc_runtime_tests {
             .expect("webview should be created");
         let set = get_ipc_response(
             &webview,
-            invoke_request("yandex_sync_set_token", serde_json::json!({ "token": "abc" })),
+            invoke_request(
+                "yandex_sync_set_token",
+                serde_json::json!({ "token": "abc" }),
+            ),
         );
         assert!(set.is_ok());
         let response = get_ipc_response(
@@ -1979,6 +1998,74 @@ mod ipc_runtime_tests {
     }
 
     #[test]
+    fn invoke_todoist_sync_token_commands_round_trip() {
+        let (app, app_data_dir) = build_test_app();
+        let previous = crate::settings::secret_store::get_secret(
+            &app_data_dir,
+            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+        )
+        .ok();
+        struct RestoreTodoistToken {
+            app_data_dir: std::path::PathBuf,
+            previous: Option<String>,
+        }
+        impl Drop for RestoreTodoistToken {
+            fn drop(&mut self) {
+                match self.previous.as_deref() {
+                    Some(value) => {
+                        let _ = crate::settings::secret_store::set_secret(
+                            &self.app_data_dir,
+                            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+                            value,
+                        );
+                    }
+                    None => {
+                        let _ = crate::settings::secret_store::clear_secret(
+                            &self.app_data_dir,
+                            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+                        );
+                    }
+                }
+            }
+        }
+        let _restore = RestoreTodoistToken {
+            app_data_dir: app_data_dir.clone(),
+            previous,
+        };
+        crate::settings::secret_store::clear_secret(
+            &app_data_dir,
+            crate::commands::task_sync::TODOIST_TOKEN_KEY,
+        )
+        .expect("clear todoist token");
+
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let unset = get_ipc_response(
+            &webview,
+            invoke_request("todoist_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token must succeed");
+        assert_eq!(extract_ok_json(unset), serde_json::Value::Bool(false));
+
+        let set = get_ipc_response(
+            &webview,
+            invoke_request(
+                "todoist_sync_set_token",
+                serde_json::json!({ "token": "abc" }),
+            ),
+        );
+        assert!(set.is_ok());
+        let response = get_ipc_response(
+            &webview,
+            invoke_request("todoist_sync_has_token", serde_json::json!({})),
+        )
+        .expect("has_token must succeed");
+        let value = extract_ok_json(response);
+        assert_eq!(value, serde_json::Value::Bool(true));
+    }
+
+    #[test]
     fn invoke_brain_sync_has_token_returns_false_when_unset() {
         let (app, _dir) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -2002,7 +2089,10 @@ mod ipc_runtime_tests {
 
         let set = get_ipc_response(
             &webview,
-            invoke_request("brain_sync_set_token", serde_json::json!({ "token": "abc" })),
+            invoke_request(
+                "brain_sync_set_token",
+                serde_json::json!({ "token": "abc" }),
+            ),
         );
         assert!(set.is_ok());
 
@@ -2011,7 +2101,10 @@ mod ipc_runtime_tests {
             invoke_request("brain_sync_has_token", serde_json::json!({})),
         )
         .expect("has_token after set must succeed");
-        assert_eq!(extract_ok_json(has_after_set), serde_json::Value::Bool(true));
+        assert_eq!(
+            extract_ok_json(has_after_set),
+            serde_json::Value::Bool(true)
+        );
 
         let clear = get_ipc_response(
             &webview,
@@ -2024,7 +2117,10 @@ mod ipc_runtime_tests {
             invoke_request("brain_sync_has_token", serde_json::json!({})),
         )
         .expect("has_token after clear must succeed");
-        assert_eq!(extract_ok_json(has_after_clear), serde_json::Value::Bool(false));
+        assert_eq!(
+            extract_ok_json(has_after_clear),
+            serde_json::Value::Bool(false)
+        );
     }
 
     #[test]
@@ -2035,7 +2131,10 @@ mod ipc_runtime_tests {
             .expect("webview should be created");
         let response = get_ipc_response(
             &webview,
-            invoke_request("brain_sync_set_token", serde_json::json!({ "token": "   " })),
+            invoke_request(
+                "brain_sync_set_token",
+                serde_json::json!({ "token": "   " }),
+            ),
         );
         let err = response.expect_err("whitespace token should fail");
         assert_eq!(extract_err_string(err), "Token must not be empty");
@@ -2139,7 +2238,10 @@ mod ipc_runtime_tests {
         let mut settings = load_settings(&app_data_dir).expect("load settings");
         settings.brain_sync_enabled = false;
         settings.brain_sync_url = upload_url;
-        settings.recording_root = app_data_dir.join("recordings").to_string_lossy().to_string();
+        settings.recording_root = app_data_dir
+            .join("recordings")
+            .to_string_lossy()
+            .to_string();
         save_settings(&app_data_dir, &settings).expect("save settings");
 
         let set = get_ipc_response(

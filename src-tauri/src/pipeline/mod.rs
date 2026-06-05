@@ -1157,7 +1157,10 @@ pub(crate) fn resolve_summary_prompt<'a>(
     settings: &'a PublicSettings,
     custom_prompt: Option<&'a str>,
 ) -> &'a str {
-    if let Some(prompt) = custom_prompt.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(prompt) = custom_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         return prompt;
     }
     if settings.summary_prompt.trim().is_empty() {

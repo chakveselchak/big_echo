@@ -1,8 +1,8 @@
 use crate::app_state::{AppDirs, AppState};
 pub use crate::audio::macos_system_audio::MacosSystemAudioPermissionStatus;
+use crate::get_settings_from_dirs;
 use crate::settings::public_settings::{save_settings, PublicSettings};
 use crate::window_manager::{open_settings_window_internal, open_tray_window_internal};
-use crate::get_settings_from_dirs;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};

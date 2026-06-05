@@ -151,14 +151,7 @@ pub async fn check_locale(locale: &str) -> Result<CheckResult, String> {
 }
 
 pub async fn transcribe(audio_path: &str, locale: &str) -> Result<TranscribeResult, String> {
-    let stdout = run_simple(&[
-        "transcribe",
-        "--locale",
-        locale,
-        "--input",
-        audio_path,
-    ])
-    .await?;
+    let stdout = run_simple(&["transcribe", "--locale", locale, "--input", audio_path]).await?;
     serde_json::from_str(stdout.trim()).map_err(|e| format!("parse transcribe result: {e}"))
 }
 

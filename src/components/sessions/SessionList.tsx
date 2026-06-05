@@ -13,11 +13,13 @@ import type {
 } from "../../types";
 import { getErrorMessage } from "../../lib/appUtils";
 import { tauriInvoke } from "../../lib/tauri";
+import { useTodoistTasks } from "../../hooks/useTodoistTasks";
 import { SessionCard } from "./SessionCard";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
 import { ArtifactModal } from "./ArtifactModal";
 import { SummaryPromptModal } from "./SummaryPromptModal";
 import type { SummaryPromptDialogState } from "./SummaryPromptModal";
+import { TodoistExportModal } from "./TodoistExportModal";
 
 const INITIAL_VISIBLE = 20;
 const PAGE_SIZE = 40;
@@ -110,6 +112,8 @@ export function SessionList({
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  const [todoistPendingSessionId, setTodoistPendingSessionId] = useState<string | null>(null);
+  const todoistTasks = useTodoistTasks();
   // Cache the default summary prompt fetched from backend so clicking the
   // "Настроить промпт саммари" button is instant on every repeat click
   // (the first one pays one IPC round-trip).
@@ -213,6 +217,28 @@ export function SessionList({
       setSummaryPromptDialog(null);
     } else {
       setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
+    }
+  }
+
+  async function openTodoistExport(sessionId: string) {
+    setTodoistPendingSessionId(sessionId);
+    try {
+      await todoistTasks.openPreview(sessionId);
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
+    } finally {
+      setTodoistPendingSessionId(null);
+    }
+  }
+
+  async function addTodoistTasks(taskIds: string[]) {
+    const sessionId = todoistTasks.preview?.sessionId;
+    if (!sessionId) return;
+    try {
+      const result = await todoistTasks.enqueueAndSync(sessionId, taskIds);
+      setStatus(`todoist_synced: ${result.synced} synced, ${result.failed} failed`);
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
     }
   }
 
@@ -442,6 +468,8 @@ export function SessionList({
                   onFieldBlur={flushSessionDetails}
                   onOpenFolder={openSessionFolder}
                   onUploadToBrain={onUploadToBrain}
+                  onExportTodoist={(sessionId) => void openTodoistExport(sessionId)}
+                  todoistPending={todoistPendingSessionId === item.session_id}
                   setStatus={setStatus}
                 />
               );
@@ -523,6 +551,14 @@ export function SessionList({
         dialog={summaryPromptDialog}
         onCancel={() => setSummaryPromptDialog(null)}
         onConfirm={(value) => void confirmSummaryPrompt(value)}
+      />
+
+      <TodoistExportModal
+        preview={todoistTasks.preview}
+        open={Boolean(todoistTasks.preview)}
+        syncing={todoistTasks.syncing}
+        onCancel={todoistTasks.closePreview}
+        onAddSelected={(taskIds) => void addTodoistTasks(taskIds)}
       />
     </>
   );

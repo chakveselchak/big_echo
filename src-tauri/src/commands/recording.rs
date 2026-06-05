@@ -152,6 +152,7 @@ fn start_recording_impl(
         transcript_file: transcript_name(started_at),
         summary_file: summary_name(started_at),
         meta_file: "meta.json".to_string(),
+        tasks_sync_file: "tasks_sync.json".to_string(),
     };
 
     let mic_name = if settings.mic_device_name.trim().is_empty() {
@@ -237,7 +238,11 @@ pub fn stop_recording(
     stop_recording_impl(dirs.inner(), state.inner(), session_id)
 }
 
-fn stop_recording_impl(dirs: &AppDirs, state: &AppState, session_id: String) -> Result<String, String> {
+fn stop_recording_impl(
+    dirs: &AppDirs,
+    state: &AppState,
+    session_id: String,
+) -> Result<String, String> {
     stop_active_recording_internal(dirs, state, Some(session_id.as_str()), None)
 }
 
@@ -649,7 +654,10 @@ mod tests {
             &crate::get_settings_from_dirs(&dirs).expect("load settings"),
             &state.live_levels,
         );
-        assert!(minitray::is_visible(), "minitray should be visible before stop");
+        assert!(
+            minitray::is_visible(),
+            "minitray should be visible before stop"
+        );
 
         // Build a session meta with a known relative directory so
         // stop_active_recording_internal can locate the session folder.
@@ -665,10 +673,8 @@ mod tests {
         meta.started_at_iso = started_at.to_rfc3339();
 
         let settings = crate::get_settings_from_dirs(&dirs).expect("load settings");
-        let rel_dir = crate::storage::fs_layout::build_session_relative_dir(
-            &meta.primary_tag,
-            started_at,
-        );
+        let rel_dir =
+            crate::storage::fs_layout::build_session_relative_dir(&meta.primary_tag, started_at);
         let abs_dir = crate::root_recordings_dir(&dirs.app_data_dir, &settings)
             .expect("recordings dir")
             .join(&rel_dir);
@@ -696,7 +702,10 @@ mod tests {
         // The function must return Err (finalize failed) …
         assert!(result.is_err(), "expected Err from finalize failure");
         // … but the minitray must be hidden regardless.
-        assert!(!minitray::is_visible(), "minitray must be hidden after stop, even on error");
+        assert!(
+            !minitray::is_visible(),
+            "minitray must be hidden after stop, even on error"
+        );
         assert_eq!(
             hide_calls.load(Ordering::SeqCst),
             1,
@@ -744,8 +753,7 @@ mod tests {
 
         // FE caller passes an unrelated session_id (typical for a desync
         // where FE state lagged behind a previous stop/start cycle).
-        let result =
-            stop_active_recording_internal(&dirs, &state, Some("not-the-active-id"), None);
+        let result = stop_active_recording_internal(&dirs, &state, Some("not-the-active-id"), None);
 
         assert!(matches!(result, Err(ref err) if err == "Session id mismatch"));
 
@@ -762,6 +770,9 @@ mod tests {
             "active_capture must survive a stale-id stop attempt",
         );
         // Minitray must NOT be hidden either — the session is still live.
-        assert!(!minitray::is_visible(), "minitray was never shown for this test");
+        assert!(
+            !minitray::is_visible(),
+            "minitray was never shown for this test"
+        );
     }
 }

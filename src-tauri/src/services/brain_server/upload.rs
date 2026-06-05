@@ -1,9 +1,9 @@
-use crate::services::brain_server::TOKEN_KEY;
 use crate::domain::session::SessionMeta;
 use crate::services::brain_server::client::{
     BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
 };
 use crate::services::brain_server::error::BrainUploadPublicError;
+use crate::services::brain_server::TOKEN_KEY;
 use crate::settings::public_settings::PublicSettings;
 use crate::settings::secret_store::get_secret;
 use crate::storage::sqlite_repo::add_event;
@@ -144,8 +144,13 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
         return Ok(skipped_response());
     }
 
-    let url = validate_upload_url(&settings.brain_sync_url)
-        .map_err(|_| record_failed_event(&app_data_dir, &meta.session_id, &BrainUploadPublicError::invalid_url()))?;
+    let url = validate_upload_url(&settings.brain_sync_url).map_err(|_| {
+        record_failed_event(
+            &app_data_dir,
+            &meta.session_id,
+            &BrainUploadPublicError::invalid_url(),
+        )
+    })?;
     let _ = url;
     let token = get_secret(&app_data_dir, TOKEN_KEY).map_err(|_| {
         record_failed_event(
@@ -169,7 +174,9 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
         "brain_upload_started",
         "Uploading audio to Brain",
     )
-    .map_err(|_| BrainUploadPublicError::configuration("Не удалось сохранить статус загрузки Brain."))?;
+    .map_err(|_| {
+        BrainUploadPublicError::configuration("Не удалось сохранить статус загрузки Brain.")
+    })?;
 
     match client
         .upload_audio(&url, token.trim(), &audio_path, &metadata)
@@ -257,12 +264,12 @@ pub async fn upload_session_after_record_with_shared_client(
 
 #[cfg(test)]
 mod tests {
-    use crate::services::brain_server::TOKEN_KEY;
     use crate::domain::session::{SessionMeta, SessionStatus};
     use crate::services::brain_server::client::{
         BrainServerClient, BrainUploadError, BrainUploadMetadata, BrainUploadResponse,
     };
     use crate::services::brain_server::error::BrainUploadErrorCode;
+    use crate::services::brain_server::TOKEN_KEY;
     use crate::settings::public_settings::PublicSettings;
     use crate::settings::secret_store::set_secret;
     use crate::storage::sqlite_repo::list_session_events;
@@ -367,7 +374,10 @@ mod tests {
         assert_eq!(calls[0].3.session_id, "session-upload");
         assert_eq!(calls[0].3.title, "Weekly sync");
         assert_eq!(calls[0].3.topic, "Weekly sync");
-        assert_eq!(calls[0].3.tags, vec!["team".to_string(), "weekly".to_string()]);
+        assert_eq!(
+            calls[0].3.tags,
+            vec!["team".to_string(), "weekly".to_string()]
+        );
         assert_eq!(calls[0].3.notes, "Remember risks");
         assert_eq!(calls[0].3.source, "zoom");
         assert_eq!(calls[0].3.started_at_iso, "2026-05-28T10:00:00+03:00");

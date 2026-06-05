@@ -289,7 +289,10 @@ mod tests {
         refresh_markdown_frontmatter(&empty_path, &sample_meta()).expect("ignore empty");
 
         assert!(!missing_path.exists());
-        assert_eq!(std::fs::read_to_string(&empty_path).expect("read empty"), "\n");
+        assert_eq!(
+            std::fs::read_to_string(&empty_path).expect("read empty"),
+            "\n"
+        );
     }
 
     fn markdownish_unclosed() -> &'static str {

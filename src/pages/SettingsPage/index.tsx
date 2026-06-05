@@ -3,6 +3,7 @@ import { Alert, Button, Flex, Tabs } from "antd";
 import { readBrainSyncUnlocked } from "../../lib/brainSyncUnlock";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import { useYandexSync } from "../../hooks/useYandexSync";
+import { useTodoistSync } from "../../hooks/useTodoistSync";
 import type { PublicSettings, SettingsTab } from "../../types";
 import { tauriInvoke } from "../../lib/tauri";
 import { getErrorMessage } from "../../lib/appUtils";
@@ -10,6 +11,7 @@ import { GeneralSettings } from "../../components/settings/GeneralSettings";
 import { TranscriptionSettings } from "../../components/settings/TranscriptionSettings";
 import { AudioSettings } from "../../components/settings/AudioSettings";
 import { YandexSyncSettings } from "../../components/settings/YandexSyncSettings";
+import { TodoistSyncSettings } from "../../components/settings/TodoistSyncSettings";
 import { BrainSyncSettings } from "../../components/settings/BrainSyncSettings";
 import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
 
@@ -65,6 +67,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
   } = useSettingsForm({ enabled: true, isTrayWindow: false, setStatus });
 
   const yandexSync = useYandexSync(settingsTab === "yandex");
+  const todoistSync = useTodoistSync(settingsTab === "todoist");
 
   // When embedded in the main window the unlock flag is owned by MainPage and
   // passed in; the standalone settings window falls back to reading storage.
@@ -116,6 +119,9 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       isDirty("yandex_sync_enabled") ||
       isDirty("yandex_sync_interval") ||
       isDirty("yandex_sync_remote_folder"),
+    todoist:
+      isDirty("todoist_sync_enabled") ||
+      isDirty("todoist_auto_add"),
     brain:
       isDirty("brain_sync_enabled") ||
       isDirty("brain_sync_url"),
@@ -216,6 +222,22 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
           setSettings={setSettings}
           isDirty={isDirty}
           yandexSync={yandexSync}
+        />
+      ),
+    },
+    {
+      key: "todoist" as SettingsTab,
+      label: (
+        <>
+          Todoist sync{dirtyByTab.todoist && dirtyDot}
+        </>
+      ),
+      children: (
+        <TodoistSyncSettings
+          settings={settings}
+          setSettings={setSettings}
+          isDirty={isDirty}
+          todoistSync={todoistSync}
         />
       ),
     },

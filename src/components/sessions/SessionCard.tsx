@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Badge, Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
-import { ClearOutlined, DeleteOutlined, DeploymentUnitOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
+import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, DeploymentUnitOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
@@ -34,6 +34,8 @@ type SessionCardProps = {
   onFieldBlur: (sessionId: string, detail?: SessionMetaView) => void;
   onOpenFolder: (sessionDir: string) => void;
   onUploadToBrain: (sessionId: string) => void;
+  onExportTodoist: (sessionId: string) => void;
+  todoistPending: boolean;
   setStatus: (status: string) => void;
 };
 
@@ -61,6 +63,8 @@ function SessionCardImpl({
   onFieldBlur,
   onOpenFolder,
   onUploadToBrain,
+  onExportTodoist,
+  todoistPending,
   setStatus,
 }: SessionCardProps) {
   const hasAudio = resolveSessionAudioPath(item) !== null;
@@ -212,6 +216,20 @@ function SessionCardImpl({
                   </Badge>
                 }
                 onClick={() => onUploadToBrain(item.session_id)}
+              />
+            )}
+            {item.has_summary_text && (
+              <Button
+                htmlType="button"
+                type="text"
+                size="small"
+                shape="circle"
+                className="session-todoist-export-button"
+                aria-label="Export action items to Todoist"
+                title="Export action items to Todoist"
+                loading={todoistPending}
+                icon={<CheckSquareOutlined aria-hidden="true" style={{color: "gray"}} />}
+                onClick={() => onExportTodoist(item.session_id)}
               />
             )}
           </div>

@@ -123,7 +123,11 @@ impl YandexDiskApi for HttpYandexDiskClient {
     // recurse into parent" approach once we have real sync traffic to benchmark.
     async fn ensure_dir(&self, remote_path: &str) -> Result<(), YandexError> {
         for path in Self::parent_paths(remote_path) {
-            let url = format!("{}/resources?path={}", self.base_url, urlencoding::encode(&path));
+            let url = format!(
+                "{}/resources?path={}",
+                self.base_url,
+                urlencoding::encode(&path)
+            );
             let res = self
                 .http_meta
                 .put(&url)
@@ -269,12 +273,18 @@ mod tests {
         Mock::given(method("PUT"))
             .and(path("/resources"))
             .and(query_param("path", "disk:/BigEcho"))
-            .and(wiremock::matchers::header("Authorization", "OAuth test-token"))
+            .and(wiremock::matchers::header(
+                "Authorization",
+                "OAuth test-token",
+            ))
             .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
             .await;
-        client_for(&server).ensure_dir("disk:/BigEcho").await.expect("ok");
+        client_for(&server)
+            .ensure_dir("disk:/BigEcho")
+            .await
+            .expect("ok");
     }
 
     #[tokio::test]
@@ -286,28 +296,37 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        client_for(&server).ensure_dir("disk:/BigEcho").await.expect("409 is ok");
+        client_for(&server)
+            .ensure_dir("disk:/BigEcho")
+            .await
+            .expect("409 is ok");
     }
 
     #[tokio::test]
     async fn ensure_dir_creates_missing_parents_recursively() {
         let server = MockServer::start().await;
-        Mock::given(method("PUT")).and(query_param("path", "disk:/BigEcho"))
+        Mock::given(method("PUT"))
+            .and(query_param("path", "disk:/BigEcho"))
             .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
             .await;
-        Mock::given(method("PUT")).and(query_param("path", "disk:/BigEcho/A"))
+        Mock::given(method("PUT"))
+            .and(query_param("path", "disk:/BigEcho/A"))
             .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
             .await;
-        Mock::given(method("PUT")).and(query_param("path", "disk:/BigEcho/A/B"))
+        Mock::given(method("PUT"))
+            .and(query_param("path", "disk:/BigEcho/A/B"))
             .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
             .await;
-        client_for(&server).ensure_dir("disk:/BigEcho/A/B").await.expect("ok");
+        client_for(&server)
+            .ensure_dir("disk:/BigEcho/A/B")
+            .await
+            .expect("ok");
     }
 
     #[tokio::test]
@@ -323,12 +342,16 @@ mod tests {
                 "total": 3
             }
         });
-        Mock::given(method("GET")).and(path("/resources"))
+        Mock::given(method("GET"))
+            .and(path("/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(body))
             .expect(1)
             .mount(&server)
             .await;
-        let got = client_for(&server).list_dir("disk:/BigEcho").await.expect("ok");
+        let got = client_for(&server)
+            .list_dir("disk:/BigEcho")
+            .await
+            .expect("ok");
         assert_eq!(got.len(), 2);
         assert_eq!(got["audio.opus"], 100_000);
         assert_eq!(got["transcript.md"], 1_234);
@@ -337,12 +360,16 @@ mod tests {
     #[tokio::test]
     async fn list_dir_returns_empty_on_404() {
         let server = MockServer::start().await;
-        Mock::given(method("GET")).and(path("/resources"))
+        Mock::given(method("GET"))
+            .and(path("/resources"))
             .respond_with(ResponseTemplate::new(404))
             .expect(1)
             .mount(&server)
             .await;
-        let got = client_for(&server).list_dir("disk:/missing").await.expect("ok");
+        let got = client_for(&server)
+            .list_dir("disk:/missing")
+            .await
+            .expect("ok");
         assert!(got.is_empty());
     }
 
@@ -366,16 +393,25 @@ mod tests {
                 "total": total
             }
         });
-        Mock::given(method("GET")).and(path("/resources")).and(query_param("offset", "0"))
+        Mock::given(method("GET"))
+            .and(path("/resources"))
+            .and(query_param("offset", "0"))
             .respond_with(ResponseTemplate::new(200).set_body_json(first_page))
             .expect(1)
-            .mount(&server).await;
-        Mock::given(method("GET")).and(path("/resources")).and(query_param("offset", "1000"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/resources"))
+            .and(query_param("offset", "1000"))
             .respond_with(ResponseTemplate::new(200).set_body_json(second_page))
             .expect(1)
-            .mount(&server).await;
+            .mount(&server)
+            .await;
 
-        let got = client_for(&server).list_dir("disk:/BigEcho").await.expect("ok");
+        let got = client_for(&server)
+            .list_dir("disk:/BigEcho")
+            .await
+            .expect("ok");
         assert_eq!(got.len(), 1500);
         assert_eq!(got["f0.opus"], 0);
         assert_eq!(got["f1499.opus"], 1499);
@@ -386,17 +422,22 @@ mod tests {
         let server = MockServer::start().await;
         let tmp = tempdir().expect("tempdir");
         let local = tmp.path().join("hello.txt");
-        std::fs::File::create(&local).unwrap().write_all(b"payload").unwrap();
+        std::fs::File::create(&local)
+            .unwrap()
+            .write_all(b"payload")
+            .unwrap();
 
         let href = format!("{}/upload/target", server.uri());
-        Mock::given(method("GET")).and(path("/resources/upload"))
+        Mock::given(method("GET"))
+            .and(path("/resources/upload"))
             .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "href": href }))
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "href": href })),
             )
             .expect(1)
             .mount(&server)
             .await;
-        Mock::given(method("PUT")).and(path("/upload/target"))
+        Mock::given(method("PUT"))
+            .and(path("/upload/target"))
             .respond_with(ResponseTemplate::new(201))
             .expect(1)
             .mount(&server)
@@ -413,9 +454,13 @@ mod tests {
         let server = MockServer::start().await;
         let tmp = tempdir().expect("tempdir");
         let local = tmp.path().join("hello.txt");
-        std::fs::File::create(&local).unwrap().write_all(b"x").unwrap();
+        std::fs::File::create(&local)
+            .unwrap()
+            .write_all(b"x")
+            .unwrap();
 
-        Mock::given(method("GET")).and(path("/resources/upload"))
+        Mock::given(method("GET"))
+            .and(path("/resources/upload"))
             .respond_with(ResponseTemplate::new(409))
             .expect(1)
             .mount(&server)
@@ -430,7 +475,8 @@ mod tests {
     #[tokio::test]
     async fn unauthorized_status_maps_to_unauthorized_error() {
         let server = MockServer::start().await;
-        Mock::given(method("PUT")).and(path("/resources"))
+        Mock::given(method("PUT"))
+            .and(path("/resources"))
             .respond_with(ResponseTemplate::new(401))
             .expect(1)
             .mount(&server)
@@ -447,7 +493,10 @@ mod tests {
         let server = MockServer::start().await;
         // No mocks required: upload_file should fail on File::open before any HTTP call.
         let err = client_for(&server)
-            .upload_file("disk:/X/y.opus", std::path::Path::new("/nonexistent/path/y.opus"))
+            .upload_file(
+                "disk:/X/y.opus",
+                std::path::Path::new("/nonexistent/path/y.opus"),
+            )
             .await
             .expect_err("must fail");
         assert!(matches!(err, YandexError::Io(_)));

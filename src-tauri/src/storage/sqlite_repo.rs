@@ -79,14 +79,18 @@ pub struct SessionEvent {
 
 pub const BRAIN_UPLOAD_FRESH_MINUTES: i64 = 30;
 
-pub fn brain_upload_is_fresh(updated_at_iso: Option<&str>, now: chrono::DateTime<chrono::Local>) -> bool {
+pub fn brain_upload_is_fresh(
+    updated_at_iso: Option<&str>,
+    now: chrono::DateTime<chrono::Local>,
+) -> bool {
     let Some(at_iso) = updated_at_iso else {
         return false;
     };
     chrono::DateTime::parse_from_rfc3339(at_iso)
         .map(|started| {
             let age = now.signed_duration_since(started.with_timezone(&now.timezone()));
-            age >= chrono::Duration::zero() && age < chrono::Duration::minutes(BRAIN_UPLOAD_FRESH_MINUTES)
+            age >= chrono::Duration::zero()
+                && age < chrono::Duration::minutes(BRAIN_UPLOAD_FRESH_MINUTES)
         })
         .unwrap_or(false)
 }
@@ -231,6 +235,7 @@ pub fn open_connection(app_data_dir: &Path) -> Result<Connection, String> {
         ",
     )
     .map_err(|e| e.to_string())?;
+    crate::task_sync::queue::ensure_schema(&conn)?;
     Ok(conn)
 }
 
@@ -323,7 +328,9 @@ pub fn list_session_events(
     Ok(out)
 }
 
-fn list_brain_upload_states(conn: &Connection) -> Result<HashMap<String, BrainUploadState>, String> {
+fn list_brain_upload_states(
+    conn: &Connection,
+) -> Result<HashMap<String, BrainUploadState>, String> {
     let mut stmt = conn
         .prepare(
             "
@@ -356,7 +363,10 @@ fn list_brain_upload_states(conn: &Connection) -> Result<HashMap<String, BrainUp
     let mut grouped: HashMap<String, Vec<SessionEvent>> = HashMap::new();
     for row in rows {
         let event = row.map_err(|e| e.to_string())?;
-        grouped.entry(event.session_id.clone()).or_default().push(event);
+        grouped
+            .entry(event.session_id.clone())
+            .or_default()
+            .push(event);
     }
     Ok(grouped
         .into_iter()
@@ -424,30 +434,30 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     continue;
                 }
                 Ok(meta) => {
-                let session_dir = PathBuf::from(&item.session_dir);
-                let transcript_ok =
-                    file_has_non_empty_text(&session_dir.join(&meta.artifacts.transcript_file));
-                let summary_ok =
-                    file_has_non_empty_text(&session_dir.join(&meta.artifacts.summary_file));
-                item.audio_file = meta.artifacts.audio_file.clone();
-                item.audio_format = audio_format_from_file_name(&meta.artifacts.audio_file);
-                item.audio_duration_hms = audio_duration_hms(&meta);
-                item.has_transcript_text = transcript_ok
-                    && !matches!(
-                        meta.status,
-                        SessionStatus::Recording | SessionStatus::Recorded
-                    );
-                item.has_summary_text = summary_ok
-                    && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
-                item.meta = Some(SessionListMeta {
-                    session_id: meta.session_id.clone(),
-                    source: meta.source.clone(),
-                    notes: meta.notes.clone(),
-                    custom_summary_prompt: meta.custom_summary_prompt.clone(),
-                    topic: meta.topic.clone(),
-                    tags: meta.tags.clone(),
-                    num_speakers: meta.num_speakers,
-                });
+                    let session_dir = PathBuf::from(&item.session_dir);
+                    let transcript_ok =
+                        file_has_non_empty_text(&session_dir.join(&meta.artifacts.transcript_file));
+                    let summary_ok =
+                        file_has_non_empty_text(&session_dir.join(&meta.artifacts.summary_file));
+                    item.audio_file = meta.artifacts.audio_file.clone();
+                    item.audio_format = audio_format_from_file_name(&meta.artifacts.audio_file);
+                    item.audio_duration_hms = audio_duration_hms(&meta);
+                    item.has_transcript_text = transcript_ok
+                        && !matches!(
+                            meta.status,
+                            SessionStatus::Recording | SessionStatus::Recorded
+                        );
+                    item.has_summary_text = summary_ok
+                        && matches!(meta.status, SessionStatus::Summarized | SessionStatus::Done);
+                    item.meta = Some(SessionListMeta {
+                        session_id: meta.session_id.clone(),
+                        source: meta.source.clone(),
+                        notes: meta.notes.clone(),
+                        custom_summary_prompt: meta.custom_summary_prompt.clone(),
+                        topic: meta.topic.clone(),
+                        tags: meta.tags.clone(),
+                        num_speakers: meta.num_speakers,
+                    });
                 }
             }
         }
@@ -492,7 +502,9 @@ pub fn list_session_id_dirs(app_data_dir: &Path) -> Result<Vec<(String, String)>
         .prepare("SELECT session_id, session_dir FROM sessions")
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for row in rows {
@@ -510,6 +522,11 @@ pub fn delete_session(app_data_dir: &Path, session_id: &str) -> Result<bool, Str
     .map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM session_events WHERE session_id=?1",
+        params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM task_sync_queue WHERE source_session_id=?1",
         params![session_id],
     )
     .map_err(|e| e.to_string())?;
@@ -691,16 +708,31 @@ mod tests {
             upsert_session(dir.path(), &meta, &session_dir, &meta_path).expect("upsert session");
         }
 
-        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "old failure")
-            .expect("add old failed event");
+        add_event(
+            dir.path(),
+            "s-uploaded",
+            "brain_upload_failed",
+            "old failure",
+        )
+        .expect("add old failed event");
         add_event(dir.path(), "s-uploaded", "brain_upload_succeeded", "ok")
             .expect("add success event");
-        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "retry failed")
-            .expect("add retry failure event");
+        add_event(
+            dir.path(),
+            "s-uploaded",
+            "brain_upload_failed",
+            "retry failed",
+        )
+        .expect("add retry failure event");
         add_event(dir.path(), "s-failed", "brain_upload_started", "started")
             .expect("add started event");
-        add_event(dir.path(), "s-failed", "brain_upload_failed", "network down")
-            .expect("add failed event");
+        add_event(
+            dir.path(),
+            "s-failed",
+            "brain_upload_failed",
+            "network down",
+        )
+        .expect("add failed event");
 
         let sessions = list_sessions(dir.path()).expect("list sessions");
         let by_id = |id: &str| {
@@ -710,14 +742,23 @@ mod tests {
                 .expect("session exists")
         };
 
-        assert_eq!(by_id("s-not-uploaded").brain_upload_status, BrainUploadStatus::NotUploaded);
-        assert_eq!(by_id("s-uploaded").brain_upload_status, BrainUploadStatus::Failed);
+        assert_eq!(
+            by_id("s-not-uploaded").brain_upload_status,
+            BrainUploadStatus::NotUploaded
+        );
+        assert_eq!(
+            by_id("s-uploaded").brain_upload_status,
+            BrainUploadStatus::Failed
+        );
         assert!(by_id("s-uploaded").brain_server_ingested_once);
         assert_eq!(
             by_id("s-uploaded").brain_upload_last_error.as_deref(),
             Some("retry failed")
         );
-        assert_eq!(by_id("s-failed").brain_upload_status, BrainUploadStatus::Failed);
+        assert_eq!(
+            by_id("s-failed").brain_upload_status,
+            BrainUploadStatus::Failed
+        );
         assert_eq!(
             by_id("s-failed").brain_upload_last_error.as_deref(),
             Some("network down")
@@ -730,18 +771,36 @@ mod tests {
         let dir = temp_dir();
         let conn = open(dir.path()).expect("open db");
 
-        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "old failure")
-            .expect("add old failure");
-        add_event(dir.path(), "s-uploaded", "brain_upload_succeeded", "ok")
-            .expect("add success");
-        add_event(dir.path(), "s-uploaded", "brain_upload_failed", "retry failed")
-            .expect("add retry failure");
-        add_event(dir.path(), "s-failed", "brain_upload_started", "started")
-            .expect("add started");
-        add_event(dir.path(), "s-failed", "brain_upload_failed", "latest failure")
-            .expect("add latest failure");
-        add_event(dir.path(), "s-ignored", "transcription_succeeded", "not a Brain status")
-            .expect("add unrelated event");
+        add_event(
+            dir.path(),
+            "s-uploaded",
+            "brain_upload_failed",
+            "old failure",
+        )
+        .expect("add old failure");
+        add_event(dir.path(), "s-uploaded", "brain_upload_succeeded", "ok").expect("add success");
+        add_event(
+            dir.path(),
+            "s-uploaded",
+            "brain_upload_failed",
+            "retry failed",
+        )
+        .expect("add retry failure");
+        add_event(dir.path(), "s-failed", "brain_upload_started", "started").expect("add started");
+        add_event(
+            dir.path(),
+            "s-failed",
+            "brain_upload_failed",
+            "latest failure",
+        )
+        .expect("add latest failure");
+        add_event(
+            dir.path(),
+            "s-ignored",
+            "transcription_succeeded",
+            "not a Brain status",
+        )
+        .expect("add unrelated event");
 
         let states = list_brain_upload_states(&conn).expect("list brain states");
 
@@ -749,7 +808,12 @@ mod tests {
             states.get("s-uploaded").expect("uploaded state").status,
             BrainUploadStatus::Failed
         );
-        assert!(states.get("s-uploaded").expect("uploaded state").server_ingested_once);
+        assert!(
+            states
+                .get("s-uploaded")
+                .expect("uploaded state")
+                .server_ingested_once
+        );
         assert_eq!(
             states.get("s-failed").expect("failed state").status,
             BrainUploadStatus::Failed
@@ -784,18 +848,21 @@ mod tests {
     #[test]
     fn reconcile_stale_brain_uploads_persists_interrupted_event() {
         let dir = temp_dir();
-        add_event(dir.path(), "s-stale", "brain_upload_started", "Uploading audio to Brain")
-            .expect("add started");
+        add_event(
+            dir.path(),
+            "s-stale",
+            "brain_upload_started",
+            "Uploading audio to Brain",
+        )
+        .expect("add started");
         backdate_last_event(dir.path(), "s-stale", BRAIN_UPLOAD_FRESH_MINUTES + 1);
 
         reconcile_stale_brain_uploads(dir.path()).expect("reconcile stale uploads");
 
         let events = list_session_events(dir.path(), "s-stale").expect("list events");
-        assert!(
-            events
-                .iter()
-                .any(|event| event.event_type == "brain_upload_interrupted")
-        );
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == "brain_upload_interrupted"));
         let conn = open(dir.path()).expect("open db");
         let states = super::list_brain_upload_states(&conn).expect("list states");
         assert_eq!(

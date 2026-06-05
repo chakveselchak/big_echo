@@ -68,9 +68,7 @@ pub fn try_begin_archive_upload(
 ) -> Result<BrainArchiveGuard, String> {
     let mut guard = lock_runtime_state(state)?;
     if guard.archive_running {
-        return Err(
-            "BRAIN_ALREADY_RUNNING: Загрузка архива Brain уже выполняется".to_string(),
-        );
+        return Err("BRAIN_ALREADY_RUNNING: Загрузка архива Brain уже выполняется".to_string());
     }
     let cross_process = try_acquire_brain_upload_lease(
         app_data_dir,
@@ -123,8 +121,7 @@ mod tests {
     fn archive_guard_rejects_parallel_runs_until_dropped() {
         let dir = tempdir().expect("tempdir");
         let state = new_shared_state();
-        let first =
-            try_begin_archive_upload(dir.path(), &state).expect("first archive starts");
+        let first = try_begin_archive_upload(dir.path(), &state).expect("first archive starts");
         assert!(try_begin_archive_upload(dir.path(), &state).is_err());
         drop(first);
         assert!(try_begin_archive_upload(dir.path(), &state).is_ok());

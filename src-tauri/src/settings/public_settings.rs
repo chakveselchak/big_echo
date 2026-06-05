@@ -48,6 +48,8 @@ pub struct PublicSettings {
     pub yandex_sync_remote_folder: String,
     pub brain_sync_enabled: bool,
     pub brain_sync_url: String,
+    pub todoist_sync_enabled: bool,
+    pub todoist_auto_add: bool,
     pub show_minitray_overlay: bool,
 }
 
@@ -83,6 +85,8 @@ impl Default for PublicSettings {
             yandex_sync_remote_folder: "BigEcho".to_string(),
             brain_sync_enabled: false,
             brain_sync_url: BRAIN_SYNC_DEFAULT_URL.to_string(),
+            todoist_sync_enabled: false,
+            todoist_auto_add: false,
             show_minitray_overlay: false,
         }
     }
@@ -509,8 +513,7 @@ mod tests {
             "auto_run_pipeline_on_stop":false,
             "api_call_logging_enabled":false
         }"#;
-        let parsed: PublicSettings =
-            serde_json::from_str(body).expect("settings should parse");
+        let parsed: PublicSettings = serde_json::from_str(body).expect("settings should parse");
         assert!(!parsed.auto_delete_audio_enabled);
         assert_eq!(parsed.auto_delete_audio_days, 30);
     }
@@ -572,7 +575,10 @@ mod tests {
             yandex_sync_interval: "5m".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex sync interval".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex sync interval".to_string())
+        );
     }
 
     #[test]
@@ -581,7 +587,10 @@ mod tests {
             yandex_sync_remote_folder: "BigEcho/../evil".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]
@@ -590,7 +599,10 @@ mod tests {
             yandex_sync_remote_folder: "   /".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]
@@ -599,7 +611,10 @@ mod tests {
             yandex_sync_remote_folder: "Big\\Echo".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]
@@ -608,7 +623,10 @@ mod tests {
             yandex_sync_remote_folder: "Big\nEcho".to_string(),
             ..Default::default()
         };
-        assert_eq!(s.validate(), Err("Invalid Yandex remote folder".to_string()));
+        assert_eq!(
+            s.validate(),
+            Err("Invalid Yandex remote folder".to_string())
+        );
     }
 
     #[test]

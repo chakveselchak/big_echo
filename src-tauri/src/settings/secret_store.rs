@@ -48,7 +48,10 @@ fn acquire_fallback_lock(path: &Path) -> Result<FallbackFileLock, String> {
     Ok(FallbackFileLock { file })
 }
 
-fn with_fallback_lock<T>(path: &Path, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+fn with_fallback_lock<T>(
+    path: &Path,
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
     let _lock = acquire_fallback_lock(path)?;
     action()
 }
@@ -258,11 +261,8 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let path = fallback_path(tmp.path());
         std::fs::create_dir_all(tmp.path()).expect("create dir");
-        std::fs::write(
-            &path,
-            r#"{"BRAIN_SERVER_API_TOKEN":"bad\u2028value"}"#,
-        )
-        .expect("write fallback secrets");
+        std::fs::write(&path, r#"{"BRAIN_SERVER_API_TOKEN":"bad\u2028value"}"#)
+            .expect("write fallback secrets");
 
         let err = get_secret(tmp.path(), "BRAIN_SERVER_API_TOKEN").expect_err("stored bad token");
         assert!(err.contains("control characters"));

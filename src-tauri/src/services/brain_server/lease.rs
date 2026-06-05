@@ -133,7 +133,8 @@ mod tests {
     #[test]
     fn second_process_cannot_acquire_same_lease() {
         let dir = tempdir().expect("tempdir");
-        let first = try_acquire_brain_upload_lease(dir.path(), "session:s1", 60).expect("first lease");
+        let first =
+            try_acquire_brain_upload_lease(dir.path(), "session:s1", 60).expect("first lease");
         let err = try_acquire_brain_upload_lease(dir.path(), "session:s1", 60)
             .expect_err("second lease should fail");
         assert!(err.contains("BRAIN_ALREADY_RUNNING"));
