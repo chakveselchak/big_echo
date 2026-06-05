@@ -144,7 +144,7 @@ pub fn normalize_one(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     {
-        description_parts.push(format!("**Контекст:**\n{context}"));
+        description_parts.push(context.to_string());
     }
     if let Some(assignee) = raw
         .assignee
@@ -332,7 +332,7 @@ mod tests {
 
         assert_eq!(
             normalized.description.as_deref(),
-            Some("**Контекст:**\nОбсуждали пилот с баннерами\n\n**Исполнитель:** Андрей\n\n*Файл:* `/tmp/session/summary.md`")
+            Some("Обсуждали пилот с баннерами\n\n**Исполнитель:** Андрей\n\n*Файл:* `/tmp/session/summary.md`")
         );
     }
 
