@@ -105,6 +105,57 @@ async function clickAntdMenuItem(
   await user.click(menuItem);
 }
 
+function namedPromptSettings(summaryPrompt: string) {
+  return {
+    recording_root: "./recordings",
+    artifact_open_app: "",
+    transcription_provider: "nexara",
+    transcription_url: "",
+    transcription_task: "transcribe",
+    transcription_diarization_setting: "general",
+    salute_speech_scope: "SALUTE_SPEECH_CORP",
+    salute_speech_model: "general",
+    salute_speech_language: "ru-RU",
+    salute_speech_sample_rate: 48000,
+    salute_speech_channels_count: 1,
+    summary_url: "",
+    summary_prompt: summaryPrompt,
+    openai_model: "gpt-4.1-mini",
+    audio_format: "opus",
+    opus_bitrate_kbps: 24,
+    mic_device_name: "",
+    system_device_name: "",
+    auto_run_pipeline_on_stop: false,
+    api_call_logging_enabled: false,
+    auto_delete_audio_enabled: false,
+    auto_delete_audio_days: 30,
+    yandex_sync_enabled: false,
+    yandex_sync_interval: "24h",
+    yandex_sync_remote_folder: "BigEcho",
+    brain_sync_enabled: false,
+    brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
+    todoist_sync_enabled: false,
+    todoist_auto_add: false,
+    show_minitray_overlay: false,
+  };
+}
+
+function namedPromptSessionListItem(sessionId: string, topic: string) {
+  return {
+    session_id: sessionId,
+    status: "recorded",
+    primary_tag: "slack",
+    topic,
+    display_date_ru: "11.03.2026",
+    started_at_iso: "2026-03-11T12:30:00+03:00",
+    session_dir: `/tmp/${sessionId}`,
+    audio_duration_hms: "00:20:00",
+    has_transcript_text: true,
+    has_summary_text: false,
+    brain_upload_status: "not_uploaded",
+  };
+}
+
 describe("App main window", () => {
   afterEach(() => {
     invokeMock.mockImplementation(defaultInvokeImpl);
@@ -384,6 +435,7 @@ describe("App main window", () => {
           source: "zoom",
           notes: "alpha",
           custom_summary_prompt: "",
+          custom_summary_prompt_name: "",
           topic: "Edited topic",
           tags: ["Alice"],
           num_speakers: null,
@@ -439,6 +491,7 @@ describe("App main window", () => {
 
   it("opens summary prompt dialog with system default and saves custom prompt on Ok", async () => {
     const user = userEvent.setup();
+    let savedPrompt = false;
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "get_ui_sync_state") {
         return { source: "slack", topic: "", is_recording: false, active_session_id: null };
@@ -500,8 +553,30 @@ describe("App main window", () => {
           source: "slack",
           notes: "",
           custom_summary_prompt: "",
+          custom_summary_prompt_name: savedPrompt ? "Meeting summary" : "",
           topic: "Prompt session",
           tags: [],
+        };
+      }
+      if (cmd === "list_summary_prompts") {
+        return savedPrompt
+          ? [
+              {
+                name: "Meeting summary",
+                prompt: "Итог: решения, риски, следующие шаги",
+                created_at_iso: "2026-06-07T10:00:00+03:00",
+                updated_at_iso: "2026-06-07T10:00:00+03:00",
+              },
+            ]
+          : [];
+      }
+      if (cmd === "upsert_summary_prompt") {
+        savedPrompt = true;
+        return {
+          name: "Meeting summary",
+          prompt: "Итог: решения, риски, следующие шаги",
+          created_at_iso: "2026-06-07T10:00:00+03:00",
+          updated_at_iso: "2026-06-07T10:00:00+03:00",
         };
       }
       if (cmd === "update_session_details") {
@@ -518,20 +593,27 @@ describe("App main window", () => {
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
-    const textarea = within(dialog).getByRole("textbox");
+    const textarea = within(dialog).getByLabelText("Текст промпта");
     expect(textarea).toHaveValue("Сделай саммари блоками: решения, риски, action items");
 
+    await user.type(within(dialog).getByLabelText("Имя промпта"), "Meeting summary");
     await user.clear(textarea);
     await user.type(textarea, "Итог: решения, риски, следующие шаги");
     await user.click(within(dialog).getByRole("button", { name: "Ок" }));
 
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("upsert_summary_prompt", {
+        payload: { name: "Meeting summary", prompt: "Итог: решения, риски, следующие шаги" },
+      });
+    });
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
         payload: {
           session_id: "s-prompt",
           source: "slack",
           notes: "",
-          custom_summary_prompt: "Итог: решения, риски, следующие шаги",
+          custom_summary_prompt: "",
+          custom_summary_prompt_name: "Meeting summary",
           topic: "Prompt session",
           tags: [],
           num_speakers: null,
@@ -541,9 +623,142 @@ describe("App main window", () => {
 
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
     const reopenedDialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
-    expect(within(reopenedDialog).getByRole("textbox")).toHaveValue(
-      "Итог: решения, риски, следующие шаги"
+    expect(within(reopenedDialog).getByLabelText("Имя промпта")).toHaveValue("Meeting summary");
+    expect(within(reopenedDialog).getByLabelText("Текст промпта")).toHaveValue(
+      "Итог: решения, риски, следующие шаги",
     );
+  });
+
+  it("lists named prompts, selects one, and binds the session on Ok", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "get_settings") {
+        return namedPromptSettings("Default summary prompt");
+      }
+      if (cmd === "list_sessions") {
+        return [namedPromptSessionListItem("s-prompt", "Prompt session")];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-prompt",
+          source: "slack",
+          notes: "",
+          custom_summary_prompt: "",
+          custom_summary_prompt_name: "",
+          topic: "Prompt session",
+          tags: [],
+        };
+      }
+      if (cmd === "list_summary_prompts") {
+        return [
+          {
+            name: "Actions",
+            prompt: "Only action items",
+            created_at_iso: "2026-06-07T10:00:00+03:00",
+            updated_at_iso: "2026-06-07T10:00:00+03:00",
+          },
+        ];
+      }
+      if (cmd === "upsert_summary_prompt" || cmd === "update_session_details") {
+        return cmd === "upsert_summary_prompt"
+          ? {
+              name: "Actions",
+              prompt: "Only action items",
+              created_at_iso: "2026-06-07T10:00:00+03:00",
+              updated_at_iso: "2026-06-07T10:00:00+03:00",
+            }
+          : "updated";
+      }
+      return null;
+    });
+
+    render(<App />);
+    await screen.findByText("Prompt session");
+    await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    await user.click(within(dialog).getByRole("button", { name: "Actions" }));
+
+    expect(within(dialog).getByLabelText("Имя промпта")).toHaveValue("Actions");
+    expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("Only action items");
+
+    await user.click(within(dialog).getByRole("button", { name: "Ок" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
+        payload: expect.objectContaining({
+          session_id: "s-prompt",
+          custom_summary_prompt: "",
+          custom_summary_prompt_name: "Actions",
+        }),
+      });
+    });
+  });
+
+  it("saves legacy prompt text under a new name before binding the session", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "get_settings") {
+        return namedPromptSettings("Default summary prompt");
+      }
+      if (cmd === "list_sessions") {
+        return [namedPromptSessionListItem("s-legacy", "Legacy session")];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-legacy",
+          source: "slack",
+          notes: "",
+          custom_summary_prompt: "Legacy freeform prompt",
+          custom_summary_prompt_name: "",
+          topic: "Legacy session",
+          tags: [],
+        };
+      }
+      if (cmd === "list_summary_prompts") {
+        return [];
+      }
+      if (cmd === "upsert_summary_prompt") {
+        return {
+          name: "Legacy converted",
+          prompt: "Legacy freeform prompt",
+          created_at_iso: "2026-06-07T10:00:00+03:00",
+          updated_at_iso: "2026-06-07T10:00:00+03:00",
+        };
+      }
+      if (cmd === "update_session_details") {
+        return "updated";
+      }
+      return null;
+    });
+
+    render(<App />);
+    await screen.findByText("Legacy session");
+    await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("Legacy freeform prompt");
+    await user.type(within(dialog).getByLabelText("Имя промпта"), "Legacy converted");
+    await user.click(within(dialog).getByRole("button", { name: "Ок" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("upsert_summary_prompt", {
+        payload: { name: "Legacy converted", prompt: "Legacy freeform prompt" },
+      });
+    });
+    expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
+      payload: expect.objectContaining({
+        session_id: "s-legacy",
+        custom_summary_prompt: "",
+        custom_summary_prompt_name: "Legacy converted",
+      }),
+    });
   });
 
   it("marks the summary-prompt button with an orange dot when the session uses a custom prompt", async () => {
