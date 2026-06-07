@@ -10,8 +10,8 @@ use crate::settings::secret_store::get_secret;
 use crate::storage::markdown_artifact::{strip_frontmatter, write_markdown_artifact};
 use crate::storage::session_store::{load_meta, save_meta};
 use crate::storage::sqlite_repo::{
-    add_event, clear_retry_job, fetch_due_retry_jobs, get_meta_path, schedule_retry_job,
-    upsert_session,
+    add_event, clear_retry_job, fetch_due_retry_jobs, get_meta_path, get_summary_prompt,
+    schedule_retry_job, upsert_session,
 };
 use std::fs;
 use std::io::Write;
@@ -260,15 +260,21 @@ pub async fn run_pipeline_core(
     }
 
     if needs_summary {
-        let summary_prompt_override = custom_summary_prompt
+        let summary_prompt_override = if let Some(prompt) = custom_summary_prompt
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                let prompt = meta.custom_summary_prompt.trim();
-                (!prompt.is_empty()).then(|| prompt.to_string())
-            });
+        {
+            Some(prompt.to_string())
+        } else {
+            let prompt_name = meta.custom_summary_prompt_name.trim();
+            if !prompt_name.is_empty() {
+                Some(get_summary_prompt(&data_dir, prompt_name)?.prompt)
+            } else {
+                let legacy_prompt = meta.custom_summary_prompt.trim();
+                (!legacy_prompt.is_empty()).then(|| legacy_prompt.to_string())
+            }
+        };
         let transcript_path = session_dir.join(&meta.artifacts.transcript_file);
         let transcript_for_summary = read_transcript_body_for_summary(&transcript_path)?;
 

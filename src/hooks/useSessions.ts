@@ -260,7 +260,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       return next;
     });
     try {
-      const customPrompt = sessionDetails[sessionId]?.custom_summary_prompt?.trim() ?? "";
+      const detail = sessionDetails[sessionId] as
+        | (SessionMetaView & { custom_summary_prompt_name?: string })
+        | undefined;
+      const hasNamedPrompt = Boolean(detail?.custom_summary_prompt_name?.trim());
+      const customPrompt = hasNamedPrompt ? "" : detail?.custom_summary_prompt?.trim() ?? "";
       await tauriInvoke<string>(
         "run_summary",
         customPrompt ? { sessionId, customPrompt } : { sessionId }

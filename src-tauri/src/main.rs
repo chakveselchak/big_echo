@@ -1661,6 +1661,81 @@ mod ipc_runtime_tests {
     }
 
     #[test]
+    fn invoke_run_summary_uses_named_prompt_when_override_is_missing() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (base_url, requests) = spawn_summary_capture_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-summary-named", &base_url);
+        let session_dir = app_data_dir.join("sessions").join("session-summary-named");
+        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
+            .expect("write transcript");
+
+        storage::sqlite_repo::upsert_summary_prompt(
+            &app_data_dir,
+            "Actions",
+            "Сделай саммари только по задачам",
+        )
+        .expect("insert prompt");
+
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt = "Legacy prompt should not be used".to_string();
+        meta.custom_summary_prompt_name = "Actions".to_string();
+        save_meta(&meta_path, &meta).expect("save meta");
+
+        get_ipc_response(
+            &webview,
+            invoke_request("run_summary", json!({ "sessionId": "session-summary-named" })),
+        )
+        .expect("run_summary should succeed");
+
+        let captured = requests.lock().expect("lock requests");
+        let request_body = captured[0]
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        let payload: serde_json::Value =
+            serde_json::from_str(request_body).expect("valid json payload");
+        assert_eq!(
+            payload["messages"][0]["content"].as_str(),
+            Some("Сделай саммари только по задачам")
+        );
+    }
+
+    #[test]
+    fn invoke_run_summary_errors_when_named_prompt_is_missing() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (base_url, _requests) = spawn_summary_capture_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-summary-missing-prompt", &base_url);
+        let session_dir = app_data_dir
+            .join("sessions")
+            .join("session-summary-missing-prompt");
+        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
+            .expect("write transcript");
+
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt_name = "Missing".to_string();
+        save_meta(&meta_path, &meta).expect("save meta");
+
+        let err = get_ipc_response(
+            &webview,
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId": "session-summary-missing-prompt" }),
+            ),
+        )
+        .expect_err("run_summary should fail");
+
+        assert!(err.to_string().contains("Summary prompt not found: Missing"));
+    }
+
+    #[test]
     fn invoke_run_summary_without_custom_prompt_uses_settings_prompt() {
         let (app, app_data_dir) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())

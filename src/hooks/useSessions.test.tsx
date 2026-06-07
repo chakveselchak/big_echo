@@ -314,6 +314,58 @@ describe("useSessions", () => {
     });
   });
 
+  it("runs summary without passing prompt text when the session uses a named prompt", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-named",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Named prompt",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T10:00:00+03:00",
+            session_dir: "/tmp/s-named",
+            audio_duration_hms: "00:15:20",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-named",
+          source: "zoom",
+          notes: "",
+          custom_summary_prompt: "",
+          custom_summary_prompt_name: "Actions",
+          topic: "Named prompt",
+          tags: [],
+        };
+      }
+      if (cmd === "list_known_tags") {
+        return [];
+      }
+      return args ?? null;
+    });
+
+    const setStatus = vi.fn();
+    const setLastSessionId = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    await act(async () => {
+      await result.current.getSummary("s-named");
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("run_summary", { sessionId: "s-named" });
+  });
+
   it("tracks Get text clicks before running transcription", async () => {
     const setStatus = vi.fn();
     const setLastSessionId = vi.fn();
