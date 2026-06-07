@@ -30,6 +30,7 @@ pub struct SessionListMeta {
     pub source: String,
     pub notes: String,
     pub custom_summary_prompt: String,
+    pub custom_summary_prompt_name: String,
     pub topic: String,
     pub tags: Vec<String>,
     #[serde(default)]
@@ -561,6 +562,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                         source: meta.source.clone(),
                         notes: meta.notes.clone(),
                         custom_summary_prompt: meta.custom_summary_prompt.clone(),
+                        custom_summary_prompt_name: meta.custom_summary_prompt_name.clone(),
                         topic: meta.topic.clone(),
                         tags: meta.tags.clone(),
                         num_speakers: meta.num_speakers,

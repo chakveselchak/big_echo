@@ -1268,6 +1268,47 @@ mod ipc_runtime_tests {
     }
 
     #[test]
+    fn invoke_update_session_details_persists_custom_summary_prompt_name_and_clears_legacy_prompt()
+    {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let base_url = spawn_mock_pipeline_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-prompt-name", &base_url);
+
+        let session_dir = app_data_dir.join("sessions").join("session-prompt-name");
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt = "Legacy prompt".to_string();
+        save_meta(&meta_path, &meta).expect("save legacy meta");
+
+        get_ipc_response(
+            &webview,
+            invoke_request(
+                "update_session_details",
+                json!({
+                    "payload": {
+                        "session_id": "session-prompt-name",
+                        "source": "zoom",
+                        "notes": "",
+                        "custom_summary_prompt": "Legacy prompt",
+                        "custom_summary_prompt_name": "Actions",
+                        "topic": "Prompt binding",
+                        "tags": [],
+                        "num_speakers": null
+                    }
+                }),
+            ),
+        )
+        .expect("update details should succeed");
+
+        let saved = load_meta(&meta_path).expect("load saved meta");
+        assert_eq!(saved.custom_summary_prompt_name, "Actions");
+        assert_eq!(saved.custom_summary_prompt, "");
+    }
+
+    #[test]
     fn invoke_stop_rejects_without_active_session() {
         let (app, _) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())

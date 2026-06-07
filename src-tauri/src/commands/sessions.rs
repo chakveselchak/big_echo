@@ -708,6 +708,7 @@ pub fn get_session_meta(
         source: meta.source,
         notes: meta.notes,
         custom_summary_prompt: meta.custom_summary_prompt,
+        custom_summary_prompt_name: meta.custom_summary_prompt_name,
         topic: meta.topic,
         tags: meta.tags,
         num_speakers: meta.num_speakers,
@@ -744,7 +745,13 @@ fn update_session_details_impl(
     meta.primary_tag = source;
     meta.notes = payload.notes.trim().to_string();
     meta.tags = tags;
-    meta.custom_summary_prompt = payload.custom_summary_prompt.trim().to_string();
+    let prompt_name = payload.custom_summary_prompt_name.trim().to_string();
+    meta.custom_summary_prompt_name = prompt_name.clone();
+    meta.custom_summary_prompt = if prompt_name.is_empty() {
+        payload.custom_summary_prompt.trim().to_string()
+    } else {
+        String::new()
+    };
     meta.topic = payload.topic.trim().to_string();
     meta.num_speakers = payload.num_speakers.filter(|n| *n > 0);
 
@@ -1146,6 +1153,7 @@ mod tests {
                 source: "zoom".to_string(),
                 notes: String::new(),
                 custom_summary_prompt: String::new(),
+                custom_summary_prompt_name: String::new(),
                 topic: "Topic".to_string(),
                 tags: vec!["new".to_string()],
                 num_speakers: None,
@@ -1188,6 +1196,7 @@ mod tests {
                 source: "slack".to_string(),
                 notes: "Fresh notes".to_string(),
                 custom_summary_prompt: String::new(),
+                custom_summary_prompt_name: String::new(),
                 topic: "Fresh topic".to_string(),
                 tags: vec!["new".to_string()],
                 num_speakers: None,
