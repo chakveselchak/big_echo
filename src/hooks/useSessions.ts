@@ -307,6 +307,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
 
   async function saveSessionDetails(sessionId: string, detail: SessionMetaView) {
     const normalized = normalizeSessionMeta(detail);
+    const previous = sessionDetails[sessionId];
     const existing = autosaveTimersRef.current[sessionId];
     if (existing) {
       clearTimeout(existing);
@@ -320,6 +321,22 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       return true;
     } catch (err) {
       setStatus(`error: ${String(err)}`);
+      setSessionDetails((prev) => {
+        const current = prev[sessionId];
+        if (!current || !sameSessionMeta(current, normalized)) return prev;
+        const pending = autosaveTimersRef.current[sessionId];
+        if (pending) {
+          clearTimeout(pending);
+          delete autosaveTimersRef.current[sessionId];
+        }
+        delete pendingAutosaveSignatureRef.current[sessionId];
+        if (!previous) {
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        }
+        return { ...prev, [sessionId]: previous };
+      });
       return false;
     }
   }

@@ -662,15 +662,11 @@ describe("App main window", () => {
           },
         ];
       }
-      if (cmd === "upsert_summary_prompt" || cmd === "update_session_details") {
-        return cmd === "upsert_summary_prompt"
-          ? {
-              name: "Actions",
-              prompt: "Only action items",
-              created_at_iso: "2026-06-07T10:00:00+03:00",
-              updated_at_iso: "2026-06-07T10:00:00+03:00",
-            }
-          : "updated";
+      if (cmd === "upsert_summary_prompt") {
+        throw new Error("existing prompt should be bound without upsert");
+      }
+      if (cmd === "update_session_details") {
+        return "updated";
       }
       return null;
     });
@@ -696,6 +692,90 @@ describe("App main window", () => {
         }),
       });
     });
+    expect(invokeMock).not.toHaveBeenCalledWith("upsert_summary_prompt", expect.anything());
+  });
+
+  it("ignores stale prompt loads when opening prompts for different sessions quickly", async () => {
+    const user = userEvent.setup();
+    let firstPromptLoad!: (value: unknown) => void;
+    let secondPromptLoad!: (value: unknown) => void;
+    let promptLoadCount = 0;
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "get_settings") {
+        return namedPromptSettings("Default summary prompt");
+      }
+      if (cmd === "list_sessions") {
+        return [
+          namedPromptSessionListItem("s-first", "First session"),
+          namedPromptSessionListItem("s-second", "Second session"),
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        const sessionId = (args as { sessionId: string }).sessionId;
+        return {
+          session_id: sessionId,
+          source: "slack",
+          notes: "",
+          custom_summary_prompt: "",
+          custom_summary_prompt_name: sessionId === "s-first" ? "First prompt" : "Second prompt",
+          topic: sessionId === "s-first" ? "First session" : "Second session",
+          tags: [],
+        };
+      }
+      if (cmd === "list_summary_prompts") {
+        promptLoadCount += 1;
+        if (promptLoadCount === 1) {
+          return new Promise((resolve) => {
+            firstPromptLoad = resolve;
+          });
+        }
+        return new Promise((resolve) => {
+          secondPromptLoad = resolve;
+        });
+      }
+      return null;
+    });
+
+    render(<App />);
+    await screen.findByText("First session");
+    await screen.findByText("Second session");
+
+    const promptButtons = screen.getAllByRole("button", { name: "Настроить промпт саммари" });
+    await user.click(promptButtons[0]);
+    await user.click(promptButtons[1]);
+
+    await act(async () => {
+      secondPromptLoad([
+        {
+          name: "Second prompt",
+          prompt: "Second prompt body",
+          created_at_iso: "2026-06-07T10:00:00+03:00",
+          updated_at_iso: "2026-06-07T10:00:00+03:00",
+        },
+      ]);
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    expect(within(dialog).getByLabelText("Имя промпта")).toHaveValue("Second prompt");
+    expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("Second prompt body");
+
+    await act(async () => {
+      firstPromptLoad([
+        {
+          name: "First prompt",
+          prompt: "First prompt body",
+          created_at_iso: "2026-06-07T10:00:00+03:00",
+          updated_at_iso: "2026-06-07T10:00:00+03:00",
+        },
+      ]);
+    });
+
+    expect(within(dialog).getByLabelText("Имя промпта")).toHaveValue("Second prompt");
+    expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("Second prompt body");
   });
 
   it("saves legacy prompt text under a new name before binding the session", async () => {

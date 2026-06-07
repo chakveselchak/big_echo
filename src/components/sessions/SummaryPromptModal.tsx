@@ -79,6 +79,8 @@ function SummaryPromptModalBody({
   const [nameError, setNameError] = useState("");
   const [valueError, setValueError] = useState("");
   const touchedRef = useRef(false);
+  const nameErrorId = "summary-prompt-name-error";
+  const valueErrorId = "summary-prompt-value-error";
 
   // Accept async backfill from the parent (default-prompt IPC that resolves
   // after the modal opened with an empty value), but never clobber user edits.
@@ -128,6 +130,7 @@ function SummaryPromptModalBody({
                 }
                 onClick={() => selectPrompt(prompt)}
                 disabled={saving}
+                aria-pressed={prompt.name === name}
               >
                 {prompt.name}
               </button>
@@ -142,6 +145,8 @@ function SummaryPromptModalBody({
             <span>Имя промпта</span>
             <Input
               aria-label="Имя промпта"
+              aria-describedby={nameError ? nameErrorId : undefined}
+              aria-invalid={Boolean(nameError)}
               value={name}
               status={nameError ? "error" : undefined}
               onChange={(event) => {
@@ -151,13 +156,19 @@ function SummaryPromptModalBody({
               }}
               disabled={saving}
             />
-            {nameError && <span className="summary-prompt-error">{nameError}</span>}
+            {nameError && (
+              <span id={nameErrorId} className="summary-prompt-error">
+                {nameError}
+              </span>
+            )}
           </label>
 
           <label className="summary-prompt-field">
             <span>Текст промпта</span>
             <Input.TextArea
               aria-label="Текст промпта"
+              aria-describedby={valueError ? valueErrorId : undefined}
+              aria-invalid={Boolean(valueError)}
               rows={8}
               value={value}
               status={valueError ? "error" : undefined}
@@ -168,7 +179,11 @@ function SummaryPromptModalBody({
               }}
               disabled={saving}
             />
-            {valueError && <span className="summary-prompt-error">{valueError}</span>}
+            {valueError && (
+              <span id={valueErrorId} className="summary-prompt-error">
+                {valueError}
+              </span>
+            )}
           </label>
         </div>
       </div>

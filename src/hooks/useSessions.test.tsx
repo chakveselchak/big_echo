@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { captureAnalyticsEventMock, invokeMock } = vi.hoisted(() => ({
   captureAnalyticsEventMock: vi.fn(async () => undefined),
@@ -51,6 +51,10 @@ describe("useSessions", () => {
   beforeEach(() => {
     invokeMock.mockClear();
     captureAnalyticsEventMock.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("loads sessions and meta details through the tauri adapter", async () => {
@@ -364,6 +368,173 @@ describe("useSessions", () => {
     });
 
     expect(invokeMock).toHaveBeenCalledWith("run_summary", { sessionId: "s-named" });
+  });
+
+  it("rolls back optimistic details when explicit save persistence fails", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s1",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Weekly sync",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T10:00:00+03:00",
+            session_dir: "/tmp/s1",
+            audio_duration_hms: "00:15:20",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s1",
+          source: "zoom",
+          notes: "",
+          custom_summary_prompt: "Legacy prompt",
+          custom_summary_prompt_name: "",
+          topic: "Weekly sync",
+          tags: [],
+        };
+      }
+      if (cmd === "update_session_details") {
+        throw new Error("disk write failed");
+      }
+      if (cmd === "list_known_tags") {
+        return [];
+      }
+      return args ?? null;
+    });
+
+    const setStatus = vi.fn();
+    const setLastSessionId = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    await waitFor(() => {
+      expect(result.current.sessionDetails.s1?.custom_summary_prompt).toBe("Legacy prompt");
+    });
+
+    const nextDetail = {
+      ...result.current.sessionDetails.s1!,
+      custom_summary_prompt: "",
+      custom_summary_prompt_name: "Actions",
+    };
+
+    let saved = true;
+    await act(async () => {
+      saved = await result.current.saveSessionDetails("s1", nextDetail);
+    });
+
+    expect(saved).toBe(false);
+    expect(result.current.sessionDetails.s1?.custom_summary_prompt).toBe("Legacy prompt");
+    expect(result.current.sessionDetails.s1?.custom_summary_prompt_name).toBe("");
+  });
+
+  it("keeps a newer local edit eligible for autosave after explicit save fails", async () => {
+    let rejectFirstSave!: (reason?: unknown) => void;
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s1",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Weekly sync",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T10:00:00+03:00",
+            session_dir: "/tmp/s1",
+            audio_duration_hms: "00:15:20",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s1",
+          source: "zoom",
+          notes: "",
+          custom_summary_prompt: "Legacy prompt",
+          custom_summary_prompt_name: "",
+          topic: "Weekly sync",
+          tags: [],
+        };
+      }
+      if (cmd === "update_session_details") {
+        const payload = (args as { payload: { custom_summary_prompt_name?: string } }).payload;
+        if (payload.custom_summary_prompt_name === "Actions") {
+          return new Promise((_resolve, reject) => {
+            rejectFirstSave = reject;
+          });
+        }
+        return "updated";
+      }
+      if (cmd === "list_known_tags") {
+        return [];
+      }
+      return args ?? null;
+    });
+
+    const setStatus = vi.fn();
+    const setLastSessionId = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    await waitFor(() => {
+      expect(result.current.sessionDetails.s1?.custom_summary_prompt).toBe("Legacy prompt");
+    });
+
+    vi.useFakeTimers();
+    const failedDetail = {
+      ...result.current.sessionDetails.s1!,
+      custom_summary_prompt: "",
+      custom_summary_prompt_name: "Actions",
+    };
+    let savePromise!: Promise<boolean>;
+    act(() => {
+      savePromise = result.current.saveSessionDetails("s1", failedDetail);
+    });
+
+    const newerDetail = {
+      ...failedDetail,
+      custom_summary_prompt_name: "Decisions",
+    };
+    act(() => {
+      result.current.setSessionDetails((prev) => ({ ...prev, s1: newerDetail }));
+    });
+
+    await act(async () => {
+      rejectFirstSave(new Error("disk write failed"));
+      await savePromise;
+    });
+
+    expect(result.current.sessionDetails.s1?.custom_summary_prompt_name).toBe("Decisions");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
+      payload: expect.objectContaining({
+        session_id: "s1",
+        custom_summary_prompt: "",
+        custom_summary_prompt_name: "Decisions",
+      }),
+    });
   });
 
   it("tracks Get text clicks before running transcription", async () => {

@@ -117,6 +117,7 @@ export function SessionList({
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const [todoistPendingSessionId, setTodoistPendingSessionId] = useState<string | null>(null);
   const todoistTasks = useTodoistTasks();
+  const summaryPromptsRequestIdRef = useRef(0);
   // Cache the default summary prompt fetched from backend so clicking the
   // "Настроить промпт саммари" button is instant on every repeat click
   // (the first one pays one IPC round-trip).
@@ -162,23 +163,31 @@ export function SessionList({
     return [...prompts].sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  async function loadSummaryPrompts() {
+  async function loadSummaryPrompts(requestId: number) {
     setSummaryPromptsLoading(true);
     try {
       const prompts = await tauriInvoke<SummaryPromptView[]>("list_summary_prompts");
       const sorted = sortSummaryPrompts(prompts);
+      if (summaryPromptsRequestIdRef.current !== requestId) return sorted;
       setSummaryPrompts(sorted);
       return sorted;
     } catch (err) {
-      setStatus(`error: ${getErrorMessage(err)}`);
+      if (summaryPromptsRequestIdRef.current === requestId) {
+        setStatus(`error: ${getErrorMessage(err)}`);
+      }
       return summaryPrompts;
     } finally {
-      setSummaryPromptsLoading(false);
+      if (summaryPromptsRequestIdRef.current === requestId) {
+        setSummaryPromptsLoading(false);
+      }
     }
   }
 
   async function openSummaryPromptDialog(detail: SessionMetaView) {
-    const prompts = await loadSummaryPrompts();
+    const requestId = summaryPromptsRequestIdRef.current + 1;
+    summaryPromptsRequestIdRef.current = requestId;
+    const prompts = await loadSummaryPrompts(requestId);
+    if (summaryPromptsRequestIdRef.current !== requestId) return;
     const promptName = detail.custom_summary_prompt_name?.trim() ?? "";
     const selectedPrompt = promptName
       ? prompts.find((prompt) => prompt.name === promptName)
@@ -250,14 +259,21 @@ export function SessionList({
 
     setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: true } : prev));
     try {
-      const savedPrompt = await tauriInvoke<SummaryPromptView>("upsert_summary_prompt", {
-        payload,
-      });
-      setSummaryPrompts((prev) => {
-        const next = prev.filter((prompt) => prompt.name !== savedPrompt.name);
-        next.push(savedPrompt);
-        return sortSummaryPrompts(next);
-      });
+      const unchangedPrompt = summaryPrompts.find(
+        (prompt) => prompt.name === payload.name && prompt.prompt === payload.prompt,
+      );
+      const savedPrompt =
+        unchangedPrompt ??
+        (await tauriInvoke<SummaryPromptView>("upsert_summary_prompt", {
+          payload,
+        }));
+      if (!unchangedPrompt) {
+        setSummaryPrompts((prev) => {
+          const next = prev.filter((prompt) => prompt.name !== savedPrompt.name);
+          next.push(savedPrompt);
+          return sortSummaryPrompts(next);
+        });
+      }
 
       const nextDetail: SessionMetaView = {
         ...current,
