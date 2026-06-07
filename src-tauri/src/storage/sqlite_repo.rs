@@ -77,6 +77,14 @@ pub struct SessionEvent {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SummaryPromptView {
+    pub name: String,
+    pub prompt: String,
+    pub created_at_iso: String,
+    pub updated_at_iso: String,
+}
+
 pub const BRAIN_UPLOAD_FRESH_MINUTES: i64 = 30;
 
 pub fn brain_upload_is_fresh(
@@ -232,11 +240,110 @@ pub fn open_connection(app_data_dir: &Path) -> Result<Connection, String> {
             next_run_epoch INTEGER NOT NULL,
             last_error TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS summary_prompts (
+            name TEXT PRIMARY KEY,
+            prompt TEXT NOT NULL,
+            created_at_iso TEXT NOT NULL,
+            updated_at_iso TEXT NOT NULL
+        );
         ",
     )
     .map_err(|e| e.to_string())?;
     crate::task_sync::queue::ensure_schema(&conn)?;
     Ok(conn)
+}
+
+fn row_to_summary_prompt(row: &rusqlite::Row<'_>) -> rusqlite::Result<SummaryPromptView> {
+    Ok(SummaryPromptView {
+        name: row.get(0)?,
+        prompt: row.get(1)?,
+        created_at_iso: row.get(2)?,
+        updated_at_iso: row.get(3)?,
+    })
+}
+
+pub fn list_summary_prompts(app_data_dir: &Path) -> Result<Vec<SummaryPromptView>, String> {
+    let conn = open(app_data_dir)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, prompt, created_at_iso, updated_at_iso
+             FROM summary_prompts
+             ORDER BY name COLLATE NOCASE ASC, name ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], row_to_summary_prompt)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+pub fn get_summary_prompt(app_data_dir: &Path, name: &str) -> Result<SummaryPromptView, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Prompt name is required".to_string());
+    }
+    let conn = open(app_data_dir)?;
+    conn.query_row(
+        "SELECT name, prompt, created_at_iso, updated_at_iso
+         FROM summary_prompts
+         WHERE name=?1",
+        params![name],
+        row_to_summary_prompt,
+    )
+    .map_err(|err| {
+        if matches!(err, rusqlite::Error::QueryReturnedNoRows) {
+            format!("Summary prompt not found: {name}")
+        } else {
+            err.to_string()
+        }
+    })
+}
+
+pub fn upsert_summary_prompt(
+    app_data_dir: &Path,
+    name: &str,
+    prompt: &str,
+) -> Result<SummaryPromptView, String> {
+    let name = name.trim();
+    let prompt = prompt.trim();
+    if name.is_empty() {
+        return Err("Prompt name is required".to_string());
+    }
+    if prompt.is_empty() {
+        return Err("Prompt text is required".to_string());
+    }
+
+    let conn = open(app_data_dir)?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "
+        INSERT INTO summary_prompts (name, prompt, created_at_iso, updated_at_iso)
+        VALUES (?1, ?2, ?3, ?3)
+        ON CONFLICT(name) DO UPDATE SET
+            prompt=excluded.prompt,
+            updated_at_iso=excluded.updated_at_iso
+        ",
+        params![name, prompt, now],
+    )
+    .map_err(|e| e.to_string())?;
+    get_summary_prompt(app_data_dir, name)
+}
+
+pub fn delete_summary_prompt(app_data_dir: &Path, name: &str) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Prompt name is required".to_string());
+    }
+    let conn = open(app_data_dir)?;
+    let deleted = conn
+        .execute("DELETE FROM summary_prompts WHERE name=?1", params![name])
+        .map_err(|e| e.to_string())?;
+    if deleted == 0 {
+        return Err(format!("Summary prompt not found: {name}"));
+    }
+    Ok(())
 }
 
 pub fn upsert_session(
@@ -644,6 +751,83 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn summary_prompts_schema_is_created_by_open_connection() {
+        let tmp = temp_dir();
+        let conn = open_connection(tmp.path()).expect("open sqlite");
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='summary_prompts'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema query");
+
+        assert_eq!(exists, 1);
+    }
+
+    #[test]
+    fn upsert_summary_prompt_creates_and_updates_by_name() {
+        let tmp = temp_dir();
+
+        let created = upsert_summary_prompt(tmp.path(), " Decisions ", " First prompt ")
+            .expect("create prompt");
+        assert_eq!(created.name, "Decisions");
+        assert_eq!(created.prompt, "First prompt");
+        assert!(!created.created_at_iso.is_empty());
+        assert_eq!(created.created_at_iso, created.updated_at_iso);
+
+        let updated = upsert_summary_prompt(tmp.path(), "Decisions", "Updated prompt")
+            .expect("update prompt");
+        assert_eq!(updated.name, "Decisions");
+        assert_eq!(updated.prompt, "Updated prompt");
+        assert_eq!(updated.created_at_iso, created.created_at_iso);
+        assert!(!updated.updated_at_iso.is_empty());
+
+        let fetched = get_summary_prompt(tmp.path(), "Decisions").expect("get prompt");
+        assert_eq!(fetched.prompt, "Updated prompt");
+    }
+
+    #[test]
+    fn list_summary_prompts_returns_name_order() {
+        let tmp = temp_dir();
+        upsert_summary_prompt(tmp.path(), "Risks", "Risk prompt").expect("insert risks");
+        upsert_summary_prompt(tmp.path(), "Actions", "Action prompt").expect("insert actions");
+
+        let prompts = list_summary_prompts(tmp.path()).expect("list prompts");
+
+        assert_eq!(
+            prompts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            vec!["Actions", "Risks"]
+        );
+    }
+
+    #[test]
+    fn delete_summary_prompt_removes_unused_prompt() {
+        let tmp = temp_dir();
+        upsert_summary_prompt(tmp.path(), "Actions", "Action prompt").expect("insert");
+
+        delete_summary_prompt(tmp.path(), "Actions").expect("delete");
+
+        let prompts = list_summary_prompts(tmp.path()).expect("list prompts");
+        assert!(prompts.is_empty());
+    }
+
+    #[test]
+    fn summary_prompt_name_and_prompt_are_required() {
+        let tmp = temp_dir();
+
+        assert_eq!(
+            upsert_summary_prompt(tmp.path(), "   ", "Prompt").expect_err("empty name"),
+            "Prompt name is required"
+        );
+        assert_eq!(
+            upsert_summary_prompt(tmp.path(), "Name", "   ").expect_err("empty prompt"),
+            "Prompt text is required"
+        );
     }
 
     #[test]
