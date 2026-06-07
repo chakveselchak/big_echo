@@ -6,13 +6,16 @@ use crate::domain::session::{format_ru_date, SessionArtifacts, SessionMeta, Sess
 use crate::storage::fs_layout::{build_session_relative_dir, summary_name, transcript_name};
 use crate::storage::session_store::{load_meta, save_meta};
 use crate::storage::sqlite_repo::{
-    add_event, delete_session as repo_delete_session, get_meta_path, get_session_dir,
-    list_sessions as repo_list_sessions, upsert_session, SessionListItem,
+    add_event, delete_session as repo_delete_session,
+    delete_summary_prompt as repo_delete_summary_prompt, get_meta_path, get_session_dir,
+    list_sessions as repo_list_sessions, list_summary_prompts as repo_list_summary_prompts,
+    upsert_session, upsert_summary_prompt as repo_upsert_summary_prompt, SessionListItem,
+    SummaryPromptView,
 };
 use crate::tray_manager::set_tray_indicator_from_state;
 use crate::{get_settings_from_dirs, root_recordings_dir};
 use chrono::{DateTime, Duration, Local, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -713,6 +716,31 @@ pub fn get_session_meta(
         tags: meta.tags,
         num_speakers: meta.num_speakers,
     })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpsertSummaryPromptRequest {
+    pub name: String,
+    pub prompt: String,
+}
+
+#[tauri::command]
+pub fn list_summary_prompts(dirs: tauri::State<AppDirs>) -> Result<Vec<SummaryPromptView>, String> {
+    repo_list_summary_prompts(&dirs.app_data_dir)
+}
+
+#[tauri::command]
+pub fn upsert_summary_prompt(
+    dirs: tauri::State<AppDirs>,
+    payload: UpsertSummaryPromptRequest,
+) -> Result<SummaryPromptView, String> {
+    repo_upsert_summary_prompt(&dirs.app_data_dir, &payload.name, &payload.prompt)
+}
+
+#[tauri::command]
+pub fn delete_summary_prompt(dirs: tauri::State<AppDirs>, name: String) -> Result<String, String> {
+    repo_delete_summary_prompt(&dirs.app_data_dir, &name)?;
+    Ok("deleted".to_string())
 }
 
 #[tauri::command]

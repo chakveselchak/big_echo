@@ -32,10 +32,11 @@ use commands::recording::{
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
 };
 use commands::sessions::{
-    auto_delete_old_session_audio, delete_session, delete_session_audio, get_live_input_levels,
-    get_session_meta, get_ui_sync_state, import_audio_session, list_known_tags, list_sessions,
-    open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
-    set_ui_sync_state, sync_sessions, update_session_details,
+    auto_delete_old_session_audio, delete_session, delete_session_audio, delete_summary_prompt,
+    get_live_input_levels, get_session_meta, get_ui_sync_state, import_audio_session,
+    list_known_tags, list_sessions, list_summary_prompts, open_session_artifact,
+    open_session_folder, read_session_artifact, search_session_artifacts, set_ui_sync_state,
+    sync_sessions, update_session_details, upsert_summary_prompt,
 };
 use commands::settings::{
     detect_system_source_device, get_computer_name, get_macos_system_audio_permission_status,
@@ -608,6 +609,9 @@ fn main() {
             set_ui_sync_state,
             get_live_input_levels,
             get_session_meta,
+            list_summary_prompts,
+            upsert_summary_prompt,
+            delete_summary_prompt,
             update_session_details,
             set_api_secret,
             get_api_secret,
@@ -852,6 +856,9 @@ mod ipc_runtime_tests {
                 auto_delete_old_session_audio,
                 list_known_tags,
                 get_session_meta,
+                list_summary_prompts,
+                upsert_summary_prompt,
+                delete_summary_prompt,
                 update_session_details,
                 start_recording,
                 stop_recording,
@@ -1292,8 +1299,8 @@ mod ipc_runtime_tests {
                         "session_id": "session-prompt-name",
                         "source": "zoom",
                         "notes": "",
-                        "custom_summary_prompt": "Legacy prompt",
-                        "custom_summary_prompt_name": "Actions",
+                        "customSummaryPrompt": "Legacy prompt",
+                        "customSummaryPromptName": "Actions",
                         "topic": "Prompt binding",
                         "tags": [],
                         "num_speakers": null
@@ -1306,6 +1313,56 @@ mod ipc_runtime_tests {
         let saved = load_meta(&meta_path).expect("load saved meta");
         assert_eq!(saved.custom_summary_prompt_name, "Actions");
         assert_eq!(saved.custom_summary_prompt, "");
+    }
+
+    #[test]
+    fn invoke_summary_prompt_commands_create_list_update_and_delete() {
+        let (app, _app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+
+        let created = get_ipc_response(
+            &webview,
+            invoke_request(
+                "upsert_summary_prompt",
+                json!({ "payload": { "name": "Actions", "prompt": "Action prompt" } }),
+            ),
+        )
+        .expect("create prompt")
+        .deserialize::<serde_json::Value>()
+        .expect("created prompt json");
+        assert_eq!(created["name"], "Actions");
+        assert_eq!(created["prompt"], "Action prompt");
+
+        let updated = get_ipc_response(
+            &webview,
+            invoke_request(
+                "upsert_summary_prompt",
+                json!({ "payload": { "name": "Actions", "prompt": "Updated prompt" } }),
+            ),
+        )
+        .expect("update prompt")
+        .deserialize::<serde_json::Value>()
+        .expect("updated prompt json");
+        assert_eq!(updated["name"], "Actions");
+        assert_eq!(updated["prompt"], "Updated prompt");
+
+        let list = get_ipc_response(&webview, invoke_request("list_summary_prompts", json!({})))
+            .expect("list prompts")
+            .deserialize::<serde_json::Value>()
+            .expect("list json");
+        assert_eq!(list.as_array().expect("array").len(), 1);
+        assert_eq!(list[0]["name"], "Actions");
+
+        let deleted = get_ipc_response(
+            &webview,
+            invoke_request("delete_summary_prompt", json!({ "name": "Actions" })),
+        )
+        .expect("delete prompt")
+        .deserialize::<String>()
+        .expect("deleted string");
+        assert_eq!(deleted, "deleted");
     }
 
     #[test]
