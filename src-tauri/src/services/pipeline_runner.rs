@@ -260,19 +260,37 @@ pub async fn run_pipeline_core(
     }
 
     if needs_summary {
-        let summary_prompt_override = if let Some(prompt) = custom_summary_prompt
+        let persist_summary_failure =
+            |meta: &mut crate::domain::session::SessionMeta, err: &str| -> Result<String, String> {
+                let detail = mark_pipeline_summary_failed(meta, err);
+                save_meta(&meta_path, meta)?;
+                upsert_session(&data_dir, meta, session_dir, &meta_path)?;
+                add_event(&data_dir, &meta.session_id, "pipeline_failed", &detail)?;
+                if should_schedule_retry(invocation) {
+                    schedule_retry_for_session(&data_dir, &meta.session_id, &detail)?;
+                }
+                Ok(detail)
+            };
+        let summary_prompt_override = match if let Some(prompt) = custom_summary_prompt
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            Some(prompt.to_string())
+            Ok(Some(prompt.to_string()))
         } else {
             let prompt_name = meta.custom_summary_prompt_name.trim();
             if !prompt_name.is_empty() {
-                Some(get_summary_prompt(&data_dir, prompt_name)?.prompt)
+                get_summary_prompt(&data_dir, prompt_name).map(|prompt| Some(prompt.prompt))
             } else {
                 let legacy_prompt = meta.custom_summary_prompt.trim();
-                (!legacy_prompt.is_empty()).then(|| legacy_prompt.to_string())
+                Ok((!legacy_prompt.is_empty()).then(|| legacy_prompt.to_string()))
+            }
+        } {
+            Ok(prompt) => prompt,
+            Err(err) => {
+                log_api_call("api_summary_error", format!("error={err}"));
+                persist_summary_failure(&mut meta, &err)?;
+                return Err(err);
             }
         };
         let transcript_path = session_dir.join(&meta.artifacts.transcript_file);
@@ -301,13 +319,7 @@ pub async fn run_pipeline_core(
             Ok(text) => text,
             Err(err) => {
                 log_api_call("api_summary_error", format!("error={err}"));
-                let detail = mark_pipeline_summary_failed(&mut meta, &err);
-                save_meta(&meta_path, &meta)?;
-                upsert_session(&data_dir, &meta, session_dir, &meta_path)?;
-                add_event(&data_dir, &meta.session_id, "pipeline_failed", &detail)?;
-                if should_schedule_retry(invocation) {
-                    schedule_retry_for_session(&data_dir, &meta.session_id, &detail)?;
-                }
+                persist_summary_failure(&mut meta, &err)?;
                 return Err(err);
             }
         };

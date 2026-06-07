@@ -1687,7 +1687,10 @@ mod ipc_runtime_tests {
 
         get_ipc_response(
             &webview,
-            invoke_request("run_summary", json!({ "sessionId": "session-summary-named" })),
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId": "session-summary-named" }),
+            ),
         )
         .expect("run_summary should succeed");
 
@@ -1732,7 +1735,22 @@ mod ipc_runtime_tests {
         )
         .expect_err("run_summary should fail");
 
-        assert!(err.to_string().contains("Summary prompt not found: Missing"));
+        assert!(err
+            .to_string()
+            .contains("Summary prompt not found: Missing"));
+
+        let saved = load_meta(&meta_path).expect("load failed meta");
+        assert_eq!(saved.status, SessionStatus::Failed);
+        assert!(saved
+            .errors
+            .iter()
+            .any(|error| error.contains("Summary prompt not found: Missing")));
+        let events = list_session_events(&app_data_dir, "session-summary-missing-prompt")
+            .expect("load events");
+        assert!(events.iter().any(|event| {
+            event.event_type == "pipeline_failed"
+                && event.detail.contains("Summary prompt not found: Missing")
+        }));
     }
 
     #[test]
