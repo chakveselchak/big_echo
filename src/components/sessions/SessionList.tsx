@@ -175,7 +175,7 @@ export function SessionList({
       if (summaryPromptsRequestIdRef.current === requestId) {
         setStatus(`error: ${getErrorMessage(err)}`);
       }
-      return summaryPrompts;
+      return null;
     } finally {
       if (summaryPromptsRequestIdRef.current === requestId) {
         setSummaryPromptsLoading(false);
@@ -188,6 +188,7 @@ export function SessionList({
     summaryPromptsRequestIdRef.current = requestId;
     const prompts = await loadSummaryPrompts(requestId);
     if (summaryPromptsRequestIdRef.current !== requestId) return;
+    if (!prompts) return;
     const promptName = detail.custom_summary_prompt_name?.trim() ?? "";
     const selectedPrompt = promptName
       ? prompts.find((prompt) => prompt.name === promptName)
@@ -199,6 +200,18 @@ export function SessionList({
         promptName: selectedPrompt.name,
         value: selectedPrompt.prompt,
         saving: false,
+      });
+      return;
+    }
+
+    if (promptName) {
+      setStatus(`error: summary_prompt_not_found: ${promptName}`);
+      setSummaryPromptDialog({
+        sessionId: detail.session_id,
+        promptName,
+        value: "",
+        saving: false,
+        notice: "Сохраненный промпт с таким именем не найден. Введите текст, чтобы восстановить его.",
       });
       return;
     }
@@ -259,15 +272,30 @@ export function SessionList({
 
     setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: true } : prev));
     try {
-      const unchangedPrompt = summaryPrompts.find(
-        (prompt) => prompt.name === payload.name && prompt.prompt === payload.prompt,
-      );
+      const existingPrompt = summaryPrompts.find((prompt) => prompt.name === payload.name);
+      const promptChanged = existingPrompt?.prompt !== payload.prompt;
+      const currentPromptName = current.custom_summary_prompt_name?.trim() ?? "";
+      const nextDetail: SessionMetaView = {
+        ...current,
+        custom_summary_prompt: "",
+        custom_summary_prompt_name: payload.name,
+      };
+
+      if (existingPrompt && promptChanged && currentPromptName !== payload.name) {
+        const saved = await saveSessionDetails(summaryPromptDialog.sessionId, nextDetail);
+        if (!saved) {
+          setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
+          return;
+        }
+      }
+
       const savedPrompt =
-        unchangedPrompt ??
-        (await tauriInvoke<SummaryPromptView>("upsert_summary_prompt", {
-          payload,
-        }));
-      if (!unchangedPrompt) {
+        existingPrompt && !promptChanged
+          ? existingPrompt
+          : await tauriInvoke<SummaryPromptView>("upsert_summary_prompt", {
+              payload,
+            });
+      if (!existingPrompt || promptChanged) {
         setSummaryPrompts((prev) => {
           const next = prev.filter((prompt) => prompt.name !== savedPrompt.name);
           next.push(savedPrompt);
@@ -275,15 +303,15 @@ export function SessionList({
         });
       }
 
-      const nextDetail: SessionMetaView = {
-        ...current,
-        custom_summary_prompt: "",
-        custom_summary_prompt_name: savedPrompt.name,
-      };
-      const saved = await saveSessionDetails(summaryPromptDialog.sessionId, nextDetail);
-      if (!saved) {
-        setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
-        return;
+      if (!(existingPrompt && promptChanged && currentPromptName !== payload.name)) {
+        const saved = await saveSessionDetails(summaryPromptDialog.sessionId, {
+          ...nextDetail,
+          custom_summary_prompt_name: savedPrompt.name,
+        });
+        if (!saved) {
+          setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
+          return;
+        }
       }
       setSummaryPromptDialog(null);
     } catch (err) {

@@ -24,6 +24,9 @@ const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
     if (cmd === "list_sessions") {
       return [];
     }
+    if (cmd === "list_summary_prompts") {
+      return [];
+    }
     if (cmd === "get_settings") {
       return {
         recording_root: "./recordings",
@@ -778,6 +781,112 @@ describe("App main window", () => {
     expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("Second prompt body");
   });
 
+  it("does not update an existing shared prompt when binding the session fails", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "get_settings") {
+        return namedPromptSettings("Default summary prompt");
+      }
+      if (cmd === "list_sessions") {
+        return [namedPromptSessionListItem("s-prompt", "Prompt session")];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-prompt",
+          source: "slack",
+          notes: "",
+          custom_summary_prompt: "",
+          custom_summary_prompt_name: "",
+          topic: "Prompt session",
+          tags: [],
+        };
+      }
+      if (cmd === "list_summary_prompts") {
+        return [
+          {
+            name: "Actions",
+            prompt: "Only action items",
+            created_at_iso: "2026-06-07T10:00:00+03:00",
+            updated_at_iso: "2026-06-07T10:00:00+03:00",
+          },
+        ];
+      }
+      if (cmd === "update_session_details") {
+        throw new Error("disk write failed");
+      }
+      if (cmd === "upsert_summary_prompt") {
+        throw new Error("shared prompt should not be updated after failed bind");
+      }
+      return null;
+    });
+
+    render(<App />);
+    await screen.findByText("Prompt session");
+    await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    await user.click(within(dialog).getByRole("button", { name: "Actions" }));
+    const textarea = within(dialog).getByLabelText("Текст промпта");
+    await user.clear(textarea);
+    await user.type(textarea, "Updated shared prompt");
+    await user.click(within(dialog).getByRole("button", { name: "Ок" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("update_session_details", {
+        payload: expect.objectContaining({
+          session_id: "s-prompt",
+          custom_summary_prompt_name: "Actions",
+        }),
+      });
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("upsert_summary_prompt", expect.anything());
+    expect(await screen.findByRole("dialog", { name: "Промпт саммари" })).toBeInTheDocument();
+  });
+
+  it("opens a missing named prompt as a recovery draft instead of using default or legacy text", async () => {
+    const user = userEvent.setup();
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return { source: "slack", topic: "", is_recording: false, active_session_id: null };
+      }
+      if (cmd === "get_settings") {
+        return namedPromptSettings("Default summary prompt");
+      }
+      if (cmd === "list_sessions") {
+        return [namedPromptSessionListItem("s-missing", "Missing prompt session")];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-missing",
+          source: "slack",
+          notes: "",
+          custom_summary_prompt: "Legacy text should not be shown",
+          custom_summary_prompt_name: "Missing prompt",
+          topic: "Missing prompt session",
+          tags: [],
+        };
+      }
+      if (cmd === "list_summary_prompts") {
+        return [];
+      }
+      return null;
+    });
+
+    render(<App />);
+    await screen.findByText("Missing prompt session");
+    await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    expect(within(dialog).getByLabelText("Имя промпта")).toHaveValue("Missing prompt");
+    expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("");
+    expect(
+      within(dialog).getByText("Сохраненный промпт с таким именем не найден. Введите текст, чтобы восстановить его."),
+    ).toBeInTheDocument();
+  });
+
   it("saves legacy prompt text under a new name before binding the session", async () => {
     const user = userEvent.setup();
     invokeMock.mockImplementation(async (cmd: string) => {
@@ -1256,6 +1365,7 @@ describe("App main window", () => {
           tags: [],
         };
       }
+      if (cmd === "list_summary_prompts") return [];
       if (cmd === "open_session_folder") return "opened";
       if (cmd === "open_session_artifact") return "opened";
       if (cmd === "run_transcription") return "transcribed";

@@ -1596,6 +1596,17 @@ select {
   font-weight: 500;
 }
 
+.summary-prompt-notice {
+  margin-top: 14px;
+  border: 1px solid rgba(213, 137, 19, 0.34);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 247, 230, 0.95);
+  color: #7a4f09;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 10px;
+}
+
 @media (max-width: 720px) {
   .summary-prompt-card {
     width: calc(100vw - 24px) !important;

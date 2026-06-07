@@ -7,6 +7,7 @@ export type SummaryPromptDialogState = {
   promptName: string;
   value: string;
   saving: boolean;
+  notice?: string;
 };
 
 type SummaryPromptModalProps = {
@@ -44,6 +45,7 @@ export function SummaryPromptModal({
           prompts={prompts}
           loadingPrompts={loadingPrompts}
           saving={dialog.saving}
+          notice={dialog.notice}
           onCancel={onCancel}
           onConfirm={onConfirm}
         />
@@ -58,6 +60,7 @@ type SummaryPromptModalBodyProps = {
   prompts: SummaryPromptView[];
   loadingPrompts: boolean;
   saving: boolean;
+  notice?: string;
   onCancel: () => void;
   onConfirm: (payload: { name: string; prompt: string }) => void;
 };
@@ -71,6 +74,7 @@ function SummaryPromptModalBody({
   prompts,
   loadingPrompts,
   saving,
+  notice,
   onCancel,
   onConfirm,
 }: SummaryPromptModalBodyProps) {
@@ -187,6 +191,7 @@ function SummaryPromptModalBody({
           </label>
         </div>
       </div>
+      {notice && <div className="summary-prompt-notice">{notice}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 24 }}>
         <Button onClick={onCancel} disabled={saving}>
           Отмена
