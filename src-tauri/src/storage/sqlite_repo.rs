@@ -333,16 +333,21 @@ pub fn upsert_summary_prompt(
 }
 
 fn count_sessions_using_summary_prompt(app_data_dir: &Path, name: &str) -> Result<usize, String> {
+    let name = name.trim();
     let sessions = list_sessions(app_data_dir)?;
     let mut count = 0usize;
     for item in sessions {
         let Some(meta_path) = get_meta_path(app_data_dir, &item.session_id)? else {
             continue;
         };
-        let meta = match load_meta(&meta_path) {
-            Ok(meta) => meta,
-            Err(_) => continue,
-        };
+        let meta = load_meta(&meta_path).map_err(|err| {
+            format!(
+                "Cannot verify summary prompt usage for session {} at {}: {}",
+                item.session_id,
+                meta_path.display(),
+                err
+            )
+        })?;
         if meta.custom_summary_prompt_name.trim() == name {
             count += 1;
         }
@@ -864,6 +869,58 @@ mod tests {
         let err = delete_summary_prompt(tmp.path(), "Actions").expect_err("prompt in use");
 
         assert_eq!(err, "Summary prompt is used by 1 session(s): Actions");
+    }
+
+    #[test]
+    fn delete_summary_prompt_matches_trimmed_session_prompt_names() {
+        let tmp = temp_dir();
+        upsert_summary_prompt(tmp.path(), "Actions", "Action prompt").expect("insert prompt");
+
+        let session_dir = tmp.path().join("sessions").join("s-actions-trimmed");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = SessionMeta::new(
+            "s-actions-trimmed".to_string(),
+            "zoom".to_string(),
+            vec![],
+            "Prompt use".to_string(),
+            "".to_string(),
+        );
+        meta.custom_summary_prompt_name = " Actions ".to_string();
+        crate::storage::session_store::save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(tmp.path(), &meta, &session_dir, &meta_path).expect("upsert session");
+
+        let err = delete_summary_prompt(tmp.path(), " Actions ").expect_err("prompt in use");
+
+        assert_eq!(err, "Summary prompt is used by 1 session(s): Actions");
+    }
+
+    #[test]
+    fn delete_summary_prompt_fails_closed_when_session_meta_cannot_be_loaded() {
+        let tmp = temp_dir();
+        upsert_summary_prompt(tmp.path(), "Actions", "Action prompt").expect("insert prompt");
+
+        let session_dir = tmp.path().join("sessions").join("s-corrupt-meta");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+        let meta_path = session_dir.join("meta.json");
+        let meta = SessionMeta::new(
+            "s-corrupt-meta".to_string(),
+            "zoom".to_string(),
+            vec![],
+            "Prompt use".to_string(),
+            "".to_string(),
+        );
+        crate::storage::session_store::save_meta(&meta_path, &meta).expect("save meta");
+        upsert_session(tmp.path(), &meta, &session_dir, &meta_path).expect("upsert session");
+        std::fs::write(&meta_path, "{not-json").expect("corrupt meta");
+
+        let err = delete_summary_prompt(tmp.path(), "Actions").expect_err("corrupt meta blocks");
+
+        assert!(
+            err.contains("Cannot verify summary prompt usage for session s-corrupt-meta at"),
+            "{err}"
+        );
+        assert!(err.contains("meta.json"), "{err}");
     }
 
     #[test]
