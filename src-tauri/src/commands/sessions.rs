@@ -773,13 +773,23 @@ fn update_session_details_impl(
     meta.primary_tag = source;
     meta.notes = payload.notes.trim().to_string();
     meta.tags = tags;
-    let prompt_name = payload.custom_summary_prompt_name.trim().to_string();
-    meta.custom_summary_prompt_name = prompt_name.clone();
-    meta.custom_summary_prompt = if prompt_name.is_empty() {
-        payload.custom_summary_prompt.trim().to_string()
-    } else {
-        String::new()
-    };
+    if let Some(prompt_name) = payload.custom_summary_prompt_name.as_deref() {
+        let prompt_name = prompt_name.trim().to_string();
+        meta.custom_summary_prompt_name = prompt_name.clone();
+        meta.custom_summary_prompt = if prompt_name.is_empty() {
+            payload
+                .custom_summary_prompt
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        } else {
+            String::new()
+        };
+    } else if let Some(prompt) = payload.custom_summary_prompt.as_deref() {
+        meta.custom_summary_prompt_name = String::new();
+        meta.custom_summary_prompt = prompt.trim().to_string();
+    }
     meta.topic = payload.topic.trim().to_string();
     meta.num_speakers = payload.num_speakers.filter(|n| *n > 0);
 
@@ -1180,8 +1190,8 @@ mod tests {
                 session_id: "s-retag".to_string(),
                 source: "zoom".to_string(),
                 notes: String::new(),
-                custom_summary_prompt: String::new(),
-                custom_summary_prompt_name: String::new(),
+                custom_summary_prompt: Some(String::new()),
+                custom_summary_prompt_name: Some(String::new()),
                 topic: "Topic".to_string(),
                 tags: vec!["new".to_string()],
                 num_speakers: None,
@@ -1223,8 +1233,8 @@ mod tests {
                 session_id: "s-active".to_string(),
                 source: "slack".to_string(),
                 notes: "Fresh notes".to_string(),
-                custom_summary_prompt: String::new(),
-                custom_summary_prompt_name: String::new(),
+                custom_summary_prompt: Some(String::new()),
+                custom_summary_prompt_name: Some(String::new()),
                 topic: "Fresh topic".to_string(),
                 tags: vec!["new".to_string()],
                 num_speakers: None,
