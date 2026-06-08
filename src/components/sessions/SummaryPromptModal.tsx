@@ -28,7 +28,7 @@ export function SummaryPromptModal({
   return (
     <Modal
       open={Boolean(dialog)}
-      title="Промпт саммари"
+      title="Управление промптами для саммари"
       closable={false}
       onCancel={onCancel}
       transitionName=""
@@ -119,29 +119,32 @@ function SummaryPromptModalBody({
   return (
     <>
       <div className="summary-prompt-editor">
-        <div className="summary-prompt-list" aria-label="Сохраненные промпты">
-          {loadingPrompts ? (
-            <div className="summary-prompt-list-empty">Загрузка...</div>
-          ) : sortedPrompts.length ? (
-            sortedPrompts.map((prompt) => (
-              <button
-                key={prompt.name}
-                type="button"
-                className={
-                  prompt.name === name
-                    ? "summary-prompt-list-item summary-prompt-list-item-active"
-                    : "summary-prompt-list-item"
-                }
-                onClick={() => selectPrompt(prompt)}
-                disabled={saving}
-                aria-pressed={prompt.name === name}
-              >
-                {prompt.name}
-              </button>
-            ))
-          ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет сохраненных промптов" />
-          )}
+        <div className="summary-prompt-sidebar">
+          <div className="summary-prompt-list-label">Сохраненные промпты</div>
+          <div className="summary-prompt-list" aria-label="Сохраненные промпты">
+            {loadingPrompts ? (
+              <div className="summary-prompt-list-empty">Загрузка...</div>
+            ) : sortedPrompts.length ? (
+              sortedPrompts.map((prompt) => (
+                <button
+                  key={prompt.name}
+                  type="button"
+                  className={
+                    prompt.name === name
+                      ? "summary-prompt-list-item summary-prompt-list-item-active"
+                      : "summary-prompt-list-item"
+                  }
+                  onClick={() => selectPrompt(prompt)}
+                  disabled={saving}
+                  aria-pressed={prompt.name === name}
+                >
+                  {prompt.name}
+                </button>
+              ))
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Нет сохраненных промптов" />
+            )}
+          </div>
         </div>
 
         <div className="summary-prompt-fields">

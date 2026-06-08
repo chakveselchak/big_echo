@@ -595,7 +595,8 @@ describe("App main window", () => {
 
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const dialog = await screen.findByRole("dialog", { name: "Управление промптами для саммари" });
+    expect(within(dialog).getByText("Сохраненные промпты")).toBeInTheDocument();
     const textarea = within(dialog).getByLabelText("Текст промпта");
     expect(textarea).toHaveValue("Сделай саммари блоками: решения, риски, action items");
 
@@ -625,7 +626,7 @@ describe("App main window", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
-    const reopenedDialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const reopenedDialog = await screen.findByRole("dialog", { name: "Управление промптами для саммари" });
     expect(within(reopenedDialog).getByLabelText("Имя промпта")).toHaveValue("Meeting summary");
     expect(within(reopenedDialog).getByLabelText("Текст промпта")).toHaveValue(
       "Итог: решения, риски, следующие шаги",
@@ -678,7 +679,7 @@ describe("App main window", () => {
     await screen.findByText("Prompt session");
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const dialog = await screen.findByRole("dialog", { name: "Управление промптами для саммари" });
     await user.click(within(dialog).getByRole("button", { name: "Actions" }));
 
     expect(within(dialog).getByLabelText("Имя промпта")).toHaveValue("Actions");
@@ -762,7 +763,7 @@ describe("App main window", () => {
       ]);
     });
 
-    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const dialog = await screen.findByRole("dialog", { name: "Управление промптами для саммари" });
     expect(within(dialog).getByLabelText("Имя промпта")).toHaveValue("Second prompt");
     expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("Second prompt body");
 
@@ -827,7 +828,7 @@ describe("App main window", () => {
     await screen.findByText("Prompt session");
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const dialog = await screen.findByRole("dialog", { name: "Управление промптами для саммари" });
     await user.click(within(dialog).getByRole("button", { name: "Actions" }));
     const textarea = within(dialog).getByLabelText("Текст промпта");
     await user.clear(textarea);
@@ -843,7 +844,7 @@ describe("App main window", () => {
       });
     });
     expect(invokeMock).not.toHaveBeenCalledWith("upsert_summary_prompt", expect.anything());
-    expect(await screen.findByRole("dialog", { name: "Промпт саммари" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Управление промптами для саммари" })).toBeInTheDocument();
   });
 
   it("opens a missing named prompt as a recovery draft instead of using default or legacy text", async () => {
@@ -879,7 +880,7 @@ describe("App main window", () => {
     await screen.findByText("Missing prompt session");
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const dialog = await screen.findByRole("dialog", { name: "Управление промптами для саммари" });
     expect(within(dialog).getByLabelText("Имя промпта")).toHaveValue("Missing prompt");
     expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("");
     expect(
@@ -931,7 +932,7 @@ describe("App main window", () => {
     await screen.findByText("Legacy session");
     await user.click(screen.getByRole("button", { name: "Настроить промпт саммари" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Промпт саммари" });
+    const dialog = await screen.findByRole("dialog", { name: "Управление промптами для саммари" });
     expect(within(dialog).getByLabelText("Текст промпта")).toHaveValue("Legacy freeform prompt");
     await user.type(within(dialog).getByLabelText("Имя промпта"), "Legacy converted");
     await user.click(within(dialog).getByRole("button", { name: "Ок" }));
@@ -1430,11 +1431,11 @@ describe("App main window", () => {
 
     menu = openMenu();
     await clickAntdMenuItem(user, menu, "Настроить промпт саммари");
-    expect(await screen.findByRole("dialog", { name: "Промпт саммари" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Управление промптами для саммари" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Отмена" }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Промпт саммари" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Управление промптами для саммари" })).not.toBeInTheDocument();
     });
   });
 

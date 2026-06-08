@@ -1525,10 +1525,25 @@ select {
   display: grid;
   grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+}
+
+.summary-prompt-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.summary-prompt-list-label {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .summary-prompt-list {
+  flex: 1 1 auto;
   min-height: 268px;
   max-height: 420px;
   overflow: auto;
