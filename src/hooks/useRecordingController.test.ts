@@ -459,6 +459,26 @@ describe("useRecordingController", () => {
     expect(result.current.controller.muteState).toEqual({ micMuted: false, systemMuted: false });
   });
 
+  it("reflects pause state broadcast from the minitray via ui:pause", async () => {
+    const { result } = renderControllerHarness({ isTrayWindow: true });
+
+    await waitFor(() => {
+      expect(listeners.get("ui:pause")).toBeDefined();
+    });
+    expect(result.current.controller.isPaused).toBe(false);
+
+    const pauseHandler = listeners.get("ui:pause");
+    await act(async () => {
+      await pauseHandler?.({ payload: { paused: true } });
+    });
+    expect(result.current.controller.isPaused).toBe(true);
+
+    await act(async () => {
+      await pauseHandler?.({ payload: { paused: false } });
+    });
+    expect(result.current.controller.isPaused).toBe(false);
+  });
+
   it("resets mute state when a new recording session is hydrated while already recording", async () => {
     const loadSessions = vi.fn(async () => undefined);
 

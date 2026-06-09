@@ -116,6 +116,33 @@ pub(crate) fn toggle_active_mic_mute(
     apply_recording_input_mute_for_state(state, &session_id, "mic", !currently_muted)
 }
 
+/// Toggle pause on the active recording (both mic and system tracks). Used by
+/// the minitray pause button via the `minitray:toggle_pause_request` listener in
+/// main.rs. Returns the new paused state. Errors if there is no active recording.
+pub(crate) fn toggle_active_pause(state: &AppState) -> Result<bool, String> {
+    {
+        let guard = state
+            .active_session
+            .lock()
+            .map_err(|_| "state lock poisoned".to_string())?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "No active recording session".to_string())?;
+    }
+    let next_paused = !state.recording_control.is_paused();
+    if let Ok(capture_guard) = state.active_capture.lock() {
+        if let Some(capture) = capture_guard.as_ref() {
+            capture.set_paused(next_paused)?;
+        }
+    }
+    // Guarantee the shared flag reflects the new state even if no capture is
+    // attached (capture.set_paused sets the same flag when present).
+    state.recording_control.set_paused(next_paused);
+    // Keep the minitray pause button in sync. No-op when the panel is hidden.
+    crate::services::minitray::set_paused(next_paused);
+    Ok(next_paused)
+}
+
 #[tauri::command]
 pub fn set_recording_input_muted(
     state: tauri::State<AppState>,
@@ -246,6 +273,7 @@ fn start_recording_impl(
     // so its button could otherwise show a stale icon). No-op if not visible.
     crate::services::minitray::show_if_enabled(&settings, &state.live_levels);
     crate::services::minitray::set_mic_muted(state.recording_control.snapshot().mic_muted);
+    crate::services::minitray::set_paused(state.recording_control.is_paused());
     Ok(StartRecordingResponse {
         session_id,
         session_dir: abs_dir.to_string_lossy().to_string(),
@@ -518,6 +546,44 @@ mod tests {
     fn toggle_active_mic_mute_errors_without_active_session() {
         let state = AppState::default();
         let error = toggle_active_mic_mute(&state).unwrap_err();
+        assert_eq!(error, "No active recording session");
+    }
+
+    #[test]
+    fn toggle_active_pause_inverts_and_returns_state() {
+        // toggle_active_pause pushes to minitray::set_paused; hold the minitray
+        // test lock and reset its state so the push is a no-op and we don't
+        // perturb minitray tests running in parallel.
+        let _minitray_guard = crate::services::minitray::acquire_test_lock();
+        crate::services::minitray::reset_test_state();
+
+        let state = AppState::default();
+        *state.active_session.lock().expect("session lock") = Some(SessionMeta::new(
+            "active-session".to_string(),
+            "zoom".to_string(),
+            vec!["zoom".to_string()],
+            String::new(),
+            String::new(),
+        ));
+        *state.active_capture.lock().expect("capture lock") = Some(
+            crate::audio::capture::ContinuousCapture::test_stub(state.recording_control.clone()),
+        );
+
+        assert!(!state.recording_control.is_paused());
+
+        let first = toggle_active_pause(&state).expect("pause should succeed");
+        assert!(first);
+        assert!(state.recording_control.is_paused());
+
+        let second = toggle_active_pause(&state).expect("resume should succeed");
+        assert!(!second);
+        assert!(!state.recording_control.is_paused());
+    }
+
+    #[test]
+    fn toggle_active_pause_errors_without_active_session() {
+        let state = AppState::default();
+        let error = toggle_active_pause(&state).unwrap_err();
         assert_eq!(error, "No active recording session");
     }
 

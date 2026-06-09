@@ -30,7 +30,7 @@ use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
-    toggle_active_mic_mute,
+    toggle_active_mic_mute, toggle_active_pause,
 };
 use commands::sessions::{
     auto_delete_old_session_audio, delete_session, delete_session_audio, get_live_input_levels,
@@ -197,6 +197,15 @@ pub(crate) fn broadcast_mic_mute(
     let payload = serde_json::json!({ "mute_state": mute_state });
     for (_label, window) in app.webview_windows() {
         let _ = window.emit("ui:mute", payload.clone());
+    }
+}
+
+/// Broadcast the paused state to every webview so the tray timer can freeze
+/// while a pause initiated from the minitray button is in effect.
+pub(crate) fn broadcast_pause(app: &AppHandle, paused: bool) {
+    let payload = serde_json::json!({ "paused": paused });
+    for (_label, window) in app.webview_windows() {
+        let _ = window.emit("ui:pause", payload.clone());
     }
 }
 
@@ -621,6 +630,19 @@ fn main() {
                     broadcast_mic_mute(&app_handle, &mute_state);
                 }
             });
+        // Rust is the single writer for the minitray pause toggle: toggle pause
+        // on the active recording, push the new state back to the panel button,
+        // and broadcast `ui:pause` so the tray timer freezes/resumes.
+        let app_handle = app.handle().clone();
+        let _minitray_toggle_pause_listener = app.listen(
+            "minitray:toggle_pause_request",
+            move |_event: tauri::Event| {
+                let state = app_handle.state::<AppState>();
+                if let Ok(paused) = toggle_active_pause(state.inner()) {
+                    broadcast_pause(&app_handle, paused);
+                }
+            },
+        );
         Ok(())
     });
 

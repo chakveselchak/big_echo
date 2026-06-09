@@ -14,6 +14,9 @@ private func _bigecho_minitray_rust_on_icon()
 @_silgen_name("bigecho_minitray_rust_on_toggle_mic")
 private func _bigecho_minitray_rust_on_toggle_mic()
 
+@_silgen_name("bigecho_minitray_rust_on_toggle_pause")
+private func _bigecho_minitray_rust_on_toggle_pause()
+
 /// Live audio wave matching the main tray's `AudioWave` style. Mirrors the
 /// thresholds, amplitude/frequency curves and phase animation defined in
 /// `src/lib/trayAudio.ts`. Single sine path stroked in the system accent
@@ -165,6 +168,7 @@ final class MinitrayController: NSObject {
     private var panel: NSPanel?
     private var meterView: LevelMeterView?
     private var micButton: NSButton?
+    private var pauseButton: NSButton?
 
     func show() {
         if panel == nil {
@@ -189,8 +193,16 @@ final class MinitrayController: NSObject {
         micButton?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
     }
 
+    func setPaused(_ paused: Bool) {
+        // Action-oriented icon: ▶ when paused (press to resume), ‖ when
+        // recording (press to pause).
+        let symbol = paused ? "play.fill" : "pause.fill"
+        let description = paused ? "Resume recording" : "Pause recording"
+        pauseButton?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+    }
+
     private func buildPanel() {
-        let width: CGFloat = 230
+        let width: CGFloat = 260
         let height: CGFloat = 36
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
@@ -235,6 +247,15 @@ final class MinitrayController: NSObject {
         mic.translatesAutoresizingMaskIntoConstraints = false
         micButton = mic
 
+        let pause = FirstMouseButton()
+        pause.bezelStyle = .accessoryBar
+        pause.image = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: "Pause recording")
+        pause.imagePosition = .imageOnly
+        pause.target = self
+        pause.action = #selector(pauseClicked)
+        pause.translatesAutoresizingMaskIntoConstraints = false
+        pauseButton = pause
+
         let stop = FirstMouseButton()
         stop.bezelStyle = .accessoryBar
         stop.image = NSImage(systemSymbolName: "stop.fill", accessibilityDescription: "Stop recording")
@@ -246,6 +267,7 @@ final class MinitrayController: NSObject {
         blur.addSubview(icon)
         blur.addSubview(meter)
         blur.addSubview(mic)
+        blur.addSubview(pause)
         blur.addSubview(stop)
 
         NSLayoutConstraint.activate([
@@ -259,10 +281,15 @@ final class MinitrayController: NSObject {
             meter.heightAnchor.constraint(equalToConstant: 22),
             meter.trailingAnchor.constraint(equalTo: mic.leadingAnchor, constant: -8),
 
-            mic.trailingAnchor.constraint(equalTo: stop.leadingAnchor, constant: -8),
+            mic.trailingAnchor.constraint(equalTo: pause.leadingAnchor, constant: -8),
             mic.centerYAnchor.constraint(equalTo: blur.centerYAnchor),
             mic.widthAnchor.constraint(equalToConstant: 22),
             mic.heightAnchor.constraint(equalToConstant: 22),
+
+            pause.trailingAnchor.constraint(equalTo: stop.leadingAnchor, constant: -8),
+            pause.centerYAnchor.constraint(equalTo: blur.centerYAnchor),
+            pause.widthAnchor.constraint(equalToConstant: 22),
+            pause.heightAnchor.constraint(equalToConstant: 22),
 
             stop.trailingAnchor.constraint(equalTo: blur.trailingAnchor, constant: -8),
             stop.centerYAnchor.constraint(equalTo: blur.centerYAnchor),
@@ -295,6 +322,10 @@ final class MinitrayController: NSObject {
     @objc private func micClicked() {
         _bigecho_minitray_rust_on_toggle_mic()
     }
+
+    @objc private func pauseClicked() {
+        _bigecho_minitray_rust_on_toggle_pause()
+    }
 }
 
 @_cdecl("bigecho_minitray_show")
@@ -315,5 +346,10 @@ public func bigecho_minitray_update_level(_ level: Float) {
 @_cdecl("bigecho_minitray_set_mic_muted")
 public func bigecho_minitray_set_mic_muted(_ muted: Bool) {
     DispatchQueue.main.async { MinitrayController.shared.setMicMuted(muted) }
+}
+
+@_cdecl("bigecho_minitray_set_paused")
+public func bigecho_minitray_set_paused(_ paused: Bool) {
+    DispatchQueue.main.async { MinitrayController.shared.setPaused(paused) }
 }
 

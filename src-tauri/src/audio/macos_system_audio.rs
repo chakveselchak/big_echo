@@ -59,6 +59,8 @@ swift!(fn bigecho_stop_system_audio_capture(handle: Int64) -> Bool);
 swift!(fn bigecho_get_system_audio_capture_level(handle: Int64) -> Int32);
 #[cfg(target_os = "macos")]
 swift!(fn bigecho_set_system_audio_capture_muted(handle: Int64, muted: Bool) -> Bool);
+#[cfg(target_os = "macos")]
+swift!(fn bigecho_set_system_audio_capture_paused(handle: Int64, paused: Bool) -> Bool);
 
 pub fn permission_status() -> MacosSystemAudioPermissionStatus {
     #[cfg(target_os = "macos")]
@@ -141,6 +143,23 @@ impl NativeSystemAudioCapture {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (self, muted);
+            Ok(())
+        }
+    }
+
+    pub fn set_paused(&self, paused: bool) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            if unsafe { bigecho_set_system_audio_capture_paused(self.handle, paused) } {
+                Ok(())
+            } else {
+                Err("Failed to update native macOS system audio pause state".to_string())
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (self, paused);
             Ok(())
         }
     }
