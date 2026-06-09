@@ -101,15 +101,22 @@ pub(crate) fn get_settings_from_dirs(dirs: &AppDirs) -> Result<PublicSettings, S
 
 // ── Pipeline helpers ─────────────────────────────────────────────────────────
 
-fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
-    let transcription_ready = if settings.transcription_provider == "salute_speech" {
+fn transcription_ready_after_stop(settings: &PublicSettings) -> bool {
+    if settings.transcription_provider == "salute_speech" {
         true
     } else {
         !settings.transcription_url.trim().is_empty()
-    };
+    }
+}
+
+fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
     settings.auto_run_pipeline_on_stop
-        && transcription_ready
+        && transcription_ready_after_stop(settings)
         && !settings.summary_url.trim().is_empty()
+}
+
+fn should_auto_transcribe_after_stop(settings: &PublicSettings) -> bool {
+    settings.auto_transcribe_on_stop && transcription_ready_after_stop(settings)
 }
 
 fn should_upload_brain_after_stop(settings: &PublicSettings) -> bool {
@@ -366,6 +373,19 @@ pub(crate) fn stop_active_recording_internal(
                 &session_id,
                 PipelineInvocation::Run,
                 PipelineMode::Full,
+                None,
+            )
+            .await;
+        });
+    } else if should_auto_transcribe_after_stop(&settings) {
+        let dirs_for_pipeline = dirs.clone();
+        let session_id = meta.session_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = run_pipeline_core(
+                dirs_for_pipeline,
+                &session_id,
+                PipelineInvocation::Run,
+                PipelineMode::TranscriptionOnly,
                 None,
             )
             .await;
@@ -711,6 +731,44 @@ mod ipc_runtime_tests {
             ..Default::default()
         };
         assert!(should_auto_run_pipeline_after_stop(&ready));
+    }
+
+    #[test]
+    fn auto_transcribe_after_stop_requires_toggle_and_provider_ready() {
+        let disabled = PublicSettings::default();
+        assert!(!should_auto_transcribe_after_stop(&disabled));
+
+        let no_url = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: String::new(),
+            ..Default::default()
+        };
+        assert!(!should_auto_transcribe_after_stop(&no_url));
+
+        let ready = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: "https://example.com/transcribe".to_string(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&ready));
+
+        // salute_speech не требует transcription_url
+        let salute_ready = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_provider: "salute_speech".to_string(),
+            transcription_url: String::new(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&salute_ready));
+
+        // Не требует summary_url (в отличие от полного pipeline)
+        let no_summary = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: "https://example.com/transcribe".to_string(),
+            summary_url: String::new(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&no_summary));
     }
 
     #[test]

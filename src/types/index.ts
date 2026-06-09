@@ -19,6 +19,7 @@ export type PublicSettings = {
   mic_device_name: string;
   system_device_name: string;
   auto_run_pipeline_on_stop: boolean;
+  auto_transcribe_on_stop: boolean;
   api_call_logging_enabled: boolean;
   auto_delete_audio_enabled: boolean;
   auto_delete_audio_days: number;
