@@ -581,6 +581,35 @@ describe("Tray window", () => {
     });
   });
 
+  it("reflects a mic mute toggled from the minitray via the ui:mute broadcast", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Rec" }));
+    await screen.findByRole("button", { name: "Mute microphone" });
+    expect(screen.getByRole("button", { name: "Mute microphone" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+
+    await waitFor(() => expect(listeners.has("ui:mute")).toBe(true));
+    await act(async () => {
+      const handlers = listeners.get("ui:mute") ?? [];
+      await Promise.all(
+        handlers.map((h) =>
+          h({ payload: JSON.stringify({ mute_state: { micMuted: true, systemMuted: false } }) })
+        )
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Unmute microphone" })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      );
+    });
+  });
+
   it("keeps tray recording controls active when mute rpc fails", async () => {
     const user = userEvent.setup();
 

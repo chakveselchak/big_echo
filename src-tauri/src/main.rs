@@ -30,6 +30,7 @@ use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
+    toggle_active_mic_mute,
 };
 use commands::sessions::{
     auto_delete_old_session_audio, delete_session, delete_session_audio, get_live_input_levels,
@@ -183,6 +184,19 @@ pub(crate) fn broadcast_recording_stopped(app: &AppHandle) {
     for (_label, window) in app.webview_windows() {
         let _ = window.emit("ui:recording", ui_payload.clone());
         let _ = window.emit("recording:status", status_payload.clone());
+    }
+}
+
+/// Broadcast the current mic/system mute state to every webview so the tray UI
+/// reflects a mute toggle initiated from the minitray button. `RecordingMuteState`
+/// serializes camelCase (`micMuted`/`systemMuted`), matching the frontend type.
+pub(crate) fn broadcast_mic_mute(
+    app: &AppHandle,
+    mute_state: &crate::audio::capture::RecordingMuteState,
+) {
+    let payload = serde_json::json!({ "mute_state": mute_state });
+    for (_label, window) in app.webview_windows() {
+        let _ = window.emit("ui:mute", payload.clone());
     }
 }
 
@@ -595,6 +609,17 @@ fn main() {
                     Some(&app_handle),
                 );
                 broadcast_recording_stopped(&app_handle);
+            });
+        // Rust is the single writer for the minitray mic toggle: toggle the
+        // active session's mic, push the new state back to the panel button,
+        // and broadcast `ui:mute` so other webviews mirror it.
+        let app_handle = app.handle().clone();
+        let _minitray_toggle_mic_listener =
+            app.listen("minitray:toggle_mic_request", move |_event: tauri::Event| {
+                let state = app_handle.state::<AppState>();
+                if let Ok(mute_state) = toggle_active_mic_mute(state.inner()) {
+                    broadcast_mic_mute(&app_handle, &mute_state);
+                }
             });
         Ok(())
     });

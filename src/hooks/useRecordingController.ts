@@ -346,6 +346,7 @@ export function useRecordingController({
     let unlistenStop: (() => void) | undefined;
     let unlistenUiSync: (() => void) | undefined;
     let unlistenUiRecording: (() => void) | undefined;
+    let unlistenUiMute: (() => void) | undefined;
 
     if (enableTrayCommandListeners) {
       tauriListen("tray:start", async () => {
@@ -433,11 +434,23 @@ export function useRecordingController({
       unlistenUiRecording = fn;
     });
 
+    // Broadcast from the minitray mic button (Rust is the single writer).
+    // Tray-UI mute toggles update optimistically and don't broadcast, so this
+    // only fires for minitray-initiated changes — no echo loop.
+    tauriListen("ui:mute", (event) => {
+      const payload = parseEventPayload<{ mute_state?: RecordingMuteState }>(event);
+      if (!payload?.mute_state) return;
+      applyMuteState(payload.mute_state);
+    }).then((fn) => {
+      unlistenUiMute = fn;
+    });
+
     return () => {
       if (unlistenStart) unlistenStart();
       if (unlistenStop) unlistenStop();
       if (unlistenUiSync) unlistenUiSync();
       if (unlistenUiRecording) unlistenUiRecording();
+      if (unlistenUiMute) unlistenUiMute();
     };
   }, [enableTrayCommandListeners, loadSessions, setLastSessionId, setSession, setSource, setStatus, setTopic]);
 
