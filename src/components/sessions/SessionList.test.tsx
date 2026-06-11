@@ -130,6 +130,8 @@ function renderList(
     requestDeleteSession: noop,
     requestDeleteAudio: noop,
     onUploadToBrain: noop,
+    onShareAudio: noop,
+    syncedSessionIds: new Set<string>(),
     setStatus: noop,
     ...overrides,
   };
@@ -255,6 +257,8 @@ describe("SessionList lazy loading", () => {
         requestDeleteSession={noop}
         requestDeleteAudio={noop}
         onUploadToBrain={noop}
+        onShareAudio={noop}
+        syncedSessionIds={new Set<string>()}
         setStatus={noop}
       />,
     );

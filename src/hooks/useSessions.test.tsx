@@ -33,6 +33,9 @@ const { captureAnalyticsEventMock, invokeMock } = vi.hoisted(() => ({
     if (cmd === "list_known_tags") {
       return [];
     }
+    if (cmd === "yandex_list_synced_sessions") {
+      return [];
+    }
     return args ?? null;
   }),
 }));
@@ -43,6 +46,13 @@ vi.mock("../lib/tauri", () => ({
 
 vi.mock("../lib/analytics", () => ({
   captureAnalyticsEvent: captureAnalyticsEventMock,
+}));
+
+// useSessions subscribes to the "yandex-sync-finished" Tauri event on mount;
+// stub listen() so it resolves to a no-op unlisten instead of hitting the
+// (absent) Tauri IPC and emitting unhandled errors in jsdom.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async () => () => undefined),
 }));
 
 import { useSessions } from "./useSessions";
