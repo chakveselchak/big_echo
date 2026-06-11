@@ -387,7 +387,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       await tauriInvoke("open_external_url", { url });
       setStatus(`Открыл ссылку: ${url}`);
     } catch (err) {
-      setStatus(getErrorMessage(err));
+      setStatus(`error: ${getErrorMessage(err)}`);
     }
   }
 
@@ -590,14 +590,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
 
   useEffect(() => {
     void refreshSyncedSessions();
-    let unlisten: (() => void) | undefined;
-    void listen("yandex-sync-finished", () => {
+    const unlistenFinished = listen("yandex-sync-finished", () => {
       void refreshSyncedSessions();
-    }).then((fn) => {
-      unlisten = fn;
     });
     return () => {
-      if (unlisten) unlisten();
+      void unlistenFinished.then((fn) => fn());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
