@@ -50,8 +50,8 @@ use commands::task_sync::{
 };
 use commands::updates::{check_for_update, open_external_url};
 use commands::yandex_sync::{
-    yandex_sync_clear_token, yandex_sync_has_token, yandex_sync_now, yandex_sync_set_token,
-    yandex_sync_status,
+    yandex_list_synced_sessions, yandex_share_audio, yandex_sync_clear_token,
+    yandex_sync_has_token, yandex_sync_now, yandex_sync_set_token, yandex_sync_status,
 };
 #[cfg(test)]
 use domain::session::SessionMeta;
@@ -694,6 +694,8 @@ fn main() {
             yandex_sync_has_token,
             yandex_sync_status,
             yandex_sync_now,
+            yandex_share_audio,
+            yandex_list_synced_sessions,
             todoist_sync_set_token,
             todoist_sync_clear_token,
             todoist_sync_has_token,
@@ -972,6 +974,8 @@ mod ipc_runtime_tests {
                 yandex_sync_has_token,
                 yandex_sync_status,
                 yandex_sync_now,
+                yandex_share_audio,
+                yandex_list_synced_sessions,
                 todoist_sync_set_token,
                 todoist_sync_clear_token,
                 todoist_sync_has_token,

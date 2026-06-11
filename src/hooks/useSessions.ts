@@ -10,6 +10,7 @@ import {
 import { captureAnalyticsEvent } from "../lib/analytics";
 import { getErrorMessage, normalizeTags } from "../lib/appUtils";
 import { tauriInvoke } from "../lib/tauri";
+import { listen } from "@tauri-apps/api/event";
 
 type SessionArtifactSearchHit = {
   transcript_match: boolean;
@@ -99,6 +100,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const [audioDeleteTargetSessionId, setAudioDeleteTargetSessionId] = useState<string | null>(null);
   const [audioDeletePendingSessionId, setAudioDeletePendingSessionId] = useState<string | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<SessionArtifactPreview | null>(null);
+  const [syncedSessionIds, setSyncedSessionIds] = useState<Set<string>>(new Set());
   const autosaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
   const artifactSearchRequestIdRef = useRef(0);
@@ -368,6 +370,27 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     await tauriInvoke<string>("open_session_folder", { sessionDir });
   }
 
+  async function refreshSyncedSessions() {
+    try {
+      const ids = await tauriInvoke<string[]>("yandex_list_synced_sessions");
+      setSyncedSessionIds(new Set(ids));
+    } catch {
+      // No token, network error, or auth failure → hide the share button
+      // everywhere by treating nothing as synced. Stays quiet (no status spam).
+      setSyncedSessionIds(new Set());
+    }
+  }
+
+  async function shareSessionAudio(sessionId: string) {
+    try {
+      const url = await tauriInvoke<string>("yandex_share_audio", { sessionId });
+      await tauriInvoke("open_external_url", { url });
+      setStatus(`Открыл ссылку: ${url}`);
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
+    }
+  }
+
   async function openSessionArtifact(sessionId: string, artifactKind: "transcript" | "summary") {
     const query = sessionSearchQuery.trim();
     const artifactHit = sessionArtifactSearchHits[sessionId];
@@ -565,6 +588,17 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     };
   }, []);
 
+  useEffect(() => {
+    void refreshSyncedSessions();
+    const unlistenFinished = listen("yandex-sync-finished", () => {
+      void refreshSyncedSessions();
+    });
+    return () => {
+      void unlistenFinished.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Safety: if the user closes the app / tab with unsaved edits, flush every
   // pending change synchronously. Uses `pagehide` + `visibilitychange` which
   // are more reliable than `beforeunload` inside the Tauri WebView.
@@ -710,7 +744,9 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     setPipelineStateBySession,
     setSessionDetails,
     setSessionSearchQuery,
+    shareSessionAudio,
     summaryPendingBySession,
+    syncedSessionIds,
     textPendingBySession,
   };
 }

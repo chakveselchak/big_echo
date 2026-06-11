@@ -260,7 +260,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::yandex_disk::client::YandexError;
+    use crate::services::yandex_disk::client::{ResourceMeta, YandexError};
     use async_trait::async_trait;
     use std::sync::Mutex;
     use tempfile::tempdir;
@@ -337,6 +337,15 @@ mod tests {
             g.upload_calls += 1;
             let size = std::fs::metadata(local_path).unwrap().len();
             g.files.insert(remote_path.to_string(), size);
+            Ok(())
+        }
+        async fn resource_meta(
+            &self,
+            _remote_path: &str,
+        ) -> Result<Option<ResourceMeta>, YandexError> {
+            Ok(None)
+        }
+        async fn publish(&self, _remote_path: &str) -> Result<(), YandexError> {
             Ok(())
         }
     }
