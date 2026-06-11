@@ -102,7 +102,9 @@ export function MainPage() {
     setDeleteTarget,
     setSessionDetails,
     setSessionSearchQuery,
+    shareSessionAudio,
     summaryPendingBySession,
+    syncedSessionIds,
     textPendingBySession,
   } = useSessions({ setStatus, lastSessionId, setLastSessionId });
 
@@ -324,6 +326,8 @@ export function MainPage() {
           requestDeleteSession={requestDeleteSession}
           requestDeleteAudio={requestDeleteAudio}
           onUploadToBrain={(sessionId) => void uploadSessionToBrain(sessionId)}
+          onShareAudio={(sessionId) => void shareSessionAudio(sessionId)}
+          syncedSessionIds={syncedSessionIds}
           setStatus={setStatus}
         />
       </section>

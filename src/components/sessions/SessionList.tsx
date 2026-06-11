@@ -67,6 +67,8 @@ type SessionListProps = {
   requestDeleteSession: (sessionId: string, isRecording: boolean) => void;
   requestDeleteAudio: (sessionId: string) => void;
   onUploadToBrain: (sessionId: string) => void;
+  onShareAudio: (sessionId: string) => void;
+  syncedSessionIds: Set<string>;
   setStatus: (status: string) => void;
 };
 
@@ -107,6 +109,8 @@ export function SessionList({
   requestDeleteSession,
   requestDeleteAudio,
   onUploadToBrain,
+  onShareAudio,
+  syncedSessionIds,
   setStatus,
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
@@ -468,6 +472,8 @@ export function SessionList({
                   onFieldBlur={flushSessionDetails}
                   onOpenFolder={openSessionFolder}
                   onUploadToBrain={onUploadToBrain}
+                  onShare={onShareAudio}
+                  canShare={syncedSessionIds.has(item.session_id)}
                   onExportTodoist={(sessionId) => void openTodoistExport(sessionId)}
                   todoistPending={todoistPendingSessionId === item.session_id}
                   setStatus={setStatus}
