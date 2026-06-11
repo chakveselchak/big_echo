@@ -24,11 +24,23 @@ pub enum YandexError {
     Io(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceMeta {
+    pub size: u64,
+    pub public_url: Option<String>,
+}
+
 #[async_trait]
 pub trait YandexDiskApi: Send + Sync {
     async fn ensure_dir(&self, remote_path: &str) -> Result<(), YandexError>;
     async fn list_dir(&self, remote_path: &str) -> Result<HashMap<String, u64>, YandexError>;
     async fn upload_file(&self, remote_path: &str, local_path: &Path) -> Result<(), YandexError>;
+    /// `GET /resources?path=...&fields=name,size,public_url`. 200 → `Some`,
+    /// 404 → `None` (not on the Disk), 401/403 → `Unauthorized`.
+    async fn resource_meta(&self, remote_path: &str) -> Result<Option<ResourceMeta>, YandexError>;
+    /// `PUT /resources/publish?path=...`. Idempotent; re-publishing keeps the
+    /// same `public_url`.
+    async fn publish(&self, remote_path: &str) -> Result<(), YandexError>;
 }
 
 pub struct HttpYandexDiskClient {
@@ -113,6 +125,14 @@ struct EmbeddedField {
 struct ListDirResponse {
     #[serde(rename = "_embedded")]
     embedded: EmbeddedField,
+}
+
+#[derive(Deserialize)]
+struct ResourceMetaResponse {
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    public_url: Option<String>,
 }
 
 #[async_trait]
@@ -249,6 +269,62 @@ impl YandexDiskApi for HttpYandexDiskClient {
             401 | 403 => Err(YandexError::Unauthorized),
             status => {
                 let body = put_res.text().await.unwrap_or_default();
+                Err(YandexError::Http { status, body })
+            }
+        }
+    }
+
+    async fn resource_meta(&self, remote_path: &str) -> Result<Option<ResourceMeta>, YandexError> {
+        let url = format!(
+            "{}/resources?path={}&fields={}",
+            self.base_url,
+            urlencoding::encode(remote_path),
+            urlencoding::encode("name,size,public_url")
+        );
+        let res = self
+            .http_meta
+            .get(&url)
+            .header("Authorization", self.auth_header_value())
+            .send()
+            .await
+            .map_err(|e| YandexError::Network(e.to_string()))?;
+        match res.status().as_u16() {
+            200 => {}
+            404 => return Ok(None),
+            401 | 403 => return Err(YandexError::Unauthorized),
+            status => {
+                let body = res.text().await.unwrap_or_default();
+                return Err(YandexError::Http { status, body });
+            }
+        }
+        let parsed: ResourceMetaResponse = res
+            .json()
+            .await
+            .map_err(|e| YandexError::Parse(e.to_string()))?;
+        Ok(Some(ResourceMeta {
+            size: parsed.size.unwrap_or(0),
+            public_url: parsed.public_url,
+        }))
+    }
+
+    async fn publish(&self, remote_path: &str) -> Result<(), YandexError> {
+        let url = format!(
+            "{}/resources/publish?path={}",
+            self.base_url,
+            urlencoding::encode(remote_path)
+        );
+        let res = self
+            .http_meta
+            .put(&url)
+            .header("Authorization", self.auth_header_value())
+            .send()
+            .await
+            .map_err(|e| YandexError::Network(e.to_string()))?;
+        match res.status().as_u16() {
+            200 | 201 => Ok(()),
+            401 | 403 => Err(YandexError::Unauthorized),
+            status => {
+                let body = res.text().await.unwrap_or_default();
                 Err(YandexError::Http { status, body })
             }
         }
@@ -500,5 +576,79 @@ mod tests {
             .await
             .expect_err("must fail");
         assert!(matches!(err, YandexError::Io(_)));
+    }
+
+    #[tokio::test]
+    async fn resource_meta_returns_public_url_on_200() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "name": "audio.opus", "size": 100_000,
+            "public_url": "https://disk.yandex.ru/d/abc123"
+        });
+        Mock::given(method("GET"))
+            .and(path("/resources"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let got = client_for(&server)
+            .resource_meta("disk:/BigEcho/audio.opus")
+            .await
+            .expect("ok");
+        assert_eq!(
+            got,
+            Some(ResourceMeta {
+                size: 100_000,
+                public_url: Some("https://disk.yandex.ru/d/abc123".to_string()),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn resource_meta_returns_none_on_404() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/resources"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let got = client_for(&server)
+            .resource_meta("disk:/BigEcho/missing.opus")
+            .await
+            .expect("ok");
+        assert_eq!(got, None);
+    }
+
+    #[tokio::test]
+    async fn publish_succeeds_on_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/resources/publish"))
+            .and(query_param("path", "disk:/BigEcho/audio.opus"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        client_for(&server)
+            .publish("disk:/BigEcho/audio.opus")
+            .await
+            .expect("publish ok");
+    }
+
+    #[tokio::test]
+    async fn publish_maps_401_to_unauthorized() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/resources/publish"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let err = client_for(&server)
+            .publish("disk:/BigEcho/audio.opus")
+            .await
+            .expect_err("must fail");
+        assert_eq!(err, YandexError::Unauthorized);
     }
 }
