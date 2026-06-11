@@ -30,6 +30,7 @@ use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
+    toggle_active_mic_mute, toggle_active_pause,
 };
 use commands::sessions::{
     auto_delete_old_session_audio, delete_session, delete_session_audio, delete_summary_prompt,
@@ -102,15 +103,22 @@ pub(crate) fn get_settings_from_dirs(dirs: &AppDirs) -> Result<PublicSettings, S
 
 // ── Pipeline helpers ─────────────────────────────────────────────────────────
 
-fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
-    let transcription_ready = if settings.transcription_provider == "salute_speech" {
+fn transcription_ready_after_stop(settings: &PublicSettings) -> bool {
+    if settings.transcription_provider == "salute_speech" {
         true
     } else {
         !settings.transcription_url.trim().is_empty()
-    };
+    }
+}
+
+fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
     settings.auto_run_pipeline_on_stop
-        && transcription_ready
+        && transcription_ready_after_stop(settings)
         && !settings.summary_url.trim().is_empty()
+}
+
+fn should_auto_transcribe_after_stop(settings: &PublicSettings) -> bool {
+    settings.auto_transcribe_on_stop && transcription_ready_after_stop(settings)
 }
 
 fn should_upload_brain_after_stop(settings: &PublicSettings) -> bool {
@@ -177,6 +185,28 @@ pub(crate) fn broadcast_recording_stopped(app: &AppHandle) {
     for (_label, window) in app.webview_windows() {
         let _ = window.emit("ui:recording", ui_payload.clone());
         let _ = window.emit("recording:status", status_payload.clone());
+    }
+}
+
+/// Broadcast the current mic/system mute state to every webview so the tray UI
+/// reflects a mute toggle initiated from the minitray button. `RecordingMuteState`
+/// serializes camelCase (`micMuted`/`systemMuted`), matching the frontend type.
+pub(crate) fn broadcast_mic_mute(
+    app: &AppHandle,
+    mute_state: &crate::audio::capture::RecordingMuteState,
+) {
+    let payload = serde_json::json!({ "mute_state": mute_state });
+    for (_label, window) in app.webview_windows() {
+        let _ = window.emit("ui:mute", payload.clone());
+    }
+}
+
+/// Broadcast the paused state to every webview so the tray timer can freeze
+/// while a pause initiated from the minitray button is in effect.
+pub(crate) fn broadcast_pause(app: &AppHandle, paused: bool) {
+    let payload = serde_json::json!({ "paused": paused });
+    for (_label, window) in app.webview_windows() {
+        let _ = window.emit("ui:pause", payload.clone());
     }
 }
 
@@ -367,6 +397,19 @@ pub(crate) fn stop_active_recording_internal(
                 &session_id,
                 PipelineInvocation::Run,
                 PipelineMode::Full,
+                None,
+            )
+            .await;
+        });
+    } else if should_auto_transcribe_after_stop(&settings) {
+        let dirs_for_pipeline = dirs.clone();
+        let session_id = meta.session_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = run_pipeline_core(
+                dirs_for_pipeline,
+                &session_id,
+                PipelineInvocation::Run,
+                PipelineMode::TranscriptionOnly,
                 None,
             )
             .await;
@@ -577,6 +620,30 @@ fn main() {
                 );
                 broadcast_recording_stopped(&app_handle);
             });
+        // Rust is the single writer for the minitray mic toggle: toggle the
+        // active session's mic, push the new state back to the panel button,
+        // and broadcast `ui:mute` so other webviews mirror it.
+        let app_handle = app.handle().clone();
+        let _minitray_toggle_mic_listener =
+            app.listen("minitray:toggle_mic_request", move |_event: tauri::Event| {
+                let state = app_handle.state::<AppState>();
+                if let Ok(mute_state) = toggle_active_mic_mute(state.inner()) {
+                    broadcast_mic_mute(&app_handle, &mute_state);
+                }
+            });
+        // Rust is the single writer for the minitray pause toggle: toggle pause
+        // on the active recording, push the new state back to the panel button,
+        // and broadcast `ui:pause` so the tray timer freezes/resumes.
+        let app_handle = app.handle().clone();
+        let _minitray_toggle_pause_listener = app.listen(
+            "minitray:toggle_pause_request",
+            move |_event: tauri::Event| {
+                let state = app_handle.state::<AppState>();
+                if let Ok(paused) = toggle_active_pause(state.inner()) {
+                    broadcast_pause(&app_handle, paused);
+                }
+            },
+        );
         Ok(())
     });
 
@@ -715,6 +782,44 @@ mod ipc_runtime_tests {
             ..Default::default()
         };
         assert!(should_auto_run_pipeline_after_stop(&ready));
+    }
+
+    #[test]
+    fn auto_transcribe_after_stop_requires_toggle_and_provider_ready() {
+        let disabled = PublicSettings::default();
+        assert!(!should_auto_transcribe_after_stop(&disabled));
+
+        let no_url = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: String::new(),
+            ..Default::default()
+        };
+        assert!(!should_auto_transcribe_after_stop(&no_url));
+
+        let ready = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: "https://example.com/transcribe".to_string(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&ready));
+
+        // salute_speech не требует transcription_url
+        let salute_ready = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_provider: "salute_speech".to_string(),
+            transcription_url: String::new(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&salute_ready));
+
+        // Не требует summary_url (в отличие от полного pipeline)
+        let no_summary = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: "https://example.com/transcribe".to_string(),
+            summary_url: String::new(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&no_summary));
     }
 
     #[test]

@@ -47,6 +47,7 @@ pub struct SharedLevels {
 pub struct SharedRecordingControl {
     mic_muted: Arc<AtomicBool>,
     system_muted: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
 }
 
 impl Default for SharedLevels {
@@ -102,12 +103,26 @@ impl SharedRecordingControl {
         Self {
             mic_muted: Arc::new(AtomicBool::new(false)),
             system_muted: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn reset(&self) {
         self.mic_muted.store(false, Ordering::Relaxed);
         self.system_muted.store(false, Ordering::Relaxed);
+        self.paused.store(false, Ordering::Relaxed);
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    pub fn pause_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.paused)
     }
 
     pub fn set_channel(&self, channel: &str, muted: bool) -> Result<(), String> {
@@ -268,6 +283,22 @@ impl ContinuousCapture {
         Ok(())
     }
 
+    /// Pause/resume capture on both tracks. Sets the shared pause flag (the
+    /// cpal mic stream reads the same Arc) and pauses the native macOS system
+    /// capture. While paused, both tracks drop incoming buffers, so their files
+    /// stop growing in sync and resume from the same point — the final mix has
+    /// no silent gap.
+    pub fn set_paused(&self, paused: bool) -> Result<(), String> {
+        self.recording_control.set_paused(paused);
+
+        #[cfg(target_os = "macos")]
+        if let Some(native) = &self.native_system_capture {
+            native.set_paused(paused)?;
+        }
+
+        Ok(())
+    }
+
     pub fn refresh_native_system_level(&self, levels: &SharedLevels) {
         #[cfg(target_os = "macos")]
         if let Some(native) = &self.native_system_capture {
@@ -373,6 +404,7 @@ fn capture_until_stopped_device(
         Arc::clone(&mic_sink),
         levels.mic_meter(),
         control.mic_flag(),
+        control.pause_flag(),
     )?;
     mic_stream.play().map_err(|e| e.to_string())?;
 
@@ -390,6 +422,7 @@ fn capture_until_stopped_device(
             Arc::clone(&sink),
             levels.system_meter(),
             control.system_flag(),
+            control.pause_flag(),
         )?;
         stream.play().map_err(|e| e.to_string())?;
         system_path = Some(path);
@@ -454,6 +487,7 @@ fn capture_until_stopped_macos(
         Arc::clone(&mic_sink),
         levels.mic_meter(),
         control.mic_flag(),
+        control.pause_flag(),
     ) {
         Ok(result) => result,
         Err(err) => {
@@ -709,6 +743,7 @@ fn build_capture_stream(
     sink: I16Sink,
     level_output: Arc<AtomicU32>,
     mute_flag: Arc<AtomicBool>,
+    pause_flag: Arc<AtomicBool>,
 ) -> Result<(Stream, u32), String> {
     let default_cfg = device
         .default_input_config()
@@ -727,11 +762,19 @@ fn build_capture_stream(
             let sink = Arc::clone(&sink);
             let level_output = Arc::clone(&level_output);
             let mute_flag = Arc::clone(&mute_flag);
+            let pause_flag = Arc::clone(&pause_flag);
             device
                 .build_input_stream(
                     &cfg,
                     move |data: &[f32], _| {
-                        append_mono_f32_as_i16(data, channels, &sink, &level_output, &mute_flag)
+                        append_mono_f32_as_i16(
+                            data,
+                            channels,
+                            &sink,
+                            &level_output,
+                            &mute_flag,
+                            &pause_flag,
+                        )
                     },
                     err_fn,
                     None,
@@ -742,11 +785,19 @@ fn build_capture_stream(
             let sink = Arc::clone(&sink);
             let level_output = Arc::clone(&level_output);
             let mute_flag = Arc::clone(&mute_flag);
+            let pause_flag = Arc::clone(&pause_flag);
             device
                 .build_input_stream(
                     &cfg,
                     move |data: &[i16], _| {
-                        append_mono_i16(data, channels, &sink, &level_output, &mute_flag)
+                        append_mono_i16(
+                            data,
+                            channels,
+                            &sink,
+                            &level_output,
+                            &mute_flag,
+                            &pause_flag,
+                        )
                     },
                     err_fn,
                     None,
@@ -757,11 +808,19 @@ fn build_capture_stream(
             let sink = Arc::clone(&sink);
             let level_output = Arc::clone(&level_output);
             let mute_flag = Arc::clone(&mute_flag);
+            let pause_flag = Arc::clone(&pause_flag);
             device
                 .build_input_stream(
                     &cfg,
                     move |data: &[u16], _| {
-                        append_mono_u16_as_i16(data, channels, &sink, &level_output, &mute_flag)
+                        append_mono_u16_as_i16(
+                            data,
+                            channels,
+                            &sink,
+                            &level_output,
+                            &mute_flag,
+                            &pause_flag,
+                        )
                     },
                     err_fn,
                     None,
@@ -780,8 +839,15 @@ fn append_mono_f32_as_i16(
     sink: &I16Sink,
     level_output: &Arc<AtomicU32>,
     mute_flag: &Arc<AtomicBool>,
+    pause_flag: &Arc<AtomicBool>,
 ) {
     if channels == 0 {
+        return;
+    }
+    if pause_flag.load(Ordering::Relaxed) {
+        // Paused: drop the buffer entirely so the file does not grow, and flatten
+        // the meter. Resuming appends right after the last written sample.
+        store_level(level_output, 0.0);
         return;
     }
     let mut bytes = Vec::with_capacity((data.len() / channels) * 2);
@@ -817,8 +883,13 @@ fn append_mono_i16(
     sink: &I16Sink,
     level_output: &Arc<AtomicU32>,
     mute_flag: &Arc<AtomicBool>,
+    pause_flag: &Arc<AtomicBool>,
 ) {
     if channels == 0 {
+        return;
+    }
+    if pause_flag.load(Ordering::Relaxed) {
+        store_level(level_output, 0.0);
         return;
     }
     let mut bytes = Vec::with_capacity((data.len() / channels) * 2);
@@ -854,8 +925,13 @@ fn append_mono_u16_as_i16(
     sink: &I16Sink,
     level_output: &Arc<AtomicU32>,
     mute_flag: &Arc<AtomicBool>,
+    pause_flag: &Arc<AtomicBool>,
 ) {
     if channels == 0 {
+        return;
+    }
+    if pause_flag.load(Ordering::Relaxed) {
+        store_level(level_output, 0.0);
         return;
     }
     let mut bytes = Vec::with_capacity((data.len() / channels) * 2);
@@ -1122,6 +1198,54 @@ mod tests {
         );
         control.reset();
         assert_eq!(control.snapshot(), RecordingMuteState::default());
+    }
+
+    #[test]
+    fn shared_recording_control_tracks_and_resets_pause() {
+        let control = SharedRecordingControl::new();
+        assert!(!control.is_paused());
+        control.set_paused(true);
+        assert!(control.is_paused());
+        // pause is independent of mute snapshot
+        assert_eq!(control.snapshot(), RecordingMuteState::default());
+        control.set_paused(false);
+        assert!(!control.is_paused());
+        control.set_paused(true);
+        control.reset();
+        assert!(!control.is_paused());
+    }
+
+    #[test]
+    fn paused_mic_append_writes_nothing_and_zeroes_meter() {
+        use std::io::{BufWriter, Write};
+        let path = std::env::temp_dir().join("bigecho_test_paused_append.raw");
+        let _ = std::fs::remove_file(&path);
+        let sink: I16Sink = Arc::new(Mutex::new(BufWriter::new(
+            File::create(&path).expect("create temp sink"),
+        )));
+        let level = Arc::new(AtomicU32::new(0));
+        let mute = Arc::new(AtomicBool::new(false));
+        let pause = Arc::new(AtomicBool::new(true));
+
+        append_mono_i16(&[1000, 2000, 3000], 1, &sink, &level, &mute, &pause);
+        sink.lock().unwrap().flush().unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            0,
+            "paused append must write nothing"
+        );
+        assert_eq!(load_level(&level), 0.0, "paused meter forced to zero");
+
+        pause.store(false, Ordering::Relaxed);
+        append_mono_i16(&[1000, 2000, 3000], 1, &sink, &level, &mute, &pause);
+        sink.lock().unwrap().flush().unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            6,
+            "3 i16 samples written = 6 bytes once resumed"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(target_os = "macos")]

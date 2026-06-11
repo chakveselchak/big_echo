@@ -138,6 +138,7 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
     private var closedFile = false
     private var latestLevel: Float = 0
     private var isMuted = false
+    private var isPaused = false
     /// Tracks whether any sample buffer was successfully written to disk.
     /// `SCStream.stopCapture` regularly returns benign teardown errors after
     /// the audio file has already been flushed. When that happens we still
@@ -237,6 +238,15 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
         stateLock.unlock()
     }
 
+    func setPaused(_ paused: Bool) {
+        stateLock.lock()
+        isPaused = paused
+        if paused {
+            latestLevel = 0
+        }
+        stateLock.unlock()
+    }
+
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         recordRuntimeError(error)
     }
@@ -255,9 +265,16 @@ private final class SystemAudioCaptureSession: NSObject, SCStreamOutput, SCStrea
                 return
             }
             stateLock.lock()
+            let paused = isPaused
             let muted = isMuted
-            latestLevel = muted ? 0 : level
+            latestLevel = (paused || muted) ? 0 : level
             stateLock.unlock()
+            // Paused: drop the buffer entirely so the file does not grow, keeping
+            // this track aligned with the (also-paused) mic track. Mute, by
+            // contrast, writes silence so the file keeps growing.
+            if paused {
+                return
+            }
             let dataToWrite = muted ? Data(count: pcmData.count) : pcmData
             try fileHandle.write(contentsOf: dataToWrite)
             stateLock.lock()
@@ -660,5 +677,17 @@ public func bigecho_set_system_audio_capture_muted(handle: Int64, muted: Bool) -
         return false
     }
     captureSession.setMuted(muted)
+    return true
+}
+
+@_cdecl("bigecho_set_system_audio_capture_paused")
+public func bigecho_set_system_audio_capture_paused(handle: Int64, paused: Bool) -> Bool {
+    captureRegistryLock.lock()
+    let captureSession = activeCaptures[handle] as? SystemAudioCaptureSession
+    captureRegistryLock.unlock()
+    guard let captureSession else {
+        return false
+    }
+    captureSession.setPaused(paused)
     return true
 }
