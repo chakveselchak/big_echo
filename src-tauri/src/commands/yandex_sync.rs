@@ -104,8 +104,9 @@ pub async fn yandex_share_audio(
 }
 
 /// Effective audio filename for a session: the stored `audio_file`, or a
-/// `audio.{format}` fallback. Empty when neither is usable (mirrors the
-/// frontend `resolveSessionAudioPath`).
+/// `audio.{format}` fallback. Empty when neither is usable (approximates the
+/// frontend `resolveSessionAudioPath`; the FE additionally gates the button on
+/// `hasAudio`, so a session surfaced here without a real file stays hidden).
 fn audio_file_for(item: &SessionListItem) -> String {
     let stored = item.audio_file.trim();
     if !stored.is_empty() {
