@@ -61,6 +61,8 @@ pub struct SessionMeta {
     #[serde(default)]
     pub custom_summary_prompt: String,
     #[serde(default)]
+    pub custom_summary_prompt_name: String,
+    #[serde(default)]
     pub num_speakers: Option<u32>,
     pub status: SessionStatus,
     pub artifacts: SessionArtifacts,
@@ -92,6 +94,7 @@ impl SessionMeta {
             notes,
             topic,
             custom_summary_prompt: String::new(),
+            custom_summary_prompt_name: String::new(),
             num_speakers: None,
             status: SessionStatus::Recording,
             artifacts: SessionArtifacts::default(),
@@ -145,5 +148,36 @@ mod tests {
         let artifacts: SessionArtifacts = serde_json::from_str(raw).expect("legacy artifacts");
 
         assert_eq!(artifacts.tasks_sync_file, "tasks_sync.json");
+    }
+
+    #[test]
+    fn session_meta_defaults_missing_custom_summary_prompt_name_to_empty_string() {
+        let raw = r#"{
+        "session_id": "legacy",
+        "created_at_iso": "2026-06-07T10:00:00+03:00",
+        "started_at_iso": "2026-06-07T10:00:00+03:00",
+        "ended_at_iso": null,
+        "display_date_ru": "07.06.2026",
+        "source": "zoom",
+        "primary_tag": "zoom",
+        "tags": [],
+        "notes": "",
+        "topic": "Legacy",
+        "custom_summary_prompt": "Legacy prompt",
+        "num_speakers": null,
+        "status": "recorded",
+        "artifacts": {
+            "audio_file": "audio.opus",
+            "transcript_file": "transcript.md",
+            "summary_file": "summary.md",
+            "meta_file": "meta.json"
+        },
+        "errors": []
+    }"#;
+
+        let meta: SessionMeta = serde_json::from_str(raw).expect("legacy meta");
+
+        assert_eq!(meta.custom_summary_prompt, "Legacy prompt");
+        assert_eq!(meta.custom_summary_prompt_name, "");
     }
 }

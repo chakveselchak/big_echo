@@ -54,6 +54,13 @@ export type BrainUploadResponse = {
   error?: string | null;
 };
 
+export type SummaryPromptView = {
+  name: string;
+  prompt: string;
+  created_at_iso: string;
+  updated_at_iso: string;
+};
+
 export type RecordingInputChannel = "mic" | "system";
 export type RecordingMuteState = {
   micMuted: boolean;
@@ -85,6 +92,7 @@ export type SessionMetaView = {
   source: string;
   notes: string;
   custom_summary_prompt?: string;
+  custom_summary_prompt_name?: string;
   topic: string;
   tags: string[];
   num_speakers?: number | null;

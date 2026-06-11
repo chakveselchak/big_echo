@@ -26,15 +26,17 @@ function makeItem(
   };
 }
 
-function makeDetail(): SessionMetaView {
+function makeDetail(overrides: Partial<SessionMetaView> = {}): SessionMetaView {
   return {
     session_id: "s-brain",
     source: "slack",
     notes: "",
     custom_summary_prompt: "",
+    custom_summary_prompt_name: "",
     topic: "Brain sync",
     tags: [],
     num_speakers: null,
+    ...overrides,
   };
 }
 
@@ -49,7 +51,7 @@ function renderCard(
   const result = render(
     <SessionCard
       item={item}
-      detail={makeDetail()}
+      detail={makeDetail(detailOverrides)}
       textPending={false}
       summaryPending={false}
       pipelineState={undefined as PipelineUiState | undefined}
@@ -200,6 +202,14 @@ describe("SessionCard Brain upload status", () => {
   it("hides upload button for sessions without audio", () => {
     renderCard(makeItem("not_uploaded", { audio_file: "", audio_format: "unknown" }));
     expect(screen.queryByRole("button", { name: "Загрузить в Brain" })).not.toBeInTheDocument();
+  });
+
+  it("marks the summary prompt button when a session uses a named prompt", () => {
+    const { container } = renderCard(makeItem("uploaded"), vi.fn(), true, {
+      custom_summary_prompt_name: "Actions",
+    });
+
+    expect(container.querySelector(".summary-prompt-dot")).toBeInTheDocument();
   });
 });
 

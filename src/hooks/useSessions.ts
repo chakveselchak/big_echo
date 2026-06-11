@@ -49,6 +49,7 @@ function sameSessionMeta(left: SessionMetaView, right: SessionMetaView) {
     left.source === right.source &&
     left.notes === right.notes &&
     (left.custom_summary_prompt ?? "") === (right.custom_summary_prompt ?? "") &&
+    (left.custom_summary_prompt_name ?? "") === (right.custom_summary_prompt_name ?? "") &&
     left.topic === right.topic &&
     sameTags(left.tags, right.tags) &&
     normalizeNumSpeakers(left.num_speakers) === normalizeNumSpeakers(right.num_speakers)
@@ -56,7 +57,7 @@ function sameSessionMeta(left: SessionMetaView, right: SessionMetaView) {
 }
 
 function sessionMetaSignature(meta: SessionMetaView) {
-  return `${meta.session_id}\n${meta.source}\n${meta.notes}\n${meta.custom_summary_prompt ?? ""}\n${meta.topic}\n${meta.tags.join("\u001f")}\n${normalizeNumSpeakers(meta.num_speakers) ?? ""}`;
+  return `${meta.session_id}\n${meta.source}\n${meta.notes}\n${meta.custom_summary_prompt ?? ""}\n${meta.custom_summary_prompt_name ?? ""}\n${meta.topic}\n${meta.tags.join("\u001f")}\n${normalizeNumSpeakers(meta.num_speakers) ?? ""}`;
 }
 
 function normalizeSessionMeta(meta: SessionMetaView): SessionMetaView {
@@ -64,6 +65,7 @@ function normalizeSessionMeta(meta: SessionMetaView): SessionMetaView {
     ...meta,
     notes: meta.notes ?? "",
     custom_summary_prompt: meta.custom_summary_prompt ?? "",
+    custom_summary_prompt_name: meta.custom_summary_prompt_name ?? "",
     tags: meta.tags ?? [],
     num_speakers: normalizeNumSpeakers(meta.num_speakers),
   };
@@ -75,6 +77,7 @@ function fallbackSessionMeta(item: SessionListItem): SessionMetaView {
     source: item.primary_tag,
     notes: "",
     custom_summary_prompt: "",
+    custom_summary_prompt_name: "",
     topic: item.topic,
     tags: [],
     num_speakers: null,
@@ -262,7 +265,9 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       return next;
     });
     try {
-      const customPrompt = sessionDetails[sessionId]?.custom_summary_prompt?.trim() ?? "";
+      const detail = sessionDetails[sessionId];
+      const hasNamedPrompt = Boolean(detail?.custom_summary_prompt_name?.trim());
+      const customPrompt = hasNamedPrompt ? "" : detail?.custom_summary_prompt?.trim() ?? "";
       await tauriInvoke<string>(
         "run_summary",
         customPrompt ? { sessionId, customPrompt } : { sessionId }
@@ -292,6 +297,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         source: detail.source,
         notes: detail.notes,
         custom_summary_prompt: detail.custom_summary_prompt ?? "",
+        custom_summary_prompt_name: detail.custom_summary_prompt_name ?? "",
         topic: detail.topic,
         tags: detail.tags,
         num_speakers: normalizeNumSpeakers(detail.num_speakers),
@@ -303,6 +309,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
 
   async function saveSessionDetails(sessionId: string, detail: SessionMetaView) {
     const normalized = normalizeSessionMeta(detail);
+    const previous = sessionDetails[sessionId];
     const existing = autosaveTimersRef.current[sessionId];
     if (existing) {
       clearTimeout(existing);
@@ -316,6 +323,22 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       return true;
     } catch (err) {
       setStatus(`error: ${String(err)}`);
+      setSessionDetails((prev) => {
+        const current = prev[sessionId];
+        if (!current || !sameSessionMeta(current, normalized)) return prev;
+        const pending = autosaveTimersRef.current[sessionId];
+        if (pending) {
+          clearTimeout(pending);
+          delete autosaveTimersRef.current[sessionId];
+        }
+        delete pendingAutosaveSignatureRef.current[sessionId];
+        if (!previous) {
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        }
+        return { ...prev, [sessionId]: previous };
+      });
       return false;
     }
   }
@@ -618,6 +641,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
             source: current.source,
             notes: current.notes,
             custom_summary_prompt: current.custom_summary_prompt ?? "",
+            custom_summary_prompt_name: current.custom_summary_prompt_name ?? "",
             topic: current.topic,
             tags: current.tags,
             num_speakers: normalizeNumSpeakers(current.num_speakers),

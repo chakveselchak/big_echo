@@ -6,13 +6,16 @@ use crate::domain::session::{format_ru_date, SessionArtifacts, SessionMeta, Sess
 use crate::storage::fs_layout::{build_session_relative_dir, summary_name, transcript_name};
 use crate::storage::session_store::{load_meta, save_meta};
 use crate::storage::sqlite_repo::{
-    add_event, delete_session as repo_delete_session, get_meta_path, get_session_dir,
-    list_sessions as repo_list_sessions, upsert_session, SessionListItem,
+    add_event, delete_session as repo_delete_session,
+    delete_summary_prompt as repo_delete_summary_prompt, get_meta_path, get_session_dir,
+    list_sessions as repo_list_sessions, list_summary_prompts as repo_list_summary_prompts,
+    upsert_session, upsert_summary_prompt as repo_upsert_summary_prompt, SessionListItem,
+    SummaryPromptView,
 };
 use crate::tray_manager::set_tray_indicator_from_state;
 use crate::{get_settings_from_dirs, root_recordings_dir};
 use chrono::{DateTime, Duration, Local, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -708,10 +711,36 @@ pub fn get_session_meta(
         source: meta.source,
         notes: meta.notes,
         custom_summary_prompt: meta.custom_summary_prompt,
+        custom_summary_prompt_name: meta.custom_summary_prompt_name,
         topic: meta.topic,
         tags: meta.tags,
         num_speakers: meta.num_speakers,
     })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpsertSummaryPromptRequest {
+    pub name: String,
+    pub prompt: String,
+}
+
+#[tauri::command]
+pub fn list_summary_prompts(dirs: tauri::State<AppDirs>) -> Result<Vec<SummaryPromptView>, String> {
+    repo_list_summary_prompts(&dirs.app_data_dir)
+}
+
+#[tauri::command]
+pub fn upsert_summary_prompt(
+    dirs: tauri::State<AppDirs>,
+    payload: UpsertSummaryPromptRequest,
+) -> Result<SummaryPromptView, String> {
+    repo_upsert_summary_prompt(&dirs.app_data_dir, &payload.name, &payload.prompt)
+}
+
+#[tauri::command]
+pub fn delete_summary_prompt(dirs: tauri::State<AppDirs>, name: String) -> Result<String, String> {
+    repo_delete_summary_prompt(&dirs.app_data_dir, &name)?;
+    Ok("deleted".to_string())
 }
 
 #[tauri::command]
@@ -744,7 +773,23 @@ fn update_session_details_impl(
     meta.primary_tag = source;
     meta.notes = payload.notes.trim().to_string();
     meta.tags = tags;
-    meta.custom_summary_prompt = payload.custom_summary_prompt.trim().to_string();
+    if let Some(prompt_name) = payload.custom_summary_prompt_name.as_deref() {
+        let prompt_name = prompt_name.trim().to_string();
+        meta.custom_summary_prompt_name = prompt_name.clone();
+        meta.custom_summary_prompt = if prompt_name.is_empty() {
+            payload
+                .custom_summary_prompt
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        } else {
+            String::new()
+        };
+    } else if let Some(prompt) = payload.custom_summary_prompt.as_deref() {
+        meta.custom_summary_prompt_name = String::new();
+        meta.custom_summary_prompt = prompt.trim().to_string();
+    }
     meta.topic = payload.topic.trim().to_string();
     meta.num_speakers = payload.num_speakers.filter(|n| *n > 0);
 
@@ -1145,7 +1190,8 @@ mod tests {
                 session_id: "s-retag".to_string(),
                 source: "zoom".to_string(),
                 notes: String::new(),
-                custom_summary_prompt: String::new(),
+                custom_summary_prompt: Some(String::new()),
+                custom_summary_prompt_name: Some(String::new()),
                 topic: "Topic".to_string(),
                 tags: vec!["new".to_string()],
                 num_speakers: None,
@@ -1187,7 +1233,8 @@ mod tests {
                 session_id: "s-active".to_string(),
                 source: "slack".to_string(),
                 notes: "Fresh notes".to_string(),
-                custom_summary_prompt: String::new(),
+                custom_summary_prompt: Some(String::new()),
+                custom_summary_prompt_name: Some(String::new()),
                 topic: "Fresh topic".to_string(),
                 tags: vec!["new".to_string()],
                 num_speakers: None,

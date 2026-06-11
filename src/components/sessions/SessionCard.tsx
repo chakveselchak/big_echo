@@ -84,7 +84,9 @@ function SessionCardImpl({
   // Orange "dirty" dot on the summary-prompt button when this session overrides
   // the default summary prompt with a non-empty custom one — mirrors the dirty
   // indicator shown in Settings.
-  const hasCustomSummaryPrompt = Boolean(draftDetail.custom_summary_prompt?.trim());
+  const hasCustomSummaryPrompt = Boolean(
+    draftDetail.custom_summary_prompt_name?.trim() || draftDetail.custom_summary_prompt?.trim()
+  );
 
   // When the parent's committed detail changes (reload from disk, external
   // update, etc.) and it no longer matches what we have locally, refresh the
@@ -97,6 +99,7 @@ function SessionCardImpl({
       detail.notes === local.notes &&
       detail.topic === local.topic &&
       (detail.custom_summary_prompt ?? "") === (local.custom_summary_prompt ?? "") &&
+      (detail.custom_summary_prompt_name ?? "") === (local.custom_summary_prompt_name ?? "") &&
       (detail.num_speakers ?? null) === (local.num_speakers ?? null) &&
       detail.tags.length === local.tags.length &&
       detail.tags.every((t, i) => t === local.tags[i])
@@ -116,6 +119,7 @@ function SessionCardImpl({
       detail.notes === current.notes &&
       detail.topic === current.topic &&
       (detail.custom_summary_prompt ?? "") === (current.custom_summary_prompt ?? "") &&
+      (detail.custom_summary_prompt_name ?? "") === (current.custom_summary_prompt_name ?? "") &&
       (detail.num_speakers ?? null) === (current.num_speakers ?? null) &&
       detail.tags.length === current.tags.length &&
       detail.tags.every((t, i) => t === current.tags[i])
@@ -475,6 +479,7 @@ function SessionCardImpl({
               />
               {hasCustomSummaryPrompt && (
                 <span
+                  className="summary-prompt-dot"
                   role="img"
                   aria-label="Промпт отличается от базового"
                   title="Промпт отличается от базового"
