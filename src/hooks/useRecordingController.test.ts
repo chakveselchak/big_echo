@@ -1197,6 +1197,19 @@ describe("useRecordingController", () => {
   });
 
   it("clears the tray topic after a successful tray stop", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return {
+          source: "slack",
+          topic: "Daily sync",
+          is_recording: true,
+          active_session_id: "active-session",
+          mute_state: { micMuted: false, systemMuted: false },
+        };
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
     const { result } = renderControllerHarness({
       isTrayWindow: true,
       initialTopic: "Daily sync",
@@ -1215,6 +1228,41 @@ describe("useRecordingController", () => {
     await waitFor(() => {
       expect(result.current.topic).toBe("");
     });
+  });
+
+  it("clears the tray topic after a minitray stop broadcast", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_ui_sync_state") {
+        return {
+          source: "slack",
+          topic: "Daily sync",
+          is_recording: true,
+          active_session_id: "active-session",
+          mute_state: { micMuted: false, systemMuted: false },
+        };
+      }
+      return getDefaultInvokeResponse(cmd);
+    });
+
+    const { result } = renderControllerHarness({
+      isTrayWindow: true,
+      initialTopic: "Daily sync",
+      initialSession: { session_id: "active-session", session_dir: "/tmp/active", status: "recording" },
+      initialStatus: "recording",
+    });
+
+    await waitFor(() => {
+      expect(result.current.topic).toBe("Daily sync");
+    });
+
+    const uiRecordingHandler = listeners.get("ui:recording");
+    expect(uiRecordingHandler).toBeDefined();
+
+    await act(async () => {
+      await uiRecordingHandler?.({ payload: { recording: false, sessionId: null } });
+    });
+
+    expect(result.current.topic).toBe("");
   });
 
   it("keeps tray topic intact if stop_recording rejects", async () => {

@@ -10,6 +10,19 @@ import { AudioPlayer } from "./AudioPlayer";
 
 const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
 
+function sameDraftDetail(left: SessionMetaView, right: SessionMetaView) {
+  return (
+    left.source === right.source &&
+    left.notes === right.notes &&
+    left.topic === right.topic &&
+    (left.custom_summary_prompt ?? "") === (right.custom_summary_prompt ?? "") &&
+    (left.custom_summary_prompt_name ?? "") === (right.custom_summary_prompt_name ?? "") &&
+    (left.num_speakers ?? null) === (right.num_speakers ?? null) &&
+    left.tags.length === right.tags.length &&
+    left.tags.every((t, i) => t === right.tags[i])
+  );
+}
+
 type SessionCardProps = {
   item: SessionListItem;
   detail: SessionMetaView;
@@ -79,6 +92,7 @@ function SessionCardImpl({
   // for every session. The parent is synced on blur via commitDraft().
   const [draftDetail, setDraftDetail] = useState<SessionMetaView>(detail);
   const draftRef = useRef(draftDetail);
+  const acceptedDetailRef = useRef(detail);
   draftRef.current = draftDetail;
 
   // Orange "dirty" dot on the summary-prompt button when this session overrides
@@ -89,21 +103,17 @@ function SessionCardImpl({
   );
 
   // When the parent's committed detail changes (reload from disk, external
-  // update, etc.) and it no longer matches what we have locally, refresh the
-  // draft. We check via fields to avoid refs that changed without value-level
+  // update, etc.), refresh the draft only if the user has no unsaved local
+  // edits. We check via fields to avoid refs that changed without value-level
   // diffs (e.g. new object from Object.fromEntries in useSessions).
   useEffect(() => {
     const local = draftRef.current;
-    if (
-      detail.source === local.source &&
-      detail.notes === local.notes &&
-      detail.topic === local.topic &&
-      (detail.custom_summary_prompt ?? "") === (local.custom_summary_prompt ?? "") &&
-      (detail.custom_summary_prompt_name ?? "") === (local.custom_summary_prompt_name ?? "") &&
-      (detail.num_speakers ?? null) === (local.num_speakers ?? null) &&
-      detail.tags.length === local.tags.length &&
-      detail.tags.every((t, i) => t === local.tags[i])
-    ) {
+    const previouslyAccepted = acceptedDetailRef.current;
+    acceptedDetailRef.current = detail;
+    if (sameDraftDetail(detail, local)) {
+      return;
+    }
+    if (!sameDraftDetail(local, previouslyAccepted)) {
       return;
     }
     setDraftDetail(detail);
@@ -114,16 +124,7 @@ function SessionCardImpl({
     // Only push to parent if something actually changed vs the committed
     // detail — avoids spurious setState in the parent tree on simple focus
     // changes with no edits.
-    if (
-      detail.source === current.source &&
-      detail.notes === current.notes &&
-      detail.topic === current.topic &&
-      (detail.custom_summary_prompt ?? "") === (current.custom_summary_prompt ?? "") &&
-      (detail.custom_summary_prompt_name ?? "") === (current.custom_summary_prompt_name ?? "") &&
-      (detail.num_speakers ?? null) === (current.num_speakers ?? null) &&
-      detail.tags.length === current.tags.length &&
-      detail.tags.every((t, i) => t === current.tags[i])
-    ) {
+    if (sameDraftDetail(detail, current)) {
       return;
     }
     onDetailChange(current);

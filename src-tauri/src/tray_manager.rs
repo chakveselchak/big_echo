@@ -303,12 +303,12 @@ pub(crate) fn build_macos_app_menu(
 
 // ── Policy predicates (pure, easily unit-testable) ───────────────────────────
 
-pub(crate) fn should_show_context_menu_on_left_click(platform: &str) -> bool {
-    platform == "windows"
+pub(crate) fn should_show_context_menu_on_left_click(_platform: &str) -> bool {
+    false
 }
 
 pub(crate) fn should_toggle_tray_popover_on_left_click(platform: &str) -> bool {
-    platform == "macos"
+    matches!(platform, "macos" | "windows")
 }
 
 pub(crate) fn should_hide_tray_popover_on_focus_lost(focused: bool) -> bool {
@@ -410,10 +410,10 @@ mod tests {
 
     #[test]
     fn tray_left_click_policy_is_platform_specific() {
-        assert!(should_show_context_menu_on_left_click("windows"));
+        assert!(!should_show_context_menu_on_left_click("windows"));
         assert!(!should_show_context_menu_on_left_click("macos"));
         assert!(should_toggle_tray_popover_on_left_click("macos"));
-        assert!(!should_toggle_tray_popover_on_left_click("windows"));
+        assert!(should_toggle_tray_popover_on_left_click("windows"));
         assert!(!should_toggle_tray_popover_on_left_click("linux"));
     }
 

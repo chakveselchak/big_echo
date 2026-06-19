@@ -116,6 +116,7 @@ pub fn hide() {
     call_hide_sink();
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn is_visible() -> bool {
     VISIBLE.load(Ordering::SeqCst)
 }

@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { SessionCard } from "./SessionCard";
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
@@ -40,48 +41,100 @@ function makeDetail(overrides: Partial<SessionMetaView> = {}): SessionMetaView {
   };
 }
 
+type SessionCardProps = ComponentProps<typeof SessionCard>;
+
+function makeProps(overrides: Partial<SessionCardProps> = {}): SessionCardProps {
+  const noop = () => undefined;
+  return {
+    item: makeItem("uploaded"),
+    detail: makeDetail(),
+    textPending: false,
+    summaryPending: false,
+    pipelineState: undefined as PipelineUiState | undefined,
+    searchQuery: "",
+    knownTagOptions: [],
+    transcriptMatch: false,
+    summaryMatch: false,
+    showNumSpeakers: false,
+    brainUploadPending: false,
+    brainSyncReady: true,
+    onContextMenu: noop,
+    onDetailChange: noop,
+    onOpenArtifact: noop,
+    onGetText: noop,
+    onGetSummary: noop,
+    onOpenSummaryPrompt: noop,
+    onDelete: noop,
+    onDeleteAudio: noop,
+    onFieldBlur: noop,
+    onOpenFolder: noop,
+    onUploadToBrain: noop,
+    onShare: noop,
+    canShare: false,
+    onExportTodoist: noop,
+    todoistPending: false,
+    setStatus: noop,
+    ...overrides,
+  };
+}
+
 function renderCard(
   item: SessionListItem,
   onUploadToBrain = vi.fn(),
   brainSyncReady = true,
-  canShare = false,
+  canShareOrDetailOverrides: boolean | Partial<SessionMetaView> = false,
   onShare = vi.fn(),
 ) {
-  const noop = () => undefined;
+  const canShare =
+    typeof canShareOrDetailOverrides === "boolean" ? canShareOrDetailOverrides : false;
+  const detailOverrides =
+    typeof canShareOrDetailOverrides === "boolean" ? {} : canShareOrDetailOverrides;
   const result = render(
     <SessionCard
-      item={item}
-      detail={makeDetail(detailOverrides)}
-      textPending={false}
-      summaryPending={false}
-      pipelineState={undefined as PipelineUiState | undefined}
-      searchQuery=""
-      knownTagOptions={[]}
-      transcriptMatch={false}
-      summaryMatch={false}
-      showNumSpeakers={false}
-      brainUploadPending={false}
-      brainSyncReady={brainSyncReady}
-      onContextMenu={noop}
-      onDetailChange={noop}
-      onOpenArtifact={noop}
-      onGetText={noop}
-      onGetSummary={noop}
-      onOpenSummaryPrompt={noop}
-      onDelete={noop}
-      onDeleteAudio={noop}
-      onFieldBlur={noop}
-      onOpenFolder={noop}
-      onUploadToBrain={onUploadToBrain}
-      onShare={onShare}
-      canShare={canShare}
-      setStatus={noop}
+      {...makeProps({
+        item,
+        detail: makeDetail(detailOverrides),
+        brainSyncReady,
+        onUploadToBrain,
+        onShare,
+        canShare,
+      })}
     />,
   );
   return { ...result, onUploadToBrain, onShare };
 }
 
 describe("SessionCard Brain upload status", () => {
+  it("keeps unsaved Topic, Tags and Notes edits when a pipeline refresh updates the session", async () => {
+    const user = userEvent.setup();
+    const initialProps = makeProps({
+      item: makeItem("uploaded", { has_summary_text: false }),
+      detail: makeDetail({ notes: "Initial note", topic: "Initial topic" }),
+    });
+    const { rerender } = render(<SessionCard {...initialProps} />);
+
+    await user.clear(screen.getByLabelText("Topic"));
+    await user.type(screen.getByLabelText("Topic"), "Edited topic");
+    const tagsInput = screen.getAllByLabelText("Tags").find((element) => element.tagName === "INPUT");
+    expect(tagsInput).toBeDefined();
+    await user.click(tagsInput!);
+    await user.type(tagsInput!, "project/acme{Enter}");
+    await user.clear(screen.getByLabelText("Notes"));
+    await user.type(screen.getByLabelText("Notes"), "Edited note");
+
+    rerender(
+      <SessionCard
+        {...initialProps}
+        item={makeItem("uploaded", { has_summary_text: true })}
+        detail={makeDetail({ notes: "Initial note", topic: "Initial topic" })}
+      />,
+    );
+
+    expect(screen.getByLabelText("Topic")).toHaveValue("Edited topic");
+    expect(screen.getAllByText("project/acme").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Notes")).toHaveValue("Edited note");
+  });
+
   it.each([
     ["uploaded", "Brain: загружено"],
     ["uploading", "Brain: загрузка"],

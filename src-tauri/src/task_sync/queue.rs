@@ -242,6 +242,7 @@ pub fn enqueue_tasks(
     tx.commit().map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
 pub fn next_pending_batch(
     app_data_dir: &Path,
     session_id: Option<&str>,
@@ -373,6 +374,7 @@ pub fn claim_pending_batch(
     Ok(claimed)
 }
 
+#[cfg(test)]
 pub fn mark_synced(app_data_dir: &Path, id: &str, external_task_id: &str) -> Result<(), String> {
     let conn = open(app_data_dir)?;
     conn.execute(
@@ -423,6 +425,7 @@ pub fn mark_synced_claimed(
     Ok(updated == 1)
 }
 
+#[cfg(test)]
 pub fn mark_failed(
     app_data_dir: &Path,
     id: &str,
@@ -432,6 +435,7 @@ pub fn mark_failed(
     mark_failed_inner(app_data_dir, id, error, None, retryable)
 }
 
+#[cfg(test)]
 pub fn mark_failed_with_kind(
     app_data_dir: &Path,
     id: &str,
@@ -442,6 +446,7 @@ pub fn mark_failed_with_kind(
     mark_failed_inner(app_data_dir, id, error, Some(kind), retryable)
 }
 
+#[cfg(test)]
 fn mark_failed_inner(
     app_data_dir: &Path,
     id: &str,
@@ -662,6 +667,7 @@ pub fn fail_stale_syncing(
     Ok((updated, session_ids))
 }
 
+#[cfg(test)]
 pub fn requeue_failed(app_data_dir: &Path, session_id: &str, provider: &str) -> Result<(), String> {
     let conn = open(app_data_dir)?;
     conn.execute(
