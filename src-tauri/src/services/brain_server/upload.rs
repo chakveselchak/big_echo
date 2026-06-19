@@ -94,7 +94,8 @@ fn upload_metadata(
     }
 }
 
-pub(crate) fn sanitize_error(raw: String, token: &str) -> String {
+#[cfg(test)]
+fn sanitize_error(raw: String, token: &str) -> String {
     let exact = if token.is_empty() {
         raw
     } else {
@@ -202,6 +203,7 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn upload_session_after_record_even_when_disabled<C: UploadAudioClient + Sync>(
     app_data_dir: PathBuf,
     session_dir: PathBuf,
@@ -222,6 +224,7 @@ pub(crate) async fn upload_session_after_record_even_when_disabled<C: UploadAudi
     .await
 }
 
+#[allow(dead_code)]
 pub async fn upload_session_after_record(
     app_data_dir: PathBuf,
     session_dir: PathBuf,

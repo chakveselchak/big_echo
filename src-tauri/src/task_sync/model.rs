@@ -25,19 +25,6 @@ pub enum TaskSyncStatus {
     Skipped,
 }
 
-impl TaskSyncStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            TaskSyncStatus::New => "new",
-            TaskSyncStatus::Queued => "queued",
-            TaskSyncStatus::Syncing => "syncing",
-            TaskSyncStatus::Synced => "synced",
-            TaskSyncStatus::Failed => "failed",
-            TaskSyncStatus::Skipped => "skipped",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedActionItem {
@@ -89,7 +76,6 @@ pub struct TodoistTaskPreview {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskSyncErrorKind {
-    MissingToken,
     InvalidToken,
     RateLimit,
     Server,
@@ -100,7 +86,6 @@ pub enum TaskSyncErrorKind {
 impl TaskSyncErrorKind {
     pub fn as_str(&self) -> &'static str {
         match self {
-            TaskSyncErrorKind::MissingToken => "missing_token",
             TaskSyncErrorKind::InvalidToken => "invalid_token",
             TaskSyncErrorKind::RateLimit => "rate_limit",
             TaskSyncErrorKind::Server => "server",

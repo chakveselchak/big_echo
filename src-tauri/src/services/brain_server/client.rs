@@ -120,6 +120,7 @@ impl BrainServerClient {
         Self {
             http: reqwest::Client::builder()
                 .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+                .timeout(DEFAULT_REQUEST_TIMEOUT)
                 .build()
                 .expect("Brain upload HTTP client should build"),
         }

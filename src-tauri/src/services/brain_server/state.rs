@@ -29,7 +29,7 @@ fn lock_runtime_state(
 
 pub struct BrainArchiveGuard {
     runtime: SharedBrainUploadState,
-    cross_process: BrainUploadLeaseGuard,
+    _cross_process: BrainUploadLeaseGuard,
     active: bool,
 }
 
@@ -46,7 +46,7 @@ impl Drop for BrainArchiveGuard {
 
 pub struct BrainSessionUploadGuard {
     runtime: SharedBrainUploadState,
-    cross_process: BrainUploadLeaseGuard,
+    _cross_process: BrainUploadLeaseGuard,
     session_id: String,
     active: bool,
 }
@@ -78,7 +78,7 @@ pub fn try_begin_archive_upload(
     guard.archive_running = true;
     Ok(BrainArchiveGuard {
         runtime: state.clone(),
-        cross_process,
+        _cross_process: cross_process,
         active: true,
     })
 }
@@ -102,7 +102,7 @@ pub fn try_begin_session_upload(
     guard.session_uploads.insert(session_id.to_string());
     Ok(BrainSessionUploadGuard {
         runtime: state.clone(),
-        cross_process,
+        _cross_process: cross_process,
         session_id: session_id.to_string(),
         active: true,
     })

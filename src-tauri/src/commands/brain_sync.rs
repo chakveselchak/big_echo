@@ -1,6 +1,6 @@
 use crate::app_state::{AppDirs, AppState};
 use crate::domain::session::SessionMeta;
-use crate::services::brain_server::client::{BrainServerClient, BrainUploadResponse};
+use crate::services::brain_server::client::BrainUploadResponse;
 use crate::services::brain_server::error::BrainUploadPublicError;
 use crate::services::brain_server::state::{
     is_already_running_error, try_begin_archive_upload, try_begin_session_upload,
@@ -327,6 +327,7 @@ pub async fn brain_sync_upload_session(
     .await
 }
 
+#[cfg(test)]
 pub(crate) async fn upload_archive_with_client<C, E>(
     app_data_dir: PathBuf,
     settings: PublicSettings,

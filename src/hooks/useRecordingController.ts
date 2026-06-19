@@ -439,6 +439,9 @@ export function useRecordingController({
       } else {
         resetMuteState();
         setSession(null);
+        if (isTrayWindow) {
+          setTopic("");
+        }
         setStatus((prev) => (prev === "recording" ? "recorded" : prev));
       }
     }).then((fn) => {
@@ -474,7 +477,7 @@ export function useRecordingController({
       if (unlistenUiMute) unlistenUiMute();
       if (unlistenUiPause) unlistenUiPause();
     };
-  }, [enableTrayCommandListeners, loadSessions, setLastSessionId, setSession, setSource, setStatus, setTopic]);
+  }, [enableTrayCommandListeners, isTrayWindow, loadSessions, setLastSessionId, setSession, setSource, setStatus, setTopic]);
 
   useEffect(() => {
     // Wait for hydration from get_ui_sync_state. Otherwise a freshly mounted
