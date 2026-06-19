@@ -26,24 +26,32 @@ function makeItem(
   };
 }
 
-function makeDetail(): SessionMetaView {
+function makeDetail(overrides: Partial<SessionMetaView> = {}): SessionMetaView {
   return {
     session_id: "s-brain",
     source: "slack",
     notes: "",
     custom_summary_prompt: "",
+    custom_summary_prompt_name: "",
     topic: "Brain sync",
     tags: [],
     num_speakers: null,
+    ...overrides,
   };
 }
 
-function renderCard(item: SessionListItem, onUploadToBrain = vi.fn(), brainSyncReady = true) {
+function renderCard(
+  item: SessionListItem,
+  onUploadToBrain = vi.fn(),
+  brainSyncReady = true,
+  canShare = false,
+  onShare = vi.fn(),
+) {
   const noop = () => undefined;
   const result = render(
     <SessionCard
       item={item}
-      detail={makeDetail()}
+      detail={makeDetail(detailOverrides)}
       textPending={false}
       summaryPending={false}
       pipelineState={undefined as PipelineUiState | undefined}
@@ -65,10 +73,12 @@ function renderCard(item: SessionListItem, onUploadToBrain = vi.fn(), brainSyncR
       onFieldBlur={noop}
       onOpenFolder={noop}
       onUploadToBrain={onUploadToBrain}
+      onShare={onShare}
+      canShare={canShare}
       setStatus={noop}
     />,
   );
-  return { ...result, onUploadToBrain };
+  return { ...result, onUploadToBrain, onShare };
 }
 
 describe("SessionCard Brain upload status", () => {
@@ -169,6 +179,8 @@ describe("SessionCard Brain upload status", () => {
         onFieldBlur={noop}
         onOpenFolder={noop}
         onUploadToBrain={noop}
+        onShare={noop}
+        canShare={false}
         setStatus={noop}
       />,
     );
@@ -190,5 +202,43 @@ describe("SessionCard Brain upload status", () => {
   it("hides upload button for sessions without audio", () => {
     renderCard(makeItem("not_uploaded", { audio_file: "", audio_format: "unknown" }));
     expect(screen.queryByRole("button", { name: "Загрузить в Brain" })).not.toBeInTheDocument();
+  });
+
+  it("marks the summary prompt button when a session uses a named prompt", () => {
+    const { container } = renderCard(makeItem("uploaded"), vi.fn(), true, {
+      custom_summary_prompt_name: "Actions",
+    });
+
+    expect(container.querySelector(".summary-prompt-dot")).toBeInTheDocument();
+  });
+});
+
+describe("SessionCard share button", () => {
+  it("hides the share button when canShare is false", () => {
+    renderCard(makeItem("uploaded"), vi.fn(), true, false);
+    expect(
+      screen.queryByRole("button", { name: "Поделиться ссылкой на аудио" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the share button and calls onShare when canShare is true", async () => {
+    const user = userEvent.setup();
+    const { onShare } = renderCard(makeItem("uploaded"), vi.fn(), true, true);
+    await user.click(
+      screen.getByRole("button", { name: "Поделиться ссылкой на аудио" }),
+    );
+    expect(onShare).toHaveBeenCalledWith("s-brain");
+  });
+
+  it("hides the share button for sessions without audio even if canShare", () => {
+    renderCard(
+      makeItem("uploaded", { audio_file: "", audio_format: "unknown" }),
+      vi.fn(),
+      true,
+      true,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Поделиться ссылкой на аудио" }),
+    ).not.toBeInTheDocument();
   });
 });

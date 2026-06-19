@@ -30,12 +30,14 @@ use commands::nexara::get_nexara_balance;
 use commands::recording::{
     get_api_secret, retry_pipeline, run_pipeline, run_summary, run_transcription, set_api_secret,
     set_recording_input_muted, start_recording, stop_active_recording, stop_recording,
+    toggle_active_mic_mute, toggle_active_pause,
 };
 use commands::sessions::{
-    auto_delete_old_session_audio, delete_session, delete_session_audio, get_live_input_levels,
-    get_session_meta, get_ui_sync_state, import_audio_session, list_known_tags, list_sessions,
-    open_session_artifact, open_session_folder, read_session_artifact, search_session_artifacts,
-    set_ui_sync_state, sync_sessions, update_session_details,
+    auto_delete_old_session_audio, delete_session, delete_session_audio, delete_summary_prompt,
+    get_live_input_levels, get_session_meta, get_ui_sync_state, import_audio_session,
+    list_known_tags, list_sessions, list_summary_prompts, open_session_artifact,
+    open_session_folder, read_session_artifact, search_session_artifacts, set_ui_sync_state,
+    sync_sessions, update_session_details, upsert_summary_prompt,
 };
 use commands::settings::{
     detect_system_source_device, get_computer_name, get_macos_system_audio_permission_status,
@@ -49,8 +51,8 @@ use commands::task_sync::{
 };
 use commands::updates::{check_for_update, open_external_url};
 use commands::yandex_sync::{
-    yandex_sync_clear_token, yandex_sync_has_token, yandex_sync_now, yandex_sync_set_token,
-    yandex_sync_status,
+    yandex_list_synced_sessions, yandex_share_audio, yandex_sync_clear_token,
+    yandex_sync_has_token, yandex_sync_now, yandex_sync_set_token, yandex_sync_status,
 };
 #[cfg(test)]
 use domain::session::SessionMeta;
@@ -101,15 +103,22 @@ pub(crate) fn get_settings_from_dirs(dirs: &AppDirs) -> Result<PublicSettings, S
 
 // ── Pipeline helpers ─────────────────────────────────────────────────────────
 
-fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
-    let transcription_ready = if settings.transcription_provider == "salute_speech" {
+fn transcription_ready_after_stop(settings: &PublicSettings) -> bool {
+    if settings.transcription_provider == "salute_speech" {
         true
     } else {
         !settings.transcription_url.trim().is_empty()
-    };
+    }
+}
+
+fn should_auto_run_pipeline_after_stop(settings: &PublicSettings) -> bool {
     settings.auto_run_pipeline_on_stop
-        && transcription_ready
+        && transcription_ready_after_stop(settings)
         && !settings.summary_url.trim().is_empty()
+}
+
+fn should_auto_transcribe_after_stop(settings: &PublicSettings) -> bool {
+    settings.auto_transcribe_on_stop && transcription_ready_after_stop(settings)
 }
 
 fn should_upload_brain_after_stop(settings: &PublicSettings) -> bool {
@@ -176,6 +185,28 @@ pub(crate) fn broadcast_recording_stopped(app: &AppHandle) {
     for (_label, window) in app.webview_windows() {
         let _ = window.emit("ui:recording", ui_payload.clone());
         let _ = window.emit("recording:status", status_payload.clone());
+    }
+}
+
+/// Broadcast the current mic/system mute state to every webview so the tray UI
+/// reflects a mute toggle initiated from the minitray button. `RecordingMuteState`
+/// serializes camelCase (`micMuted`/`systemMuted`), matching the frontend type.
+pub(crate) fn broadcast_mic_mute(
+    app: &AppHandle,
+    mute_state: &crate::audio::capture::RecordingMuteState,
+) {
+    let payload = serde_json::json!({ "mute_state": mute_state });
+    for (_label, window) in app.webview_windows() {
+        let _ = window.emit("ui:mute", payload.clone());
+    }
+}
+
+/// Broadcast the paused state to every webview so the tray timer can freeze
+/// while a pause initiated from the minitray button is in effect.
+pub(crate) fn broadcast_pause(app: &AppHandle, paused: bool) {
+    let payload = serde_json::json!({ "paused": paused });
+    for (_label, window) in app.webview_windows() {
+        let _ = window.emit("ui:pause", payload.clone());
     }
 }
 
@@ -366,6 +397,19 @@ pub(crate) fn stop_active_recording_internal(
                 &session_id,
                 PipelineInvocation::Run,
                 PipelineMode::Full,
+                None,
+            )
+            .await;
+        });
+    } else if should_auto_transcribe_after_stop(&settings) {
+        let dirs_for_pipeline = dirs.clone();
+        let session_id = meta.session_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = run_pipeline_core(
+                dirs_for_pipeline,
+                &session_id,
+                PipelineInvocation::Run,
+                PipelineMode::TranscriptionOnly,
                 None,
             )
             .await;
@@ -576,6 +620,30 @@ fn main() {
                 );
                 broadcast_recording_stopped(&app_handle);
             });
+        // Rust is the single writer for the minitray mic toggle: toggle the
+        // active session's mic, push the new state back to the panel button,
+        // and broadcast `ui:mute` so other webviews mirror it.
+        let app_handle = app.handle().clone();
+        let _minitray_toggle_mic_listener =
+            app.listen("minitray:toggle_mic_request", move |_event: tauri::Event| {
+                let state = app_handle.state::<AppState>();
+                if let Ok(mute_state) = toggle_active_mic_mute(state.inner()) {
+                    broadcast_mic_mute(&app_handle, &mute_state);
+                }
+            });
+        // Rust is the single writer for the minitray pause toggle: toggle pause
+        // on the active recording, push the new state back to the panel button,
+        // and broadcast `ui:pause` so the tray timer freezes/resumes.
+        let app_handle = app.handle().clone();
+        let _minitray_toggle_pause_listener = app.listen(
+            "minitray:toggle_pause_request",
+            move |_event: tauri::Event| {
+                let state = app_handle.state::<AppState>();
+                if let Ok(paused) = toggle_active_pause(state.inner()) {
+                    broadcast_pause(&app_handle, paused);
+                }
+            },
+        );
         Ok(())
     });
 
@@ -608,6 +676,9 @@ fn main() {
             set_ui_sync_state,
             get_live_input_levels,
             get_session_meta,
+            list_summary_prompts,
+            upsert_summary_prompt,
+            delete_summary_prompt,
             update_session_details,
             set_api_secret,
             get_api_secret,
@@ -627,6 +698,8 @@ fn main() {
             yandex_sync_has_token,
             yandex_sync_status,
             yandex_sync_now,
+            yandex_share_audio,
+            yandex_list_synced_sessions,
             todoist_sync_set_token,
             todoist_sync_clear_token,
             todoist_sync_has_token,
@@ -711,6 +784,44 @@ mod ipc_runtime_tests {
             ..Default::default()
         };
         assert!(should_auto_run_pipeline_after_stop(&ready));
+    }
+
+    #[test]
+    fn auto_transcribe_after_stop_requires_toggle_and_provider_ready() {
+        let disabled = PublicSettings::default();
+        assert!(!should_auto_transcribe_after_stop(&disabled));
+
+        let no_url = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: String::new(),
+            ..Default::default()
+        };
+        assert!(!should_auto_transcribe_after_stop(&no_url));
+
+        let ready = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: "https://example.com/transcribe".to_string(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&ready));
+
+        // salute_speech не требует transcription_url
+        let salute_ready = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_provider: "salute_speech".to_string(),
+            transcription_url: String::new(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&salute_ready));
+
+        // Не требует summary_url (в отличие от полного pipeline)
+        let no_summary = PublicSettings {
+            auto_transcribe_on_stop: true,
+            transcription_url: "https://example.com/transcribe".to_string(),
+            summary_url: String::new(),
+            ..Default::default()
+        };
+        assert!(should_auto_transcribe_after_stop(&no_summary));
     }
 
     #[test]
@@ -852,6 +963,9 @@ mod ipc_runtime_tests {
                 auto_delete_old_session_audio,
                 list_known_tags,
                 get_session_meta,
+                list_summary_prompts,
+                upsert_summary_prompt,
+                delete_summary_prompt,
                 update_session_details,
                 start_recording,
                 stop_recording,
@@ -867,6 +981,8 @@ mod ipc_runtime_tests {
                 yandex_sync_has_token,
                 yandex_sync_status,
                 yandex_sync_now,
+                yandex_share_audio,
+                yandex_list_synced_sessions,
                 todoist_sync_set_token,
                 todoist_sync_clear_token,
                 todoist_sync_has_token,
@@ -1268,6 +1384,138 @@ mod ipc_runtime_tests {
     }
 
     #[test]
+    fn invoke_update_session_details_persists_custom_summary_prompt_name_and_clears_legacy_prompt()
+    {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let base_url = spawn_mock_pipeline_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-prompt-name", &base_url);
+
+        let session_dir = app_data_dir.join("sessions").join("session-prompt-name");
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt = "Legacy prompt".to_string();
+        save_meta(&meta_path, &meta).expect("save legacy meta");
+
+        get_ipc_response(
+            &webview,
+            invoke_request(
+                "update_session_details",
+                json!({
+                    "payload": {
+                        "session_id": "session-prompt-name",
+                        "source": "zoom",
+                        "notes": "",
+                        "customSummaryPrompt": "Legacy prompt",
+                        "customSummaryPromptName": "Actions",
+                        "topic": "Prompt binding",
+                        "tags": [],
+                        "num_speakers": null
+                    }
+                }),
+            ),
+        )
+        .expect("update details should succeed");
+
+        let saved = load_meta(&meta_path).expect("load saved meta");
+        assert_eq!(saved.custom_summary_prompt_name, "Actions");
+        assert_eq!(saved.custom_summary_prompt, "");
+    }
+
+    #[test]
+    fn invoke_update_session_details_omitted_prompt_fields_preserve_existing_prompt_binding() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let base_url = spawn_mock_pipeline_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-prompt-preserve", &base_url);
+
+        let session_dir = app_data_dir
+            .join("sessions")
+            .join("session-prompt-preserve");
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt = "Legacy prompt".to_string();
+        meta.custom_summary_prompt_name = "Actions".to_string();
+        save_meta(&meta_path, &meta).expect("save prompt meta");
+
+        get_ipc_response(
+            &webview,
+            invoke_request(
+                "update_session_details",
+                json!({
+                    "payload": {
+                        "session_id": "session-prompt-preserve",
+                        "source": "zoom",
+                        "notes": "",
+                        "topic": "Prompt binding",
+                        "tags": [],
+                        "num_speakers": null
+                    }
+                }),
+            ),
+        )
+        .expect("update details should succeed");
+
+        let saved = load_meta(&meta_path).expect("load saved meta");
+        assert_eq!(saved.custom_summary_prompt_name, "Actions");
+        assert_eq!(saved.custom_summary_prompt, "Legacy prompt");
+    }
+
+    #[test]
+    fn invoke_summary_prompt_commands_create_list_update_and_delete() {
+        let (app, _app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+
+        let created = get_ipc_response(
+            &webview,
+            invoke_request(
+                "upsert_summary_prompt",
+                json!({ "payload": { "name": "Actions", "prompt": "Action prompt" } }),
+            ),
+        )
+        .expect("create prompt")
+        .deserialize::<serde_json::Value>()
+        .expect("created prompt json");
+        assert_eq!(created["name"], "Actions");
+        assert_eq!(created["prompt"], "Action prompt");
+
+        let updated = get_ipc_response(
+            &webview,
+            invoke_request(
+                "upsert_summary_prompt",
+                json!({ "payload": { "name": "Actions", "prompt": "Updated prompt" } }),
+            ),
+        )
+        .expect("update prompt")
+        .deserialize::<serde_json::Value>()
+        .expect("updated prompt json");
+        assert_eq!(updated["name"], "Actions");
+        assert_eq!(updated["prompt"], "Updated prompt");
+
+        let list = get_ipc_response(&webview, invoke_request("list_summary_prompts", json!({})))
+            .expect("list prompts")
+            .deserialize::<serde_json::Value>()
+            .expect("list json");
+        assert_eq!(list.as_array().expect("array").len(), 1);
+        assert_eq!(list[0]["name"], "Actions");
+
+        let deleted = get_ipc_response(
+            &webview,
+            invoke_request("delete_summary_prompt", json!({ "name": "Actions" })),
+        )
+        .expect("delete prompt")
+        .deserialize::<String>()
+        .expect("deleted string");
+        assert_eq!(deleted, "deleted");
+    }
+
+    #[test]
     fn invoke_stop_rejects_without_active_session() {
         let (app, _) = build_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
@@ -1560,6 +1808,99 @@ mod ipc_runtime_tests {
             payload["messages"][0]["content"].as_str(),
             Some("Сделай саммари только по action items")
         );
+    }
+
+    #[test]
+    fn invoke_run_summary_uses_named_prompt_when_override_is_missing() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (base_url, requests) = spawn_summary_capture_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-summary-named", &base_url);
+        let session_dir = app_data_dir.join("sessions").join("session-summary-named");
+        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
+            .expect("write transcript");
+
+        storage::sqlite_repo::upsert_summary_prompt(
+            &app_data_dir,
+            "Actions",
+            "Сделай саммари только по задачам",
+        )
+        .expect("insert prompt");
+
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt = "Legacy prompt should not be used".to_string();
+        meta.custom_summary_prompt_name = "Actions".to_string();
+        save_meta(&meta_path, &meta).expect("save meta");
+
+        get_ipc_response(
+            &webview,
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId": "session-summary-named" }),
+            ),
+        )
+        .expect("run_summary should succeed");
+
+        let captured = requests.lock().expect("lock requests");
+        let request_body = captured[0]
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http request body should exist");
+        let payload: serde_json::Value =
+            serde_json::from_str(request_body).expect("valid json payload");
+        assert_eq!(
+            payload["messages"][0]["content"].as_str(),
+            Some("Сделай саммари только по задачам")
+        );
+    }
+
+    #[test]
+    fn invoke_run_summary_errors_when_named_prompt_is_missing() {
+        let (app, app_data_dir) = build_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("webview should be created");
+        let (base_url, _requests) = spawn_summary_capture_server();
+        seed_pipeline_ready_session(&app_data_dir, "session-summary-missing-prompt", &base_url);
+        let session_dir = app_data_dir
+            .join("sessions")
+            .join("session-summary-missing-prompt");
+        std::fs::write(session_dir.join("transcript.txt"), "existing transcript")
+            .expect("write transcript");
+
+        let meta_path = session_dir.join("meta.json");
+        let mut meta = load_meta(&meta_path).expect("load meta");
+        meta.custom_summary_prompt_name = "Missing".to_string();
+        save_meta(&meta_path, &meta).expect("save meta");
+
+        let err = get_ipc_response(
+            &webview,
+            invoke_request(
+                "run_summary",
+                json!({ "sessionId": "session-summary-missing-prompt" }),
+            ),
+        )
+        .expect_err("run_summary should fail");
+
+        assert!(err
+            .to_string()
+            .contains("Summary prompt not found: Missing"));
+
+        let saved = load_meta(&meta_path).expect("load failed meta");
+        assert_eq!(saved.status, SessionStatus::Failed);
+        assert!(saved
+            .errors
+            .iter()
+            .any(|error| error.contains("Summary prompt not found: Missing")));
+        let events = list_session_events(&app_data_dir, "session-summary-missing-prompt")
+            .expect("load events");
+        assert!(events.iter().any(|event| {
+            event.event_type == "pipeline_failed"
+                && event.detail.contains("Summary prompt not found: Missing")
+        }));
     }
 
     #[test]

@@ -40,7 +40,11 @@ fn save_public_settings_impl(
         .unwrap_or(false);
     if recording_active {
         if payload.show_minitray_overlay {
+            // Overlay can be enabled mid-recording, when the mic may already be
+            // muted — sync the button to the real state after showing.
             crate::services::minitray::show_if_enabled(&payload, &state.live_levels);
+            crate::services::minitray::set_mic_muted(state.recording_control.snapshot().mic_muted);
+            crate::services::minitray::set_paused(state.recording_control.is_paused());
         } else {
             crate::services::minitray::hide();
         }

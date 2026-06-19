@@ -10,6 +10,7 @@ import type {
   SessionArtifactPreview,
   SessionListItem,
   SessionMetaView,
+  SummaryPromptView,
 } from "../../types";
 import { getErrorMessage } from "../../lib/appUtils";
 import { tauriInvoke } from "../../lib/tauri";
@@ -67,6 +68,8 @@ type SessionListProps = {
   requestDeleteSession: (sessionId: string, isRecording: boolean) => void;
   requestDeleteAudio: (sessionId: string) => void;
   onUploadToBrain: (sessionId: string) => void;
+  onShareAudio: (sessionId: string) => void;
+  syncedSessionIds: Set<string>;
   setStatus: (status: string) => void;
 };
 
@@ -107,13 +110,18 @@ export function SessionList({
   requestDeleteSession,
   requestDeleteAudio,
   onUploadToBrain,
+  onShareAudio,
+  syncedSessionIds,
   setStatus,
 }: SessionListProps) {
   const [summaryPromptDialog, setSummaryPromptDialog] = useState<SummaryPromptDialogState | null>(null);
+  const [summaryPrompts, setSummaryPrompts] = useState<SummaryPromptView[]>([]);
+  const [summaryPromptsLoading, setSummaryPromptsLoading] = useState(false);
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const [todoistPendingSessionId, setTodoistPendingSessionId] = useState<string | null>(null);
   const todoistTasks = useTodoistTasks();
+  const summaryPromptsRequestIdRef = useRef(0);
   // Cache the default summary prompt fetched from backend so clicking the
   // "Настроить промпт саммари" button is instant on every repeat click
   // (the first one pays one IPC round-trip).
@@ -148,17 +156,75 @@ export function SessionList({
         source: item.primary_tag,
         notes: "",
         custom_summary_prompt: "",
+        custom_summary_prompt_name: "",
         topic: item.topic,
         tags: [],
       }
     );
   }
 
-  function openSummaryPromptDialog(detail: SessionMetaView) {
+  function sortSummaryPrompts(prompts: SummaryPromptView[]) {
+    return [...prompts].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async function loadSummaryPrompts(requestId: number) {
+    setSummaryPromptsLoading(true);
+    try {
+      const prompts = await tauriInvoke<SummaryPromptView[]>("list_summary_prompts");
+      const sorted = sortSummaryPrompts(prompts);
+      if (summaryPromptsRequestIdRef.current !== requestId) return sorted;
+      setSummaryPrompts(sorted);
+      return sorted;
+    } catch (err) {
+      if (summaryPromptsRequestIdRef.current === requestId) {
+        setStatus(`error: ${getErrorMessage(err)}`);
+      }
+      return null;
+    } finally {
+      if (summaryPromptsRequestIdRef.current === requestId) {
+        setSummaryPromptsLoading(false);
+      }
+    }
+  }
+
+  async function openSummaryPromptDialog(detail: SessionMetaView) {
+    const requestId = summaryPromptsRequestIdRef.current + 1;
+    summaryPromptsRequestIdRef.current = requestId;
+    const prompts = await loadSummaryPrompts(requestId);
+    if (summaryPromptsRequestIdRef.current !== requestId) return;
+    if (!prompts) return;
+    const promptName = detail.custom_summary_prompt_name?.trim() ?? "";
+    const selectedPrompt = promptName
+      ? prompts.find((prompt) => prompt.name === promptName)
+      : null;
+
+    if (selectedPrompt) {
+      setSummaryPromptDialog({
+        sessionId: detail.session_id,
+        promptName: selectedPrompt.name,
+        value: selectedPrompt.prompt,
+        saving: false,
+      });
+      return;
+    }
+
+    if (promptName) {
+      setStatus(`error: summary_prompt_not_found: ${promptName}`);
+      setSummaryPromptDialog({
+        sessionId: detail.session_id,
+        promptName,
+        value: "",
+        saving: false,
+        notice: "Сохраненный промпт с таким именем не найден. Введите текст, чтобы восстановить его.",
+      });
+      return;
+    }
+
     const persistedPrompt = detail.custom_summary_prompt?.trim() ?? "";
     if (persistedPrompt) {
       setSummaryPromptDialog({
         sessionId: detail.session_id,
+        promptName: "",
         value: detail.custom_summary_prompt ?? "",
         saving: false,
       });
@@ -174,6 +240,7 @@ export function SessionList({
     if (syncDefault !== null) {
       setSummaryPromptDialog({
         sessionId: detail.session_id,
+        promptName: "",
         value: syncDefault,
         saving: false,
       });
@@ -182,7 +249,7 @@ export function SessionList({
 
     // Open with a placeholder first; fetch in background.
     const sessionId = detail.session_id;
-    setSummaryPromptDialog({ sessionId, value: "", saving: false });
+    setSummaryPromptDialog({ sessionId, promptName: "", value: "", saving: false });
     void tauriInvoke<PublicSettings>("get_settings")
       .then((currentSettings) => {
         cachedDefaultPromptRef.current = currentSettings.summary_prompt;
@@ -199,7 +266,7 @@ export function SessionList({
       });
   }
 
-  async function confirmSummaryPrompt(value: string) {
+  async function confirmSummaryPrompt(payload: { name: string; prompt: string }) {
     if (!summaryPromptDialog) return;
     const current = sessionDetails[summaryPromptDialog.sessionId];
     if (!current) {
@@ -207,15 +274,52 @@ export function SessionList({
       return;
     }
 
-    const nextDetail: SessionMetaView = {
-      ...current,
-      custom_summary_prompt: value,
-    };
     setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: true } : prev));
-    const saved = await saveSessionDetails(summaryPromptDialog.sessionId, nextDetail);
-    if (saved) {
+    try {
+      const existingPrompt = summaryPrompts.find((prompt) => prompt.name === payload.name);
+      const promptChanged = existingPrompt?.prompt !== payload.prompt;
+      const currentPromptName = current.custom_summary_prompt_name?.trim() ?? "";
+      const nextDetail: SessionMetaView = {
+        ...current,
+        custom_summary_prompt: "",
+        custom_summary_prompt_name: payload.name,
+      };
+
+      if (existingPrompt && promptChanged && currentPromptName !== payload.name) {
+        const saved = await saveSessionDetails(summaryPromptDialog.sessionId, nextDetail);
+        if (!saved) {
+          setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
+          return;
+        }
+      }
+
+      const savedPrompt =
+        existingPrompt && !promptChanged
+          ? existingPrompt
+          : await tauriInvoke<SummaryPromptView>("upsert_summary_prompt", {
+              payload,
+            });
+      if (!existingPrompt || promptChanged) {
+        setSummaryPrompts((prev) => {
+          const next = prev.filter((prompt) => prompt.name !== savedPrompt.name);
+          next.push(savedPrompt);
+          return sortSummaryPrompts(next);
+        });
+      }
+
+      if (!(existingPrompt && promptChanged && currentPromptName !== payload.name)) {
+        const saved = await saveSessionDetails(summaryPromptDialog.sessionId, {
+          ...nextDetail,
+          custom_summary_prompt_name: savedPrompt.name,
+        });
+        if (!saved) {
+          setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
+          return;
+        }
+      }
       setSummaryPromptDialog(null);
-    } else {
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
       setSummaryPromptDialog((prev) => (prev ? { ...prev, saving: false } : prev));
     }
   }
@@ -468,6 +572,8 @@ export function SessionList({
                   onFieldBlur={flushSessionDetails}
                   onOpenFolder={openSessionFolder}
                   onUploadToBrain={onUploadToBrain}
+                  onShare={onShareAudio}
+                  canShare={syncedSessionIds.has(item.session_id)}
                   onExportTodoist={(sessionId) => void openTodoistExport(sessionId)}
                   todoistPending={todoistPendingSessionId === item.session_id}
                   setStatus={setStatus}
@@ -549,8 +655,10 @@ export function SessionList({
 
       <SummaryPromptModal
         dialog={summaryPromptDialog}
+        prompts={summaryPrompts}
+        loadingPrompts={summaryPromptsLoading}
         onCancel={() => setSummaryPromptDialog(null)}
-        onConfirm={(value) => void confirmSummaryPrompt(value)}
+        onConfirm={(payload) => void confirmSummaryPrompt(payload)}
       />
 
       <TodoistExportModal

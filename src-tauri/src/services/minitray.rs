@@ -18,6 +18,8 @@ use crate::settings::public_settings::PublicSettings;
 type ShowSink = Box<dyn Fn() + Send + Sync>;
 type HideSink = Box<dyn Fn() + Send + Sync>;
 type LevelSink = Box<dyn Fn(f32) + Send + Sync>;
+type MicMutedSink = Box<dyn Fn(bool) + Send + Sync>;
+type PausedSink = Box<dyn Fn(bool) + Send + Sync>;
 
 static VISIBLE: AtomicBool = AtomicBool::new(false);
 /// `u64::MAX` is the "never pushed" sentinel: guarantees the first call always goes through.
@@ -28,6 +30,8 @@ static POLLER: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 static SHOW_SINK: OnceLock<ShowSink> = OnceLock::new();
 static HIDE_SINK: OnceLock<HideSink> = OnceLock::new();
 static LEVEL_SINK: OnceLock<LevelSink> = OnceLock::new();
+static MIC_MUTED_SINK: OnceLock<MicMutedSink> = OnceLock::new();
+static PAUSED_SINK: OnceLock<PausedSink> = OnceLock::new();
 
 const MIN_PUSH_INTERVAL_NS: u64 = 33_000_000; // ~30 Hz
 
@@ -46,12 +50,20 @@ pub fn install_production_sinks() {
         let _ = LEVEL_SINK.set(Box::new(|level| unsafe {
             bigecho_minitray_update_level(level)
         }));
+        let _ = MIC_MUTED_SINK.set(Box::new(|muted| unsafe {
+            bigecho_minitray_set_mic_muted(muted)
+        }));
+        let _ = PAUSED_SINK.set(Box::new(|paused| unsafe {
+            bigecho_minitray_set_paused(paused)
+        }));
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = SHOW_SINK.set(Box::new(|| {}));
         let _ = HIDE_SINK.set(Box::new(|| {}));
         let _ = LEVEL_SINK.set(Box::new(|_| {}));
+        let _ = MIC_MUTED_SINK.set(Box::new(|_| {}));
+        let _ = PAUSED_SINK.set(Box::new(|_| {}));
     }
 }
 
@@ -127,6 +139,26 @@ pub fn update_level(level: f32) {
     call_level_sink(level);
 }
 
+/// Push the mic-mute state to the panel button. No-op when the panel is
+/// hidden — the button only exists while visible, and it's rebuilt unmuted
+/// each time the panel shows (mic is reset to unmuted at recording start).
+pub fn set_mic_muted(muted: bool) {
+    if !VISIBLE.load(Ordering::SeqCst) {
+        return;
+    }
+    call_mic_muted_sink(muted);
+}
+
+/// Push the paused state to the panel's pause button. No-op when the panel is
+/// hidden (the button only exists while visible, and the panel is synced to the
+/// real state whenever it shows).
+pub fn set_paused(paused: bool) {
+    if !VISIBLE.load(Ordering::SeqCst) {
+        return;
+    }
+    call_paused_sink(paused);
+}
+
 fn call_show_sink() {
     #[cfg(test)]
     {
@@ -166,12 +198,40 @@ fn call_level_sink(level: f32) {
     }
 }
 
+fn call_mic_muted_sink(muted: bool) {
+    #[cfg(test)]
+    {
+        if let Some(sink) = test_sinks::TEST_MIC_MUTED.lock().unwrap().as_ref() {
+            sink(muted);
+            return;
+        }
+    }
+    if let Some(sink) = MIC_MUTED_SINK.get() {
+        sink(muted);
+    }
+}
+
+fn call_paused_sink(paused: bool) {
+    #[cfg(test)]
+    {
+        if let Some(sink) = test_sinks::TEST_PAUSED.lock().unwrap().as_ref() {
+            sink(paused);
+            return;
+        }
+    }
+    if let Some(sink) = PAUSED_SINK.get() {
+        sink(paused);
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[link(name = "MinitrayBridge", kind = "static")]
 extern "C" {
     fn bigecho_minitray_show();
     fn bigecho_minitray_hide();
     fn bigecho_minitray_update_level(level: f32);
+    fn bigecho_minitray_set_mic_muted(muted: bool);
+    fn bigecho_minitray_set_paused(paused: bool);
 }
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
@@ -191,6 +251,28 @@ pub extern "C" fn bigecho_minitray_rust_on_stop() {
     let _ = app.emit("minitray:stop_request", ());
 }
 
+/// Called from Swift when the user clicks the mic mute button in the minitray.
+/// Mirrors the stop button: Rust is the single writer. The listener in main.rs
+/// toggles the active session's mic mute, pushes the new state back to the
+/// panel button, and broadcasts `ui:mute` so other webviews reflect it.
+#[no_mangle]
+pub extern "C" fn bigecho_minitray_rust_on_toggle_mic() {
+    if let Some(app) = APP_HANDLE.get() {
+        let _ = app.emit("minitray:toggle_mic_request", ());
+    }
+}
+
+/// Called from Swift when the user clicks the pause button in the minitray.
+/// Mirrors the mic toggle: Rust is the single writer. The listener in main.rs
+/// toggles pause on the active recording, pushes the new state back to the panel
+/// button, and broadcasts `ui:pause` so webviews (e.g. the tray timer) react.
+#[no_mangle]
+pub extern "C" fn bigecho_minitray_rust_on_toggle_pause() {
+    if let Some(app) = APP_HANDLE.get() {
+        let _ = app.emit("minitray:toggle_pause_request", ());
+    }
+}
+
 /// Called from Swift when the user clicks the BigEcho icon in the minitray.
 #[no_mangle]
 pub extern "C" fn bigecho_minitray_rust_on_icon() {
@@ -207,12 +289,14 @@ pub fn install_callbacks(app: tauri::AppHandle) {
 
 #[cfg(test)]
 mod test_sinks {
-    use super::{HideSink, LevelSink, ShowSink};
+    use super::{HideSink, LevelSink, MicMutedSink, PausedSink, ShowSink};
     use std::sync::Mutex;
 
     pub static TEST_SHOW: Mutex<Option<ShowSink>> = Mutex::new(None);
     pub static TEST_HIDE: Mutex<Option<HideSink>> = Mutex::new(None);
     pub static TEST_LEVEL: Mutex<Option<LevelSink>> = Mutex::new(None);
+    pub static TEST_MIC_MUTED: Mutex<Option<MicMutedSink>> = Mutex::new(None);
+    pub static TEST_PAUSED: Mutex<Option<PausedSink>> = Mutex::new(None);
 }
 
 #[cfg(test)]
@@ -232,6 +316,20 @@ pub(crate) fn install_hide_sink_for_test(sink: HideSink) {
 #[cfg(test)]
 pub(crate) fn install_level_sink_for_test(sink: LevelSink) {
     *test_sinks::TEST_LEVEL
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = Some(sink);
+}
+
+#[cfg(test)]
+pub(crate) fn install_mic_muted_sink_for_test(sink: MicMutedSink) {
+    *test_sinks::TEST_MIC_MUTED
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = Some(sink);
+}
+
+#[cfg(test)]
+pub(crate) fn install_paused_sink_for_test(sink: PausedSink) {
+    *test_sinks::TEST_PAUSED
         .lock()
         .unwrap_or_else(|err| err.into_inner()) = Some(sink);
 }
@@ -267,6 +365,12 @@ pub(crate) fn reset_test_state() {
         .lock()
         .unwrap_or_else(|err| err.into_inner()) = None;
     *test_sinks::TEST_LEVEL
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = None;
+    *test_sinks::TEST_MIC_MUTED
+        .lock()
+        .unwrap_or_else(|err| err.into_inner()) = None;
+    *test_sinks::TEST_PAUSED
         .lock()
         .unwrap_or_else(|err| err.into_inner()) = None;
 }
@@ -390,6 +494,88 @@ mod tests {
         // Loose upper bound — we expect 1 if the loop runs faster than 33ms,
         // but allow up to 5 in case the test runs slowly.
         assert!(n >= 1 && n <= 5, "pushes was {}", n);
+    }
+
+    #[test]
+    fn set_mic_muted_is_noop_when_not_visible() {
+        let _guard = acquire_test_lock();
+        reset_state_for_test();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_sink = Arc::clone(&calls);
+        install_mic_muted_sink_for_test(Box::new(move |_| {
+            calls_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        set_mic_muted(true);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn set_mic_muted_calls_sink_when_visible() {
+        let _guard = acquire_test_lock();
+        reset_state_for_test();
+        let last = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let last_for_sink = Arc::clone(&last);
+        let calls_for_sink = Arc::clone(&calls);
+        install_show_sink_for_test(Box::new(|| {}));
+        install_mic_muted_sink_for_test(Box::new(move |muted| {
+            last_for_sink.store(muted, Ordering::SeqCst);
+            calls_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let mut settings = PublicSettings::default();
+        settings.show_minitray_overlay = true;
+        show_if_enabled(&settings, &SharedLevels::new());
+
+        set_mic_muted(true);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(last.load(Ordering::SeqCst));
+
+        set_mic_muted(false);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(!last.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn set_paused_is_noop_when_not_visible() {
+        let _guard = acquire_test_lock();
+        reset_state_for_test();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_sink = Arc::clone(&calls);
+        install_paused_sink_for_test(Box::new(move |_| {
+            calls_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        set_paused(true);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn set_paused_calls_sink_when_visible() {
+        let _guard = acquire_test_lock();
+        reset_state_for_test();
+        let last = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let last_for_sink = Arc::clone(&last);
+        let calls_for_sink = Arc::clone(&calls);
+        install_show_sink_for_test(Box::new(|| {}));
+        install_paused_sink_for_test(Box::new(move |paused| {
+            last_for_sink.store(paused, Ordering::SeqCst);
+            calls_for_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let mut settings = PublicSettings::default();
+        settings.show_minitray_overlay = true;
+        show_if_enabled(&settings, &SharedLevels::new());
+
+        set_paused(true);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(last.load(Ordering::SeqCst));
+
+        set_paused(false);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(!last.load(Ordering::SeqCst));
     }
 
     #[test]

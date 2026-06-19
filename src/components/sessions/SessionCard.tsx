@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Badge, Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
-import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, DeploymentUnitOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
+import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, DeploymentUnitOutlined, ExportOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
@@ -34,6 +34,8 @@ type SessionCardProps = {
   onFieldBlur: (sessionId: string, detail?: SessionMetaView) => void;
   onOpenFolder: (sessionDir: string) => void;
   onUploadToBrain: (sessionId: string) => void;
+  onShare: (sessionId: string) => void;
+  canShare: boolean;
   onExportTodoist: (sessionId: string) => void;
   todoistPending: boolean;
   setStatus: (status: string) => void;
@@ -63,6 +65,8 @@ function SessionCardImpl({
   onFieldBlur,
   onOpenFolder,
   onUploadToBrain,
+  onShare,
+  canShare,
   onExportTodoist,
   todoistPending,
   setStatus,
@@ -80,7 +84,9 @@ function SessionCardImpl({
   // Orange "dirty" dot on the summary-prompt button when this session overrides
   // the default summary prompt with a non-empty custom one — mirrors the dirty
   // indicator shown in Settings.
-  const hasCustomSummaryPrompt = Boolean(draftDetail.custom_summary_prompt?.trim());
+  const hasCustomSummaryPrompt = Boolean(
+    draftDetail.custom_summary_prompt_name?.trim() || draftDetail.custom_summary_prompt?.trim()
+  );
 
   // When the parent's committed detail changes (reload from disk, external
   // update, etc.) and it no longer matches what we have locally, refresh the
@@ -93,6 +99,7 @@ function SessionCardImpl({
       detail.notes === local.notes &&
       detail.topic === local.topic &&
       (detail.custom_summary_prompt ?? "") === (local.custom_summary_prompt ?? "") &&
+      (detail.custom_summary_prompt_name ?? "") === (local.custom_summary_prompt_name ?? "") &&
       (detail.num_speakers ?? null) === (local.num_speakers ?? null) &&
       detail.tags.length === local.tags.length &&
       detail.tags.every((t, i) => t === local.tags[i])
@@ -112,6 +119,7 @@ function SessionCardImpl({
       detail.notes === current.notes &&
       detail.topic === current.topic &&
       (detail.custom_summary_prompt ?? "") === (current.custom_summary_prompt ?? "") &&
+      (detail.custom_summary_prompt_name ?? "") === (current.custom_summary_prompt_name ?? "") &&
       (detail.num_speakers ?? null) === (current.num_speakers ?? null) &&
       detail.tags.length === current.tags.length &&
       detail.tags.every((t, i) => t === current.tags[i])
@@ -269,6 +277,19 @@ function SessionCardImpl({
               icon={<FolderOpenOutlined aria-hidden="true" style={{color: "gray"}} />}
               onClick={() => onOpenFolder(item.session_dir)}
             />
+            {hasAudio && canShare && (
+              <Button
+                htmlType="button"
+                type="text"
+                size="small"
+                shape="circle"
+                className="session-share-button"
+                aria-label="Поделиться ссылкой на аудио"
+                title="Поделиться ссылкой на аудио (Яндекс.Диск)"
+                icon={<ExportOutlined aria-hidden="true" style={{ color: "gray" }} />}
+                onClick={() => onShare(item.session_id)}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -458,6 +479,7 @@ function SessionCardImpl({
               />
               {hasCustomSummaryPrompt && (
                 <span
+                  className="summary-prompt-dot"
                   role="img"
                   aria-label="Промпт отличается от базового"
                   title="Промпт отличается от базового"

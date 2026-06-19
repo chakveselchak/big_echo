@@ -168,10 +168,36 @@ export function GeneralSettings({
           aria-label="Auto-run pipeline on Stop"
           checked={Boolean(settings.auto_run_pipeline_on_stop)}
           onChange={(event) =>
-            setSettings({ ...settings, auto_run_pipeline_on_stop: event.target.checked })
+            setSettings({
+              ...settings,
+              auto_run_pipeline_on_stop: event.target.checked,
+              auto_transcribe_on_stop: event.target.checked
+                ? false
+                : settings.auto_transcribe_on_stop,
+            })
           }
         >
           Auto-run pipeline on Stop{isDirty("auto_run_pipeline_on_stop") && dirtyDot}
+        </Checkbox>
+      </Form.Item>
+
+      <Form.Item>
+        <Checkbox
+          id="auto_transcribe_on_stop"
+          aria-label="Автоматическая транскрибация по окончанию записи"
+          checked={Boolean(settings.auto_transcribe_on_stop)}
+          onChange={(event) =>
+            setSettings({
+              ...settings,
+              auto_transcribe_on_stop: event.target.checked,
+              auto_run_pipeline_on_stop: event.target.checked
+                ? false
+                : settings.auto_run_pipeline_on_stop,
+            })
+          }
+        >
+          Автоматическая транскрибация по окончанию записи
+          {isDirty("auto_transcribe_on_stop") && dirtyDot}
         </Checkbox>
       </Form.Item>
 

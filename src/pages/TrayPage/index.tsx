@@ -41,7 +41,7 @@ export function TrayPage() {
 
   const loadSessions = useCallback(async () => {}, []);
 
-  const { liveLevels, muteState, startFromTray, stop, toggleInputMuted } = useRecordingController({
+  const { liveLevels, muteState, isPausedRef, startFromTray, stop, toggleInputMuted } = useRecordingController({
     enableTrayCommandListeners: false,
     isSettingsWindow: false,
     isTrayWindow: true,
@@ -104,17 +104,25 @@ export function TrayPage() {
       setElapsedSec(0);
       return;
     }
-    const startedAt = Date.now();
+    // Accumulate elapsed time, skipping intervals spent paused — so the timer
+    // reflects the actual (gapless) recorded duration, not wall-clock.
+    let accumulatedMs = 0;
+    let lastTick = Date.now();
     setElapsedSec(0);
     const id = setInterval(() => {
+      const now = Date.now();
+      if (!isPausedRef.current) {
+        accumulatedMs += now - lastTick;
+      }
+      lastTick = now;
       // Non-urgent: never preempt a keystroke happening at the same instant
       // in the Topic input.
       startTransition(() => {
-        setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+        setElapsedSec(Math.floor(accumulatedMs / 1000));
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [isRecording]);
+  }, [isRecording, isPausedRef]);
 
   async function handleToggleMuted(channel: "mic" | "system") {
     setTrayMuteError(null);

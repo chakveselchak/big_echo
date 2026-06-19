@@ -27,6 +27,7 @@ const { invokeMock } = vi.hoisted(() => ({
         mic_device_name: "",
         system_device_name: "",
         auto_run_pipeline_on_stop: false,
+        auto_transcribe_on_stop: false,
         api_call_logging_enabled: false,
         auto_delete_audio_enabled: false,
         auto_delete_audio_days: 30,
@@ -155,6 +156,7 @@ function mockSettings() {
     mic_device_name: "",
     system_device_name: "",
     auto_run_pipeline_on_stop: false,
+    auto_transcribe_on_stop: false,
     api_call_logging_enabled: false,
     auto_delete_audio_enabled: false,
     auto_delete_audio_days: 30,
@@ -511,6 +513,47 @@ describe("App settings window", () => {
           yandex_sync_enabled: false,
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
+        }),
+      });
+    });
+  });
+
+  it("makes auto-transcribe and auto-pipeline checkboxes mutually exclusive", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_settings");
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Generals" }));
+    const pipelineCheckbox = screen.getByRole("checkbox", {
+      name: "Auto-run pipeline on Stop",
+    });
+    const transcribeCheckbox = screen.getByRole("checkbox", {
+      name: "Автоматическая транскрибация по окончанию записи",
+    });
+
+    await user.click(pipelineCheckbox);
+    expect(pipelineCheckbox).toBeChecked();
+    expect(transcribeCheckbox).not.toBeChecked();
+
+    // Включение транскрибации снимает полный pipeline
+    await user.click(transcribeCheckbox);
+    expect(transcribeCheckbox).toBeChecked();
+    expect(pipelineCheckbox).not.toBeChecked();
+
+    // И наоборот
+    await user.click(pipelineCheckbox);
+    expect(pipelineCheckbox).toBeChecked();
+    expect(transcribeCheckbox).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
+        payload: expect.objectContaining({
+          auto_run_pipeline_on_stop: true,
+          auto_transcribe_on_stop: false,
         }),
       });
     });
