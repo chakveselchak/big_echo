@@ -87,7 +87,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CMAKE_POLICY_VERSION_MINIMUM: ${{ startsWith(matrix.runner, 'macos-') && '3.5' || '' }}
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
