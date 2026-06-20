@@ -68,6 +68,8 @@
     "status": "Status: {status}",
     "source": "Source",
     "topicOptional": "Topic (optional)",
+    "record": "Rec",
+    "stop": "Stop",
     "openSystemSettings": "Open System Settings"
   },
   "settings": {

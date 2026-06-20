@@ -99,6 +99,8 @@ export function TrayPage() {
     isMacosSystemAudioPermissionPendingReview || isMacosSystemAudioLookupFailed;
 
   const isRecording = status === "recording";
+  const recordLabel = t("tray.record");
+  const stopLabel = t("tray.stop");
 
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
@@ -283,7 +285,7 @@ export function TrayPage() {
         block
         type="primary"
         danger={isRecording}
-        aria-label={isRecording ? "Stop" : "Rec"}
+        aria-label={isRecording ? stopLabel : recordLabel}
         onClick={() => void (isRecording ? stop() : startFromTray())}
         style={{ marginTop: "auto" }}
       >
@@ -299,7 +301,7 @@ export function TrayPage() {
               aria-hidden
             />
             <span>
-              Stop (<span style={{ fontFamily: monoFontStack }}>{formatElapsed(elapsedSec)}</span>)
+              {stopLabel} (<span style={{ fontFamily: monoFontStack }}>{formatElapsed(elapsedSec)}</span>)
             </span>
           </span>
         ) : (
@@ -314,7 +316,7 @@ export function TrayPage() {
               }}
               aria-hidden
             />
-            Rec
+            {recordLabel}
           </span>
         )}
       </Button>

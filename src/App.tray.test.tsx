@@ -156,6 +156,7 @@ describe("Tray window", () => {
       expect(screen.getByText("Статус: ожидание")).toBeInTheDocument();
     });
     expect(screen.getByLabelText("Тема (опционально)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Запись" })).toBeInTheDocument();
   });
 
   it("applies shared ui sync updates", async () => {

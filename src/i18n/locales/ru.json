@@ -68,6 +68,8 @@
     "status": "Статус: {status}",
     "source": "Источник",
     "topicOptional": "Тема (опционально)",
+    "record": "Запись",
+    "stop": "Стоп",
     "openSystemSettings": "Открыть системные настройки"
   },
   "settings": {
