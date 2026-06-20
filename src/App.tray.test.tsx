@@ -157,6 +157,16 @@ describe("Tray window", () => {
     });
     expect(screen.getByLabelText("Тема (опционально)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Запись" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Микрофон")).toHaveStyle({
+        width: "84px",
+        whiteSpace: "nowrap",
+      });
+      expect(screen.getByText("Система")).toHaveStyle({
+        width: "84px",
+        whiteSpace: "nowrap",
+      });
+    });
   });
 
   it("applies shared ui sync updates", async () => {

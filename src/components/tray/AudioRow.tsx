@@ -3,6 +3,8 @@ import { Button, Flex, Typography } from "antd";
 import { AudioMutedOutlined, AudioOutlined } from "@ant-design/icons";
 import { AudioWave } from "./AudioWave";
 
+const AUDIO_ROW_LABEL_WIDTH = 84;
+
 type AudioRowProps = {
   label: string;
   animationLabel: string;
@@ -32,7 +34,9 @@ export function AudioRow({
 
   return (
     <Flex align="center" gap={6} style={{ minHeight: 28 }}>
-      <Typography.Text style={{ width: 48, flexShrink: 0, fontSize: 12 }}>
+      <Typography.Text
+        style={{ width: AUDIO_ROW_LABEL_WIDTH, flexShrink: 0, fontSize: 12, whiteSpace: "nowrap" }}
+      >
         {label}
       </Typography.Text>
       <Flex flex={1} align="center" gap={6} style={{ minWidth: 0 }}>
