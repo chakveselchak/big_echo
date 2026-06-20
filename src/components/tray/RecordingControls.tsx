@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef } from "react";
 import { Flex } from "antd";
 import { fixedSources } from "../../types";
+import { useI18n } from "../../i18n";
 
 type RecordingControlsProps = {
   source: string;
@@ -36,6 +37,10 @@ function RecordingControlsImpl({
   onSourceChange,
   onTopicChange,
 }: RecordingControlsProps) {
+  const { t } = useI18n();
+  const sourceLabel = t("tray.source");
+  const topicLabel = t("tray.topicOptional");
+
   // Topic is an UNCONTROLLED input: keystrokes (including held-Backspace
   // delete) live entirely in the DOM and never trigger a React re-render. We
   // only push the value into React state on blur (`onTopicChange`). This kills
@@ -57,10 +62,10 @@ function RecordingControlsImpl({
   return (
     <Flex gap={8}>
       <Flex vertical gap={2} style={sourceColumnStyle}>
-        <label htmlFor="tray-source" style={labelStyle}>Source</label>
+        <label htmlFor="tray-source" style={labelStyle}>{sourceLabel}</label>
         <select
           id="tray-source"
-          aria-label="Source"
+          aria-label={sourceLabel}
           value={source}
           onChange={(e) => onSourceChange(e.target.value)}
           disabled={isRecording}
@@ -74,11 +79,11 @@ function RecordingControlsImpl({
         </select>
       </Flex>
       <Flex vertical gap={2} style={topicColumnStyle}>
-        <label htmlFor="tray-topic" style={labelStyle}>Topic (optional)</label>
+        <label htmlFor="tray-topic" style={labelStyle}>{topicLabel}</label>
         <input
           ref={topicInputRef}
           id="tray-topic"
-          aria-label="Topic (optional)"
+          aria-label={topicLabel}
           type="text"
           defaultValue={topic}
           onBlur={(e) => onTopicChange(e.target.value)}

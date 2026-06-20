@@ -66,6 +66,8 @@
   },
   "tray": {
     "status": "Статус: {status}",
+    "source": "Источник",
+    "topicOptional": "Тема (опционально)",
     "openSystemSettings": "Открыть системные настройки"
   },
   "settings": {

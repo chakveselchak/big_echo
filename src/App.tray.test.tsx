@@ -155,6 +155,7 @@ describe("Tray window", () => {
     await waitFor(() => {
       expect(screen.getByText("Статус: ожидание")).toBeInTheDocument();
     });
+    expect(screen.getByLabelText("Тема (опционально)")).toBeInTheDocument();
   });
 
   it("applies shared ui sync updates", async () => {
