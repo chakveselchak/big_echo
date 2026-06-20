@@ -147,6 +147,16 @@ describe("Tray window", () => {
     window.localStorage.clear();
   });
 
+  it("localizes the tray status prefix in Russian", async () => {
+    window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "ru");
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Статус: ожидание")).toBeInTheDocument();
+    });
+  });
+
   it("applies shared ui sync updates", async () => {
     render(<App />);
 

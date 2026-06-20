@@ -1,9 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { SessionCard } from "./SessionCard";
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
+import { I18N_LANGUAGE_STORAGE_KEY, I18nProvider, type Language } from "../../i18n";
 
 function makeItem(
   brainUploadStatus: BrainUploadStatus,
@@ -42,6 +43,11 @@ function makeDetail(overrides: Partial<SessionMetaView> = {}): SessionMetaView {
 }
 
 type SessionCardProps = ComponentProps<typeof SessionCard>;
+
+function renderWithI18n(ui: ReactElement, language: Language = "en") {
+  window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, language);
+  return render(<I18nProvider>{ui}</I18nProvider>);
+}
 
 function makeProps(overrides: Partial<SessionCardProps> = {}): SessionCardProps {
   const noop = () => undefined;
@@ -84,12 +90,13 @@ function renderCard(
   brainSyncReady = true,
   canShareOrDetailOverrides: boolean | Partial<SessionMetaView> = false,
   onShare = vi.fn(),
+  language: Language = "en",
 ) {
   const canShare =
     typeof canShareOrDetailOverrides === "boolean" ? canShareOrDetailOverrides : false;
   const detailOverrides =
     typeof canShareOrDetailOverrides === "boolean" ? {} : canShareOrDetailOverrides;
-  const result = render(
+  const result = renderWithI18n(
     <SessionCard
       {...makeProps({
         item,
@@ -100,6 +107,7 @@ function renderCard(
         canShare,
       })}
     />,
+    language,
   );
   return { ...result, onUploadToBrain, onShare };
 }
@@ -111,7 +119,7 @@ describe("SessionCard Brain upload status", () => {
       item: makeItem("uploaded", { has_summary_text: false }),
       detail: makeDetail({ notes: "Initial note", topic: "Initial topic" }),
     });
-    const { rerender } = render(<SessionCard {...initialProps} />);
+    const { rerender } = renderWithI18n(<SessionCard {...initialProps} />);
 
     await user.clear(screen.getByLabelText("Topic"));
     await user.type(screen.getByLabelText("Topic"), "Edited topic");
@@ -123,11 +131,13 @@ describe("SessionCard Brain upload status", () => {
     await user.type(screen.getByLabelText("Notes"), "Edited note");
 
     rerender(
-      <SessionCard
-        {...initialProps}
-        item={makeItem("uploaded", { has_summary_text: true })}
-        detail={makeDetail({ notes: "Initial note", topic: "Initial topic" })}
-      />,
+      <I18nProvider>
+        <SessionCard
+          {...initialProps}
+          item={makeItem("uploaded", { has_summary_text: true })}
+          detail={makeDetail({ notes: "Initial note", topic: "Initial topic" })}
+        />
+      </I18nProvider>,
     );
 
     expect(screen.getByLabelText("Topic")).toHaveValue("Edited topic");
@@ -207,7 +217,7 @@ describe("SessionCard Brain upload status", () => {
 
   it("uses local pending state to disable upload before backend refresh", () => {
     const noop = () => undefined;
-    render(
+    renderWithI18n(
       <SessionCard
         item={makeItem("not_uploaded")}
         detail={makeDetail()}
@@ -234,7 +244,9 @@ describe("SessionCard Brain upload status", () => {
         onUploadToBrain={noop}
         onShare={noop}
         canShare={false}
+        onExportTodoist={noop}
         setStatus={noop}
+        todoistPending={false}
       />,
     );
 
@@ -263,6 +275,15 @@ describe("SessionCard Brain upload status", () => {
     });
 
     expect(container.querySelector(".summary-prompt-dot")).toBeInTheDocument();
+  });
+
+  it("localizes primary session actions in Russian", () => {
+    renderCard(makeItem("uploaded"), vi.fn(), true, false, vi.fn(), "ru");
+
+    expect(screen.getByText("Статус: готово")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Получить текст" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Получить саммари" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Экспортировать action items в Todoist" })).toBeInTheDocument();
   });
 });
 

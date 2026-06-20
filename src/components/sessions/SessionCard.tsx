@@ -7,6 +7,7 @@ import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
 import { extractStartTimeHm, resolveSessionAudioPath } from "../../lib/appUtils";
 import { AudioPlayer } from "./AudioPlayer";
+import { useI18n } from "../../i18n";
 
 const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
 
@@ -84,6 +85,7 @@ function SessionCardImpl({
   todoistPending,
   setStatus,
 }: SessionCardProps) {
+  const { t } = useI18n();
   const hasAudio = resolveSessionAudioPath(item) !== null;
 
   // Local draft state — edits update only this card, not the whole
@@ -168,6 +170,7 @@ function SessionCardImpl({
     !(brainUploadStatus === "uploaded" && item.brain_server_ingested_once);
   const brainUploadDisabled =
     brainUploadPending || brainUploadStatus === "uploading" || item.status === "recording";
+  const todoistExportLabel = t("sessions.actions.exportTodoist");
 
   return (
     <article
@@ -181,7 +184,7 @@ function SessionCardImpl({
             <span className="session-title-meta">{sessionTitleMeta}</span>
           </div>
           <div className={statusMatch ? "session-status match-hit" : "session-status"}>
-            Status: {formatSessionStatus(item.status)}
+            {t("sessions.status", { status: formatSessionStatus(item.status) })}
           </div>
         </div>
         <div className="session-card-actions">
@@ -234,8 +237,8 @@ function SessionCardImpl({
                 size="small"
                 shape="circle"
                 className="session-todoist-export-button"
-                aria-label="Export action items to Todoist"
-                title="Export action items to Todoist"
+                aria-label={todoistExportLabel}
+                title={todoistExportLabel}
                 loading={todoistPending}
                 icon={<CheckSquareOutlined aria-hidden="true" style={{color: "gray"}} />}
                 onClick={() => onExportTodoist(item.session_id)}
@@ -436,15 +439,20 @@ function SessionCardImpl({
               {textPending ? (
                 <span className="button-loading-content">
                   <span className="inline-loader" aria-hidden="true" />
-                  Getting text...
+                  {t("sessions.actions.gettingText")}
                 </span>
               ) : (
-                "Get text"
+                t("sessions.actions.getText")
               )}
             </Button>
             {textPending && (
-              <span className="visually-hidden" role="status" aria-live="polite" aria-label="Loading text">
-                Loading text
+              <span
+                className="visually-hidden"
+                role="status"
+                aria-live="polite"
+                aria-label={t("sessions.loadingText")}
+              >
+                {t("sessions.loadingText")}
               </span>
             )}
             <Button
@@ -457,10 +465,10 @@ function SessionCardImpl({
               {summaryPending ? (
                 <span className="button-loading-content">
                   <span className="inline-loader" aria-hidden="true" />
-                  Getting summary...
+                  {t("sessions.actions.gettingSummary")}
                 </span>
               ) : (
-                "Get Summary"
+                t("sessions.actions.getSummary")
               )}
             </Button>
             <span style={{ position: "relative", display: "inline-flex" }}>
@@ -502,9 +510,9 @@ function SessionCardImpl({
                 className="visually-hidden"
                 role="status"
                 aria-live="polite"
-                aria-label="Loading summary"
+                aria-label={t("sessions.loadingSummary")}
               >
-                Loading summary
+                {t("sessions.loadingSummary")}
               </span>
             )}
             {pipelineState ? (

@@ -1,4 +1,7 @@
 {
+  "common": {
+    "cancel": "Отмена"
+  },
   "domText": {
     "Sessions": "Сессии",
     "Settings": "Настройки",
@@ -38,6 +41,32 @@
     "Transcription provider": "Провайдер транскрибации",
     "Loading settings...": "Загрузка настроек...",
     "Loading settings…": "Загрузка настроек..."
+  },
+  "sessions": {
+    "status": "Статус: {status}",
+    "loadingText": "Загрузка текста",
+    "loadingSummary": "Загрузка саммари",
+    "actions": {
+      "getText": "Получить текст",
+      "gettingText": "Получение текста...",
+      "getSummary": "Получить саммари",
+      "gettingSummary": "Получение саммари...",
+      "exportTodoist": "Экспортировать action items в Todoist"
+    }
+  },
+  "todoistExport": {
+    "title": "Экспорт action items в Todoist",
+    "addSelected": "Добавить выбранные",
+    "addAll": "Добавить все",
+    "empty": "Action items в этом саммари не найдены.",
+    "selectTask": "Выбрать {title}",
+    "synced": "Синхронизировано",
+    "due": "Срок",
+    "assignee": "Ответственный"
+  },
+  "tray": {
+    "status": "Статус: {status}",
+    "openSystemSettings": "Открыть системные настройки"
   },
   "settings": {
     "title": "Настройки",

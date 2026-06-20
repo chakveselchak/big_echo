@@ -8,6 +8,7 @@ import {
 import { Button, Checkbox, Empty, List, Modal, Space, Tag, Typography } from "antd";
 import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import type { TodoistActionItem, TodoistTaskPreview } from "../../types";
+import { useI18n } from "../../i18n";
 
 type TodoistExportModalProps = {
   preview: TodoistTaskPreview | null;
@@ -35,6 +36,7 @@ export function TodoistExportModal({
   onCancel,
   onAddSelected,
 }: TodoistExportModalProps) {
+  const { t } = useI18n();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const selectableIds = useMemo(
     () => preview?.items.filter((item) => item.status !== "synced").map((item) => item.id) ?? [],
@@ -59,7 +61,7 @@ export function TodoistExportModal({
 
   const footer = [
     <Button key="cancel" onClick={onCancel}>
-      Cancel
+      {t("common.cancel")}
     </Button>,
     <Button
       key="selected"
@@ -67,7 +69,7 @@ export function TodoistExportModal({
       loading={syncing}
       onClick={addSelected}
     >
-      Add selected
+      {t("todoistExport.addSelected")}
     </Button>,
     <Button
       key="all"
@@ -76,18 +78,19 @@ export function TodoistExportModal({
       loading={syncing}
       onClick={() => onAddSelected(selectableIds)}
     >
-      Add all
+      {t("todoistExport.addAll")}
     </Button>,
   ];
+  const title = t("todoistExport.title");
 
   return (
     <Modal
       open={open}
-      title="Export action items to Todoist"
+      title={title}
       closable={false}
       onCancel={onCancel}
       footer={footer}
-      aria-label="Export action items to Todoist"
+      aria-label={title}
       width={720}
     >
       {preview?.warnings.length ? (
@@ -101,7 +104,7 @@ export function TodoistExportModal({
       ) : null}
 
       {!hasItems ? (
-        <Empty description="No action items found in this summary." />
+        <Empty description={t("todoistExport.empty")} />
       ) : (
         <List
           dataSource={preview?.items ?? []}
@@ -114,7 +117,7 @@ export function TodoistExportModal({
                   avatar={
                     <Checkbox
                       id={checkboxId}
-                      aria-label={`Select ${item.title}`}
+                      aria-label={t("todoistExport.selectTask", { title: item.title })}
                       checked={selectedIds.includes(item.id)}
                       disabled={disabled || syncing}
                       onChange={(event: CheckboxChangeEvent) => setChecked(item.id, event.target.checked)}
@@ -126,7 +129,10 @@ export function TodoistExportModal({
                         <Typography.Text strong>
                           {item.title}
                           {item.status === "synced" ? (
-                            <CheckCircleOutlined aria-label="Synced" style={syncedIconStyle} />
+                            <CheckCircleOutlined
+                              aria-label={t("todoistExport.synced")}
+                              style={syncedIconStyle}
+                            />
                           ) : null}
                         </Typography.Text>
                         {item.status !== "new" && item.status !== "synced" ? (
@@ -138,7 +144,7 @@ export function TodoistExportModal({
                   description={
                     <Space direction="vertical" size={2} style={{ width: "100%" }}>
                       {item.due ? (
-                        <Typography.Text aria-label="Due" type="secondary">
+                        <Typography.Text aria-label={t("todoistExport.due")} type="secondary">
                           <Space size={6}>
                             <CalendarOutlined aria-hidden style={taskMetaIconStyle} />
                             <span>{item.due}</span>
@@ -146,7 +152,7 @@ export function TodoistExportModal({
                         </Typography.Text>
                       ) : null}
                       {item.assignee ? (
-                        <Typography.Text aria-label="Assignee" type="secondary">
+                        <Typography.Text aria-label={t("todoistExport.assignee")} type="secondary">
                           <Space size={6}>
                             <UserOutlined aria-hidden style={taskMetaIconStyle} />
                             <span>{item.assignee}</span>

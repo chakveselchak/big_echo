@@ -1,4 +1,7 @@
 {
+  "common": {
+    "cancel": "Cancel"
+  },
   "domText": {
     "Sessions": "Sessions",
     "Settings": "Settings",
@@ -38,6 +41,32 @@
     "Transcription provider": "Transcription provider",
     "Loading settings...": "Loading settings...",
     "Loading settings…": "Loading settings..."
+  },
+  "sessions": {
+    "status": "Status: {status}",
+    "loadingText": "Loading text",
+    "loadingSummary": "Loading summary",
+    "actions": {
+      "getText": "Get text",
+      "gettingText": "Getting text...",
+      "getSummary": "Get Summary",
+      "gettingSummary": "Getting summary...",
+      "exportTodoist": "Export action items to Todoist"
+    }
+  },
+  "todoistExport": {
+    "title": "Export action items to Todoist",
+    "addSelected": "Add selected",
+    "addAll": "Add all",
+    "empty": "No action items found in this summary.",
+    "selectTask": "Select {title}",
+    "synced": "Synced",
+    "due": "Due",
+    "assignee": "Assignee"
+  },
+  "tray": {
+    "status": "Status: {status}",
+    "openSystemSettings": "Open System Settings"
   },
   "settings": {
     "title": "Settings",

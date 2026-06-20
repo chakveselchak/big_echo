@@ -9,6 +9,7 @@ import { AudioRow } from "../../components/tray/AudioRow";
 import { RecordingControls } from "../../components/tray/RecordingControls";
 import { initializeAnalytics } from "../../lib/analytics";
 import { getCurrentWindowLabel, tauriInvoke } from "../../lib/tauri";
+import { useI18n } from "../../i18n";
 
 const monoFontStack =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
@@ -23,6 +24,7 @@ function formatElapsed(totalSec: number): string {
 }
 
 export function TrayPage() {
+  const { t } = useI18n();
   const [status, setStatus] = useState("idle");
   const [topic, setTopic] = useState("");
   const [source, setSource] = useState("slack");
@@ -142,7 +144,7 @@ export function TrayPage() {
       {/* Status bar */}
       <Flex justify="space-between" align="center">
         <Typography.Text style={{ fontSize: 12 }}>
-          Status: {formatAppStatus(status)}
+          {t("tray.status", { status: formatAppStatus(status) })}
         </Typography.Text>
         {showMacosSystemAudioSettingsShortcut && (
           <Button
@@ -151,7 +153,7 @@ export function TrayPage() {
             style={{ padding: 0 }}
             onClick={() => void openMacosSystemAudioSettings()}
           >
-            Open System Settings
+            {t("tray.openSystemSettings")}
           </Button>
         )}
       </Flex>
