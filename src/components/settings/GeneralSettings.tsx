@@ -2,6 +2,7 @@ import { Button, Checkbox, Flex, Form, Input, InputNumber, Select, Tooltip } fro
 import { FileSyncOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import type { PublicSettings, TextEditorAppOption } from "../../types";
 import { localIconForEditor } from "../../lib/appUtils";
+import { useI18n } from "../../i18n";
 
 type GeneralSettingsProps = {
   settings: PublicSettings;
@@ -22,6 +23,7 @@ export function GeneralSettings({
   isSyncingSessions,
   textEditorApps,
 }: GeneralSettingsProps) {
+  const { language, setLanguage, t } = useI18n();
   const openerUiFallback: TextEditorAppOption[] = [
     { id: "TextEdit", name: "TextEdit", icon_fallback: "📝", icon_data_url: null },
     { id: "Visual Studio Code", name: "Visual Studio Code", icon_fallback: "💠", icon_data_url: null },
@@ -32,7 +34,7 @@ export function GeneralSettings({
   ];
   const openerOptions = textEditorApps.length > 0 ? textEditorApps : openerUiFallback;
   const openerMenuOptions = [
-    { id: "", name: "System default", icon_fallback: "", icon_data_url: null },
+    { id: "", name: t("settings.artifactOpener.systemDefault"), icon_fallback: "", icon_data_url: null },
     ...openerOptions,
   ];
 
@@ -53,10 +55,24 @@ export function GeneralSettings({
 
   return (
     <Form layout="vertical" style={{ maxWidth: 760 }}>
+      <Form.Item label={<label htmlFor="ui_language">{t("settings.language.label")}</label>}>
+        <Select
+          id="ui_language"
+          aria-label={t("settings.language.label")}
+          value={language}
+          virtual={false}
+          options={[
+            { value: "ru", label: t("settings.language.ru") },
+            { value: "en", label: t("settings.language.en") },
+          ]}
+          onChange={(value) => setLanguage(value)}
+        />
+      </Form.Item>
+
       <Form.Item
         label={
           <label htmlFor="recording_root">
-            Recording root{isDirty("recording_root") && dirtyDot}
+            {t("settings.recordingRoot.label")}{isDirty("recording_root") && dirtyDot}
           </label>
         }
       >
@@ -68,7 +84,7 @@ export function GeneralSettings({
           />
           <Button
             htmlType="button"
-            aria-label="Choose recording root folder"
+            aria-label={t("settings.recordingRoot.choose")}
             onClick={() => {
               void pickRecordingRoot();
             }}
@@ -84,10 +100,10 @@ export function GeneralSettings({
               />
             </svg>
           </Button>
-          <Tooltip title="Sync sessions with folder">
+          <Tooltip title={t("settings.recordingRoot.sync")}>
             <Button
               htmlType="button"
-              aria-label="Sync sessions with recording root folder"
+              aria-label={t("settings.recordingRoot.sync")}
               icon={<FileSyncOutlined aria-hidden="true" />}
               loading={isSyncingSessions}
               onClick={() => void syncSessions()}
@@ -99,13 +115,13 @@ export function GeneralSettings({
       <Form.Item
         label={
           <label htmlFor="artifact_open_app">
-            Artifact opener app (optional){isDirty("artifact_open_app") && dirtyDot}
+            {t("settings.artifactOpener.label")}{isDirty("artifact_open_app") && dirtyDot}
           </label>
         }
       >
         <Select
           id="artifact_open_app"
-          aria-label="Artifact opener app (optional)"
+          aria-label={t("settings.artifactOpener.label")}
           value={settings.artifact_open_app}
           virtual={false}
           options={openerMenuOptions.map((editor) => ({
@@ -134,18 +150,18 @@ export function GeneralSettings({
         <Flex align="center" gap={8} wrap="wrap">
           <Checkbox
             id="auto_delete_audio_enabled"
-            aria-label="Auto-delete audio files for old sessions"
+            aria-label={t("settings.autoDelete.label")}
             checked={Boolean(settings.auto_delete_audio_enabled)}
             onChange={(e) =>
               setSettings({ ...settings, auto_delete_audio_enabled: e.target.checked })
             }
           >
-            Auto-delete audio files for sessions older than
+            {t("settings.autoDelete.label")}
             {(isDirty("auto_delete_audio_enabled") ||
               isDirty("auto_delete_audio_days")) && dirtyDot}
           </Checkbox>
           <InputNumber
-            aria-label="Days before audio auto-delete"
+            aria-label={t("settings.autoDelete.inputLabel")}
             min={1}
             max={3650}
             value={settings.auto_delete_audio_days}
@@ -155,8 +171,8 @@ export function GeneralSettings({
             }
             style={{ width: 80 }}
           />
-          <span>days</span>
-          <Tooltip title="Runs at app startup">
+          <span>{t("settings.autoDelete.daysLabel")}</span>
+          <Tooltip title={t("settings.autoDelete.tooltip")}>
             <QuestionCircleOutlined style={{ color: "#999", cursor: "help" }} />
           </Tooltip>
         </Flex>
@@ -165,7 +181,7 @@ export function GeneralSettings({
       <Form.Item>
         <Checkbox
           id="auto_run_pipeline_on_stop"
-          aria-label="Auto-run pipeline on Stop"
+          aria-label={t("settings.autoRunPipeline")}
           checked={Boolean(settings.auto_run_pipeline_on_stop)}
           onChange={(event) =>
             setSettings({
@@ -177,14 +193,14 @@ export function GeneralSettings({
             })
           }
         >
-          Auto-run pipeline on Stop{isDirty("auto_run_pipeline_on_stop") && dirtyDot}
+          {t("settings.autoRunPipeline")}{isDirty("auto_run_pipeline_on_stop") && dirtyDot}
         </Checkbox>
       </Form.Item>
 
       <Form.Item>
         <Checkbox
           id="auto_transcribe_on_stop"
-          aria-label="Автоматическая транскрибация по окончанию записи"
+          aria-label={t("settings.autoTranscribe")}
           checked={Boolean(settings.auto_transcribe_on_stop)}
           onChange={(event) =>
             setSettings({
@@ -196,7 +212,7 @@ export function GeneralSettings({
             })
           }
         >
-          Автоматическая транскрибация по окончанию записи
+          {t("settings.autoTranscribe")}
           {isDirty("auto_transcribe_on_stop") && dirtyDot}
         </Checkbox>
       </Form.Item>
@@ -204,26 +220,26 @@ export function GeneralSettings({
       <Form.Item>
         <Checkbox
           id="api_call_logging_enabled"
-          aria-label="Enable API call logging"
+          aria-label={t("settings.apiLogging")}
           checked={Boolean(settings.api_call_logging_enabled)}
           onChange={(event) =>
             setSettings({ ...settings, api_call_logging_enabled: event.target.checked })
           }
         >
-          Enable API call logging{isDirty("api_call_logging_enabled") && dirtyDot}
+          {t("settings.apiLogging")}{isDirty("api_call_logging_enabled") && dirtyDot}
         </Checkbox>
       </Form.Item>
 
       <Form.Item>
         <Checkbox
           id="show_minitray_overlay"
-          aria-label="Show minitray on top of all windows"
+          aria-label={t("settings.minitrayOverlay")}
           checked={Boolean(settings.show_minitray_overlay)}
           onChange={(event) =>
             setSettings({ ...settings, show_minitray_overlay: event.target.checked })
           }
         >
-          Show minitray on top of all windows{isDirty("show_minitray_overlay") && dirtyDot}
+          {t("settings.minitrayOverlay")}{isDirty("show_minitray_overlay") && dirtyDot}
         </Checkbox>
       </Form.Item>
     </Form>

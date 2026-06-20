@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
 
@@ -121,6 +121,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 
+const I18N_LANGUAGE_STORAGE_KEY = "bigecho.ui.language";
+
 function getTraySourceSelect() {
   const select = screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement;
   expect(select).not.toBeNull();
@@ -132,12 +134,17 @@ function expectTraySourceValue(value: string) {
 }
 
 describe("Tray window", () => {
+  beforeEach(() => {
+    window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "en");
+  });
+
   afterEach(() => {
     listeners.clear();
     invokeMock.mockClear();
     invokeMock.mockReset();
     invokeMock.mockImplementation(defaultInvokeImplementation);
     vi.useRealTimers();
+    window.localStorage.clear();
   });
 
   it("applies shared ui sync updates", async () => {

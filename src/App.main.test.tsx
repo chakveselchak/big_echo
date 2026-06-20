@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
 
@@ -92,6 +92,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { App } from "./App";
 import packageJson from "../package.json";
 
+const I18N_LANGUAGE_STORAGE_KEY = "bigecho.ui.language";
+
 function expectSessionAntdSelectValue(label: string, value: string) {
   const combobox = screen.getByRole("combobox", { name: label });
   const select = combobox.closest(".ant-select");
@@ -160,6 +162,10 @@ function namedPromptSessionListItem(sessionId: string, topic: string) {
 }
 
 describe("App main window", () => {
+  beforeEach(() => {
+    window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "en");
+  });
+
   afterEach(() => {
     invokeMock.mockImplementation(defaultInvokeImpl);
     window.localStorage.clear();
@@ -1433,7 +1439,7 @@ describe("App main window", () => {
     await clickAntdMenuItem(user, menu, "Настроить промпт саммари");
     expect(await screen.findByRole("dialog", { name: "Управление промптами для саммари" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Управление промптами для саммари" })).not.toBeInTheDocument();
     });
@@ -1918,7 +1924,7 @@ describe("App main window", () => {
     const toggleButton = screen.getByRole("button", { name: "Воспроизвести аудио" });
     await user.click(toggleButton);
     expect(playMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Пауза" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
 
     const seekSlider = screen.getByRole("slider", { name: "Позиция аудио" });
     expect(seekSlider).toHaveValue(0);
@@ -1943,7 +1949,7 @@ describe("App main window", () => {
     });
     expect(audio?.currentTime).toBe(120);
 
-    await user.click(screen.getByRole("button", { name: "Пауза" }));
+    await user.click(screen.getByRole("button", { name: "Pause" }));
     expect(pauseMock).toHaveBeenCalledTimes(1);
 
     playMock.mockRestore();
@@ -2027,12 +2033,12 @@ describe("App main window", () => {
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
     expect(screen.getByText("Удалить сессию и все связанные файлы?")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(invokeMock).not.toHaveBeenCalledWith("delete_session", { sessionId: "s7", force: false });
     expect(screen.getByRole("heading", { name: "Delete me" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("delete_session", { sessionId: "s7", force: false });
     });
@@ -2117,7 +2123,7 @@ describe("App main window", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Delete me" })).not.toBeInTheDocument();
@@ -2196,8 +2202,8 @@ describe("App main window", () => {
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
 
-    const cancelButton = screen.getByRole("button", { name: "Отмена" });
-    const deleteButton = screen.getByRole("button", { name: "Удалить" });
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    const deleteButton = screen.getByRole("button", { name: "Delete" });
     await waitFor(() => {
       expect(cancelButton).toHaveFocus();
     });
@@ -2267,7 +2273,7 @@ describe("App main window", () => {
       screen.getByText("Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?")
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("delete_session", { sessionId: "s8", force: true });
     });
