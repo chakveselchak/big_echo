@@ -1759,6 +1759,68 @@ describe("App main window", () => {
     expect(screen.getByText("ACME renewal risk", { selector: "mark" })).toBeInTheDocument();
   });
 
+  it("renders a bounded matched artifact preview instead of the full large text", async () => {
+    const user = userEvent.setup();
+    const prefix = "prefix ".repeat(1200);
+    const suffix = " suffix".repeat(1200);
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-large",
+            status: "recorded",
+            primary_tag: "slack",
+            topic: "Large artifact",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T12:00:00+03:00",
+            session_dir: "/tmp/s-large",
+            audio_duration_hms: "00:07:42",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-large",
+          source: "zoom",
+          notes: "",
+          topic: "Large artifact",
+          tags: [],
+        };
+      }
+      if (cmd === "search_session_artifacts") {
+        if ((args as { query?: string } | undefined)?.query === "needle phrase") {
+          return {
+            "s-large": { transcript_match: true, summary_match: false },
+          };
+        }
+        return {};
+      }
+      if (cmd === "read_session_artifact") {
+        return {
+          path: "/tmp/s-large/transcript.txt",
+          text: `${prefix}needle phrase${suffix}`,
+        };
+      }
+      return defaultInvokeImpl(cmd, args);
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await user.type(screen.getByLabelText("Search sessions"), "needle phrase{Enter}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "текст" })).toHaveClass("match-hit");
+    });
+
+    await user.click(screen.getByRole("button", { name: "текст" }));
+
+    const body = await screen.findByTestId("artifact-preview-body");
+    expect(screen.getByText("needle phrase", { selector: "mark" })).toBeInTheDocument();
+    expect(body.textContent?.length).toBeLessThan(2500);
+    expect(body.textContent).toContain("...");
+  });
+
   it("focuses Search sessions on Cmd/Ctrl+F", async () => {
     const user = userEvent.setup();
     render(<App />);

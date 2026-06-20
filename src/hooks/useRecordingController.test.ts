@@ -46,6 +46,29 @@ vi.mock("../lib/tauri", () => ({
   tauriEmit: emitMock,
   tauriInvoke: invokeMock,
   tauriListen: listenMock,
+  tauriListenSafely: (
+    event: string,
+    handler: (payload?: unknown) => void | Promise<void>,
+    onError?: () => void,
+  ) => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listenMock(event, handler)
+      .then((nextUnlisten) => {
+        if (disposed) {
+          nextUnlisten();
+          return;
+        }
+        unlisten = nextUnlisten;
+      })
+      .catch(() => {
+        if (!disposed) onError?.();
+      });
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  },
   // The controller tags ui:sync emits with the originating window so peers
   // can drop their own echoes; the test harness defaults to "main".
   getCurrentWindowLabel: () => "main",
@@ -92,6 +115,13 @@ function getDefaultInvokeResponse(cmd: string) {
 
 function setDefaultInvokeMockImplementation() {
   invokeMock.mockImplementation(async (cmd: string) => getDefaultInvokeResponse(cmd));
+}
+
+function setDefaultListenMockImplementation() {
+  listenMock.mockImplementation(async (event: string, handler: (payload?: unknown) => void | Promise<void>) => {
+    listeners.set(event, handler);
+    return () => listeners.delete(event);
+  });
 }
 
 type HarnessOptions = {
@@ -153,10 +183,15 @@ describe("useRecordingController", () => {
     emitMock.mockClear();
     listenMock.mockClear();
     setDefaultInvokeMockImplementation();
+    setDefaultListenMockImplementation();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
   });
 
   it("hydrates ui sync state and starts recording through the tauri adapter", async () => {
@@ -1070,6 +1105,50 @@ describe("useRecordingController", () => {
 
     const liveLevelCalls = invokeMock.mock.calls.filter(([command]) => command === "get_live_input_levels");
     expect(liveLevelCalls.length).toBeLessThanOrEqual(4);
+  });
+
+  it("does not poll tray live levels while the tray document is hidden", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+
+    renderControllerHarness({ isTrayWindow: true });
+
+    await act(async () => {
+      await Promise.resolve();
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+
+    const liveLevelCalls = invokeMock.mock.calls.filter(([command]) => command === "get_live_input_levels");
+    expect(liveLevelCalls).toHaveLength(0);
+  });
+
+  it("unlistens tauri event subscriptions that resolve after unmount", async () => {
+    const pending: Array<{ resolve: (unlisten: () => void) => void; unlisten: ReturnType<typeof vi.fn> }> = [];
+    listenMock.mockImplementation(
+      (_event: string, _handler: (payload?: unknown) => void | Promise<void>) =>
+        new Promise((resolve) => {
+          const unlisten = vi.fn();
+          pending.push({
+            resolve: resolve as (unlisten: () => void) => void,
+            unlisten,
+          });
+        }),
+    );
+
+    const { unmount } = renderControllerHarness();
+    unmount();
+    pending.forEach(({ resolve, unlisten }) => resolve(unlisten));
+
+    await waitFor(() => {
+      expect(pending).toHaveLength(6);
+      for (const { unlisten } of pending) {
+        expect(unlisten).toHaveBeenCalledTimes(1);
+      }
+    });
   });
 
   it("flushes pending session details before stopping the recording", async () => {
