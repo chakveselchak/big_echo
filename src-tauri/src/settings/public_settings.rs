@@ -48,6 +48,7 @@ pub struct PublicSettings {
     pub yandex_sync_interval: String,
     pub yandex_sync_remote_folder: String,
     pub brain_sync_enabled: bool,
+    pub brain_sync_summary_auto_upload_enabled: bool,
     pub brain_sync_url: String,
     pub todoist_sync_enabled: bool,
     pub todoist_auto_add: bool,
@@ -86,6 +87,7 @@ impl Default for PublicSettings {
             yandex_sync_interval: "24h".to_string(),
             yandex_sync_remote_folder: "BigEcho".to_string(),
             brain_sync_enabled: false,
+            brain_sync_summary_auto_upload_enabled: false,
             brain_sync_url: BRAIN_SYNC_DEFAULT_URL.to_string(),
             todoist_sync_enabled: false,
             todoist_auto_add: false,
@@ -144,7 +146,9 @@ impl PublicSettings {
             Self::parse_http_url(&self.summary_url, "summary")?;
         }
         let brain_sync_url = self.brain_sync_url.trim();
-        if self.brain_sync_enabled && brain_sync_url.is_empty() {
+        if (self.brain_sync_enabled || self.brain_sync_summary_auto_upload_enabled)
+            && brain_sync_url.is_empty()
+        {
             return Err("Invalid Brain sync URL".to_string());
         }
         if !brain_sync_url.is_empty() {
@@ -249,6 +253,11 @@ mod tests {
     }
 
     #[test]
+    fn brain_summary_auto_upload_is_disabled_by_default() {
+        assert!(!PublicSettings::default().brain_sync_summary_auto_upload_enabled);
+    }
+
+    #[test]
     fn summary_defaults_point_to_local_codex_endpoint() {
         let settings = PublicSettings::default();
 
@@ -284,10 +293,22 @@ mod tests {
         let parsed: PublicSettings = serde_json::from_str(body).expect("settings should parse");
         assert!(!parsed.auto_run_pipeline_on_stop);
         assert!(!parsed.api_call_logging_enabled);
+        assert!(!parsed.brain_sync_summary_auto_upload_enabled);
         assert_eq!(
             parsed.artifact_opener_app,
             default_text_editor_id().unwrap_or_default().to_string()
         );
+    }
+
+    #[test]
+    fn rejects_enabled_brain_summary_auto_upload_without_url() {
+        let s = PublicSettings {
+            brain_sync_summary_auto_upload_enabled: true,
+            brain_sync_url: "  ".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(s.validate(), Err("Invalid Brain sync URL".to_string()));
     }
 
     #[test]

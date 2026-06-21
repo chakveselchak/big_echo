@@ -35,6 +35,7 @@ const { invokeMock } = vi.hoisted(() => ({
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
         brain_sync_enabled: false,
+        brain_sync_summary_auto_upload_enabled: false,
         brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
         show_minitray_overlay: false,
       };
@@ -165,6 +166,7 @@ function mockSettings() {
     yandex_sync_interval: "24h",
     yandex_sync_remote_folder: "BigEcho",
     brain_sync_enabled: false,
+    brain_sync_summary_auto_upload_enabled: false,
     brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
     show_minitray_overlay: false,
   };
@@ -800,6 +802,7 @@ describe("App settings window", () => {
       expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
         payload: expect.objectContaining({
           brain_sync_enabled: true,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://brain.example.test/upload",
         }),
       });

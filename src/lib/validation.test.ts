@@ -32,6 +32,7 @@ function baseSettings(overrides: Partial<PublicSettings> = {}): PublicSettings {
     yandex_sync_remote_folder: "BigEcho",
     show_minitray_overlay: false,
     brain_sync_enabled: false,
+    brain_sync_summary_auto_upload_enabled: false,
     brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
     ...overrides,
   };
@@ -47,6 +48,16 @@ describe("validateSettings", () => {
   it("rejects enabled Brain sync with a non-http URL", () => {
     expect(
       validateSettings(baseSettings({ brain_sync_enabled: true, brain_sync_url: "ftp://example.com/upload" }))
+    ).toContain("Неверный URL Brain sync");
+  });
+
+  it("rejects enabled Brain summary auto-upload without a URL", () => {
+    expect(
+      validateSettings(baseSettings({
+        brain_sync_enabled: false,
+        brain_sync_summary_auto_upload_enabled: true,
+        brain_sync_url: "   ",
+      }))
     ).toContain("Неверный URL Brain sync");
   });
 

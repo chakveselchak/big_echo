@@ -127,6 +127,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       isDirty("todoist_auto_add"),
     brain:
       isDirty("brain_sync_enabled") ||
+      isDirty("brain_sync_summary_auto_upload_enabled") ||
       isDirty("brain_sync_url"),
   };
 

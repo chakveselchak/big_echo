@@ -38,7 +38,8 @@ export function validateSettings(settings: PublicSettings | null): string[] {
   }
   const brainSyncUrl = settings.brain_sync_url.trim();
   if (
-    (settings.brain_sync_enabled && !brainSyncUrl) ||
+    ((settings.brain_sync_enabled || settings.brain_sync_summary_auto_upload_enabled) &&
+      !brainSyncUrl) ||
     (brainSyncUrl && !isValidHttpUrl(brainSyncUrl))
   ) {
     errors.push("Неверный URL Brain sync");

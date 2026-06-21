@@ -17,6 +17,7 @@ pub fn brain_upload_content_type(path: &Path) -> &'static str {
         Some("m4a") => "audio/mp4",
         Some("ogg") => "audio/ogg",
         Some("wav") => "audio/wav",
+        Some("md") | Some("markdown") => "text/markdown; charset=utf-8",
         _ => "application/octet-stream",
     }
 }
@@ -38,6 +39,14 @@ mod tests {
         assert_eq!(
             brain_upload_content_type(Path::new("/tmp/audio.ogg")),
             "audio/ogg"
+        );
+    }
+
+    #[test]
+    fn markdown_upload_uses_text_markdown_mime() {
+        assert_eq!(
+            brain_upload_content_type(Path::new("/tmp/summary.md")),
+            "text/markdown; charset=utf-8"
         );
     }
 }
