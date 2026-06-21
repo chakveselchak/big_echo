@@ -1,0 +1,116 @@
+{
+  "common": {
+    "cancel": "Отмена"
+  },
+  "domText": {
+    "Sessions": "Сессии",
+    "Settings": "Настройки",
+    "New version": "Новая версия",
+    "Main sections": "Основные разделы",
+    "No sessions yet": "Сессий пока нет",
+    "New recordings will appear here with search, transcript, summary, and audio actions.": "Новые записи появятся здесь вместе с поиском, текстом, саммари и аудио-действиями.",
+    "Search sessions": "Поиск сессий",
+    "Refresh sessions": "Обновить сессии",
+    "Import audio": "Импортировать аудио",
+    "Topic": "Тема",
+    "Source": "Источник",
+    "Tags": "Теги",
+    "Notes": "Заметки",
+    "Save": "Сохранить",
+    "Cancel": "Отмена",
+    "Delete": "Удалить",
+    "Close": "Закрыть",
+    "Open": "Открыть",
+    "Text": "Текст",
+    "Summary": "Саммари",
+    "No transcript yet": "Текста пока нет",
+    "No summary yet": "Саммари пока нет",
+    "Start": "Старт",
+    "Stop": "Стоп",
+    "Pause": "Пауза",
+    "Resume": "Продолжить",
+    "Status": "Статус",
+    "Open System Settings": "Открыть системные настройки",
+    "Mic": "Микрофон",
+    "Mic activity": "Активность микрофона",
+    "Mic device": "Устройство микрофона",
+    "System": "Система",
+    "System activity": "Активность системного аудио",
+    "System device": "Системное устройство",
+    "Auto": "Авто",
+    "Transcription provider": "Провайдер транскрибации",
+    "Loading settings...": "Загрузка настроек...",
+    "Loading settings…": "Загрузка настроек..."
+  },
+  "sessions": {
+    "status": "Статус: {status}",
+    "loadingText": "Загрузка текста",
+    "loadingSummary": "Загрузка саммари",
+    "actions": {
+      "getText": "Получить текст",
+      "gettingText": "Получение текста...",
+      "getSummary": "Получить саммари",
+      "gettingSummary": "Получение саммари...",
+      "exportTodoist": "Экспортировать action items в Todoist"
+    }
+  },
+  "todoistExport": {
+    "title": "Экспорт action items в Todoist",
+    "addSelected": "Добавить выбранные",
+    "addAll": "Добавить все",
+    "empty": "Action items в этом саммари не найдены.",
+    "selectTask": "Выбрать {title}",
+    "synced": "Синхронизировано",
+    "due": "Срок",
+    "assignee": "Ответственный"
+  },
+  "tray": {
+    "status": "Статус: {status}",
+    "source": "Источник",
+    "topicOptional": "Тема (опционально)",
+    "record": "Запись",
+    "stop": "Стоп",
+    "openSystemSettings": "Открыть системные настройки"
+  },
+  "settings": {
+    "title": "Настройки",
+    "tabs": {
+      "generals": "Общие",
+      "audioToText": "Аудио в текст",
+      "audio": "Аудио",
+      "yandex": "Яндекс.Диск",
+      "todoist": "Todoist",
+      "brain": "Brain"
+    },
+    "actions": {
+      "save": "Сохранить настройки",
+      "syncNow": "Синхронизировать сейчас"
+    },
+    "loading": "Загрузка настроек...",
+    "language": {
+      "label": "Язык интерфейса",
+      "ru": "Русский",
+      "en": "English"
+    },
+    "recordingRoot": {
+      "label": "Папка записей",
+      "choose": "Выбрать папку записей",
+      "sync": "Синхронизировать с папкой записей"
+    },
+    "artifactOpener": {
+      "label": "Приложение для артефактов (опционально)",
+      "systemDefault": "Системное по умолчанию"
+    },
+    "autoDelete": {
+      "label": "Автоматически удалять аудио сессий старше",
+      "days": "{count} дн.",
+      "daysLabel": "дней",
+      "inputLabel": "Дней до автоудаления аудио",
+      "tooltip": "Запускается при старте приложения"
+    },
+    "autoRunPipeline": "Автоматически запускать pipeline после Stop",
+    "autoTranscribe": "Автоматически транскрибировать после окончания записи",
+    "apiLogging": "Включить логирование API-запросов",
+    "minitrayOverlay": "Показывать minitray поверх всех окон"
+  }
+}

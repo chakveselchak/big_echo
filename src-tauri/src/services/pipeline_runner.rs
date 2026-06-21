@@ -5,6 +5,10 @@ use crate::command_core::{
     PipelineInvocation,
 };
 use crate::pipeline;
+use crate::services::brain_server::client::BrainServerClient;
+use crate::services::brain_server::upload::{
+    upload_summary_after_record_with_client, validate_upload_url,
+};
 use crate::settings::public_settings::load_settings;
 use crate::settings::secret_store::get_secret;
 use crate::storage::markdown_artifact::{strip_frontmatter, write_markdown_artifact};
@@ -70,6 +74,13 @@ fn read_transcript_body_for_summary(transcript_path: &Path) -> Result<String, St
         return Err("Transcript file is empty".to_string());
     }
     Ok(body.to_string())
+}
+
+fn should_upload_brain_summary_after_pipeline(
+    settings: &crate::settings::public_settings::PublicSettings,
+) -> bool {
+    settings.brain_sync_summary_auto_upload_enabled
+        && validate_upload_url(&settings.brain_sync_url).is_ok()
 }
 
 fn transcription_request_log_detail(
@@ -327,11 +338,8 @@ pub async fn run_pipeline_core(
             "api_summary_success",
             format!("summary_chars={}", summary.chars().count()),
         );
-        write_markdown_artifact(
-            &session_dir.join(&meta.artifacts.summary_file),
-            &meta,
-            &summary,
-        )?;
+        let summary_path = session_dir.join(&meta.artifacts.summary_file);
+        write_markdown_artifact(&summary_path, &meta, &summary)?;
         mark_pipeline_done(&mut meta);
         save_meta(&meta_path, &meta)?;
         upsert_session(&data_dir, &meta, session_dir, &meta_path)?;
@@ -341,6 +349,25 @@ pub async fn run_pipeline_core(
             "pipeline_done",
             "Summary created",
         )?;
+        if should_upload_brain_summary_after_pipeline(&settings) {
+            let app_data_dir = data_dir.clone();
+            let session_dir = session_dir.to_path_buf();
+            let upload_meta = meta.clone();
+            let upload_settings = settings.clone();
+            tauri::async_runtime::spawn(async move {
+                let client = BrainServerClient::new();
+                let _ = upload_summary_after_record_with_client(
+                    app_data_dir,
+                    session_dir,
+                    upload_meta,
+                    summary_path,
+                    upload_settings,
+                    &client,
+                    true,
+                )
+                .await;
+            });
+        }
     }
 
     if matches!(mode, PipelineMode::Full) {
@@ -461,5 +488,20 @@ mod tests {
         let body = read_transcript_body_for_summary(&transcript_path).expect("summary body");
 
         assert_eq!(body, "# Transcript\n\nSpeaker 1: Hello");
+    }
+
+    #[test]
+    fn brain_summary_auto_upload_requires_summary_flag_and_valid_url() {
+        let mut settings = sample_settings();
+        settings.brain_sync_enabled = true;
+        settings.brain_sync_summary_auto_upload_enabled = false;
+        settings.brain_sync_url = "https://brain.example/upload".to_string();
+        assert!(!should_upload_brain_summary_after_pipeline(&settings));
+
+        settings.brain_sync_summary_auto_upload_enabled = true;
+        assert!(should_upload_brain_summary_after_pipeline(&settings));
+
+        settings.brain_sync_url = "not-a-url".to_string();
+        assert!(!should_upload_brain_summary_after_pipeline(&settings));
     }
 }

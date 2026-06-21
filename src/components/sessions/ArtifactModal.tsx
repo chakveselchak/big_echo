@@ -9,8 +9,27 @@ type ArtifactModalProps = {
   onOpenInEditor?: () => void | Promise<void>;
 };
 
+const MATCHED_PREVIEW_CONTEXT_CHARS = 900;
+
+function buildMatchedPreviewText(text: string, query: string): string {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return text;
+  const matchIndex = text.toLowerCase().indexOf(normalizedQuery.toLowerCase());
+  if (matchIndex === -1) return text;
+  const start = Math.max(0, matchIndex - MATCHED_PREVIEW_CONTEXT_CHARS);
+  const end = Math.min(
+    text.length,
+    matchIndex + normalizedQuery.length + MATCHED_PREVIEW_CONTEXT_CHARS,
+  );
+  if (start === 0 && end === text.length) return text;
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < text.length ? "..." : "";
+  return `${prefix}${text.slice(start, end)}${suffix}`;
+}
+
 export function ArtifactModal({ preview, onClose, onOpenInEditor }: ArtifactModalProps) {
   const bodyRef = useRef<HTMLPreElement | null>(null);
+  const previewText = preview ? buildMatchedPreviewText(preview.text, preview.query) : "";
 
   useEffect(() => {
     if (!preview) return;
@@ -49,10 +68,11 @@ export function ArtifactModal({ preview, onClose, onOpenInEditor }: ArtifactModa
           </Typography.Paragraph>
           <pre
             ref={bodyRef}
+            data-testid="artifact-preview-body"
             className="artifact-preview-text"
             style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 400, overflowY: "auto" }}
           >
-            {renderHighlightedText(preview.text, preview.query)}
+            {renderHighlightedText(previewText, preview.query)}
           </pre>
         </>
       )}

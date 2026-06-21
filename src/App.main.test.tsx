@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
 
@@ -55,6 +55,7 @@ const { listeners, invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
         brain_sync_enabled: false,
+        brain_sync_summary_auto_upload_enabled: false,
         brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
         show_minitray_overlay: false,
       };
@@ -91,6 +92,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 import packageJson from "../package.json";
+
+const I18N_LANGUAGE_STORAGE_KEY = "bigecho.ui.language";
 
 function expectSessionAntdSelectValue(label: string, value: string) {
   const combobox = screen.getByRole("combobox", { name: label });
@@ -136,6 +139,7 @@ function namedPromptSettings(summaryPrompt: string) {
     yandex_sync_interval: "24h",
     yandex_sync_remote_folder: "BigEcho",
     brain_sync_enabled: false,
+    brain_sync_summary_auto_upload_enabled: false,
     brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
     todoist_sync_enabled: false,
     todoist_auto_add: false,
@@ -160,6 +164,10 @@ function namedPromptSessionListItem(sessionId: string, topic: string) {
 }
 
 describe("App main window", () => {
+  beforeEach(() => {
+    window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "en");
+  });
+
   afterEach(() => {
     invokeMock.mockImplementation(defaultInvokeImpl);
     window.localStorage.clear();
@@ -530,6 +538,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -1170,6 +1179,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -1336,6 +1346,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -1433,7 +1444,7 @@ describe("App main window", () => {
     await clickAntdMenuItem(user, menu, "Настроить промпт саммари");
     expect(await screen.findByRole("dialog", { name: "Управление промптами для саммари" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Управление промптами для саммари" })).not.toBeInTheDocument();
     });
@@ -1470,6 +1481,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -1573,6 +1585,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -1681,6 +1694,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -1753,6 +1767,68 @@ describe("App main window", () => {
     expect(screen.getByText("ACME renewal risk", { selector: "mark" })).toBeInTheDocument();
   });
 
+  it("renders a bounded matched artifact preview instead of the full large text", async () => {
+    const user = userEvent.setup();
+    const prefix = "prefix ".repeat(1200);
+    const suffix = " suffix".repeat(1200);
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd === "list_sessions") {
+        return [
+          {
+            session_id: "s-large",
+            status: "recorded",
+            primary_tag: "slack",
+            topic: "Large artifact",
+            display_date_ru: "11.03.2026",
+            started_at_iso: "2026-03-11T12:00:00+03:00",
+            session_dir: "/tmp/s-large",
+            audio_duration_hms: "00:07:42",
+            has_transcript_text: true,
+            has_summary_text: false,
+          },
+        ];
+      }
+      if (cmd === "get_session_meta") {
+        return {
+          session_id: "s-large",
+          source: "zoom",
+          notes: "",
+          topic: "Large artifact",
+          tags: [],
+        };
+      }
+      if (cmd === "search_session_artifacts") {
+        if ((args as { query?: string } | undefined)?.query === "needle phrase") {
+          return {
+            "s-large": { transcript_match: true, summary_match: false },
+          };
+        }
+        return {};
+      }
+      if (cmd === "read_session_artifact") {
+        return {
+          path: "/tmp/s-large/transcript.txt",
+          text: `${prefix}needle phrase${suffix}`,
+        };
+      }
+      return defaultInvokeImpl(cmd, args);
+    });
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await user.type(screen.getByLabelText("Search sessions"), "needle phrase{Enter}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "текст" })).toHaveClass("match-hit");
+    });
+
+    await user.click(screen.getByRole("button", { name: "текст" }));
+
+    const body = await screen.findByTestId("artifact-preview-body");
+    expect(screen.getByText("needle phrase", { selector: "mark" })).toBeInTheDocument();
+    expect(body.textContent?.length).toBeLessThan(2500);
+    expect(body.textContent).toContain("...");
+  });
+
   it("focuses Search sessions on Cmd/Ctrl+F", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -1800,6 +1876,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -1918,7 +1995,7 @@ describe("App main window", () => {
     const toggleButton = screen.getByRole("button", { name: "Воспроизвести аудио" });
     await user.click(toggleButton);
     expect(playMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Пауза" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
 
     const seekSlider = screen.getByRole("slider", { name: "Позиция аудио" });
     expect(seekSlider).toHaveValue(0);
@@ -1943,7 +2020,7 @@ describe("App main window", () => {
     });
     expect(audio?.currentTime).toBe(120);
 
-    await user.click(screen.getByRole("button", { name: "Пауза" }));
+    await user.click(screen.getByRole("button", { name: "Pause" }));
     expect(pauseMock).toHaveBeenCalledTimes(1);
 
     playMock.mockRestore();
@@ -1995,6 +2072,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -2027,12 +2105,12 @@ describe("App main window", () => {
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
     expect(screen.getByText("Удалить сессию и все связанные файлы?")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(invokeMock).not.toHaveBeenCalledWith("delete_session", { sessionId: "s7", force: false });
     expect(screen.getByRole("heading", { name: "Delete me" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("delete_session", { sessionId: "s7", force: false });
     });
@@ -2086,6 +2164,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -2117,7 +2196,7 @@ describe("App main window", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Delete me" })).not.toBeInTheDocument();
@@ -2156,6 +2235,7 @@ describe("App main window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -2196,8 +2276,8 @@ describe("App main window", () => {
 
     await user.click(screen.getByRole("button", { name: "Удалить сессию" }));
 
-    const cancelButton = screen.getByRole("button", { name: "Отмена" });
-    const deleteButton = screen.getByRole("button", { name: "Удалить" });
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    const deleteButton = screen.getByRole("button", { name: "Delete" });
     await waitFor(() => {
       expect(cancelButton).toHaveFocus();
     });
@@ -2267,7 +2347,7 @@ describe("App main window", () => {
       screen.getByText("Сессия помечена как активная. Принудительно удалить сессию и все связанные файлы?")
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Удалить" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("delete_session", { sessionId: "s8", force: true });
     });

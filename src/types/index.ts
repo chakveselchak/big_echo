@@ -27,6 +27,7 @@ export type PublicSettings = {
   yandex_sync_interval: "1h" | "6h" | "24h" | "48h";
   yandex_sync_remote_folder: string;
   brain_sync_enabled: boolean;
+  brain_sync_summary_auto_upload_enabled: boolean;
   brain_sync_url: string;
   todoist_sync_enabled: boolean;
   todoist_auto_add: boolean;

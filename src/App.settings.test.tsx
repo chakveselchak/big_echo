@@ -35,6 +35,7 @@ const { invokeMock } = vi.hoisted(() => ({
         yandex_sync_interval: "24h",
         yandex_sync_remote_folder: "BigEcho",
         brain_sync_enabled: false,
+        brain_sync_summary_auto_upload_enabled: false,
         brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
         show_minitray_overlay: false,
       };
@@ -95,6 +96,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { App } from "./App";
 
 const BRAIN_UNLOCK_STORAGE_KEY = "bigecho.brain_sync.unlocked";
+const I18N_LANGUAGE_STORAGE_KEY = "bigecho.ui.language";
 
 function getAntdSelect(label: string) {
   const combobox = screen.getByRole("combobox", { name: label });
@@ -164,6 +166,7 @@ function mockSettings() {
     yandex_sync_interval: "24h",
     yandex_sync_remote_folder: "BigEcho",
     brain_sync_enabled: false,
+    brain_sync_summary_auto_upload_enabled: false,
     brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
     show_minitray_overlay: false,
   };
@@ -173,6 +176,7 @@ describe("App settings window", () => {
   beforeEach(() => {
     invokeMock.mockClear();
     window.localStorage.clear();
+    window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "en");
   });
 
   it("loads settings and auto-detects system source", async () => {
@@ -191,6 +195,32 @@ describe("App settings window", () => {
 
     const input = screen.getByDisplayValue("BlackHole 2ch");
     expect(input).toBeInTheDocument();
+  });
+
+  it("switches the UI language to English", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    render(<App />);
+
+    await user.click(await screen.findByRole("tab", { name: "Общие" }));
+    expect(getAntdSelect("Язык интерфейса").select).toBeInTheDocument();
+    expect(screen.getByLabelText("Папка записей")).toBeInTheDocument();
+
+    const { combobox, select } = getAntdSelect("Язык интерфейса");
+    const selector = (select.querySelector(".ant-select-selector") as HTMLElement | null) ?? select;
+    fireEvent.mouseDown(selector);
+    await waitFor(() => {
+      expect(combobox).toHaveAttribute("aria-expanded", "true");
+    });
+    const optionTexts = await screen.findAllByText("English");
+    const optionText = optionTexts.find((element) => element.closest(".ant-select-item-option"));
+    const option = (optionText?.closest(".ant-select-item-option") as HTMLElement | null) ?? null;
+    expect(option).not.toBeNull();
+    fireEvent.click(option as HTMLElement);
+
+    expect(screen.getByRole("tab", { name: "Generals" })).toBeInTheDocument();
+    expect(getAntdSelect("Interface language").select).toBeInTheDocument();
+    expect(screen.getByLabelText("Recording root")).toBeInTheDocument();
   });
 
   it("shows a pending macOS permission state before lookup resolves", async () => {
@@ -531,7 +561,7 @@ describe("App settings window", () => {
       name: "Auto-run pipeline on Stop",
     });
     const transcribeCheckbox = screen.getByRole("checkbox", {
-      name: "Автоматическая транскрибация по окончанию записи",
+      name: "Auto-transcribe when recording stops",
     });
 
     await user.click(pipelineCheckbox);
@@ -772,6 +802,7 @@ describe("App settings window", () => {
       expect(invokeMock).toHaveBeenCalledWith("save_public_settings", {
         payload: expect.objectContaining({
           brain_sync_enabled: true,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://brain.example.test/upload",
         }),
       });

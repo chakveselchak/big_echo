@@ -179,9 +179,23 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
     <Form layout="vertical" style={{ maxWidth: 760, marginBottom: 10 }}>
       <Form.Item>
         <CheckboxWithDirty
+          id="brain_sync_enabled"
+          label="Автоматически загружать новые записи в Brain"
           checked={Boolean(settings.brain_sync_enabled)}
           dirty={isDirty("brain_sync_enabled")}
           onChange={(checked) => setSettings({ ...settings, brain_sync_enabled: checked })}
+        />
+      </Form.Item>
+
+      <Form.Item>
+        <CheckboxWithDirty
+          id="brain_sync_summary_auto_upload_enabled"
+          label="Автоматически выгружать саммари сессий"
+          checked={Boolean(settings.brain_sync_summary_auto_upload_enabled)}
+          dirty={isDirty("brain_sync_summary_auto_upload_enabled")}
+          onChange={(checked) =>
+            setSettings({ ...settings, brain_sync_summary_auto_upload_enabled: checked })
+          }
         />
       </Form.Item>
 
@@ -291,21 +305,25 @@ export function BrainSyncSettings({ settings, setSettings, isDirty }: Props) {
 }
 
 function CheckboxWithDirty({
+  id,
+  label,
   checked,
   dirty,
   onChange,
 }: {
+  id: string;
+  label: string;
   checked: boolean;
   dirty: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
     <Checkbox
-      id="brain_sync_enabled"
+      id={id}
       checked={checked}
       onChange={(e) => onChange(e.target.checked)}
     >
-      Автоматически загружать новые записи в Brain
+      {label}
       {dirty && dirtyDot}
     </Checkbox>
   );

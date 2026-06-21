@@ -8,7 +8,7 @@ import {
 } from "../types";
 import { captureAnalyticsEvent } from "../lib/analytics";
 import { clamp01, parseEventPayload, splitTags } from "../lib/appUtils";
-import { getCurrentWindowLabel, tauriEmit, tauriInvoke, tauriListen } from "../lib/tauri";
+import { getCurrentWindowLabel, tauriEmit, tauriInvoke, tauriListenSafely } from "../lib/tauri";
 import { defaultRecordingMuteState, nextRecordingMuteState } from "../lib/trayAudio";
 
 const UI_SYNC_DEBOUNCE_MS = 150;
@@ -42,6 +42,10 @@ function formatRecordingError(err: unknown): string {
     return err.message;
   }
   return String(err);
+}
+
+function isDocumentVisible() {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
 
 export function useRecordingController({
@@ -282,6 +286,7 @@ export function useRecordingController({
     let active = true;
     let inFlight = false;
     const tick = async () => {
+      if (!isDocumentVisible()) return;
       if (inFlight) return;
       inFlight = true;
       try {
@@ -352,15 +357,10 @@ export function useRecordingController({
   }, [isSettingsWindow, setLastSessionId, setSession, setSource, setStatus, setTopic]);
 
   useEffect(() => {
-    let unlistenStart: (() => void) | undefined;
-    let unlistenStop: (() => void) | undefined;
-    let unlistenUiSync: (() => void) | undefined;
-    let unlistenUiRecording: (() => void) | undefined;
-    let unlistenUiMute: (() => void) | undefined;
-    let unlistenUiPause: (() => void) | undefined;
+    const cleanups: Array<() => void> = [];
 
     if (enableTrayCommandListeners) {
-      tauriListen("tray:start", async () => {
+      cleanups.push(tauriListenSafely("tray:start", async () => {
         try {
           await startRecording({
             source: sourceRef.current,
@@ -372,11 +372,9 @@ export function useRecordingController({
         } catch (err) {
           setStatus(`error: ${formatRecordingError(err)}`);
         }
-      }).then((fn) => {
-        unlistenStart = fn;
-      });
+      }));
 
-      tauriListen("tray:stop", async () => {
+      cleanups.push(tauriListenSafely("tray:stop", async () => {
         // Rust is the single writer for "stop". The minitray on_stop and
         // STOP_HOTKEY paths both call stop_active_recording_internal directly
         // and broadcast `ui:recording { recording: false }` to every window —
@@ -398,12 +396,10 @@ export function useRecordingController({
         } catch (err) {
           setStatus(`error: ${formatRecordingError(err)}`);
         }
-      }).then((fn) => {
-        unlistenStop = fn;
-      });
+      }));
     }
 
-    tauriListen("ui:sync", (event) => {
+    cleanups.push(tauriListenSafely("ui:sync", (event) => {
       const payload = parseEventPayload<{ source?: string; topic?: string; from?: string }>(event);
       if (!payload) return;
       // Skip our own echoes. Tauri's global emit broadcasts to every webview
@@ -424,11 +420,9 @@ export function useRecordingController({
       if (typeof payload.topic === "string" && payload.topic !== topicRef.current) {
         setTopic(payload.topic);
       }
-    }).then((fn) => {
-      unlistenUiSync = fn;
-    });
+    }));
 
-    tauriListen("ui:recording", (event) => {
+    cleanups.push(tauriListenSafely("ui:recording", (event) => {
       const payload = parseEventPayload<{ recording?: boolean; sessionId?: string | null }>(event);
       if (!payload || typeof payload.recording !== "boolean") return;
       if (payload.recording) {
@@ -444,38 +438,27 @@ export function useRecordingController({
         }
         setStatus((prev) => (prev === "recording" ? "recorded" : prev));
       }
-    }).then((fn) => {
-      unlistenUiRecording = fn;
-    });
+    }));
 
     // Broadcast from the minitray mic button (Rust is the single writer).
     // Tray-UI mute toggles update optimistically and don't broadcast, so this
     // only fires for minitray-initiated changes — no echo loop.
-    tauriListen("ui:mute", (event) => {
+    cleanups.push(tauriListenSafely("ui:mute", (event) => {
       const payload = parseEventPayload<{ mute_state?: RecordingMuteState }>(event);
       if (!payload?.mute_state) return;
       applyMuteState(payload.mute_state);
-    }).then((fn) => {
-      unlistenUiMute = fn;
-    });
+    }));
 
     // Pause/resume initiated from the minitray pause button (Rust is the single
     // writer). Lets the tray timer freeze/resume.
-    tauriListen("ui:pause", (event) => {
+    cleanups.push(tauriListenSafely("ui:pause", (event) => {
       const payload = parseEventPayload<{ paused?: boolean }>(event);
       if (typeof payload?.paused !== "boolean") return;
       applyPaused(payload.paused);
-    }).then((fn) => {
-      unlistenUiPause = fn;
-    });
+    }));
 
     return () => {
-      if (unlistenStart) unlistenStart();
-      if (unlistenStop) unlistenStop();
-      if (unlistenUiSync) unlistenUiSync();
-      if (unlistenUiRecording) unlistenUiRecording();
-      if (unlistenUiMute) unlistenUiMute();
-      if (unlistenUiPause) unlistenUiPause();
+      cleanups.forEach((cleanup) => cleanup());
     };
   }, [enableTrayCommandListeners, isTrayWindow, loadSessions, setLastSessionId, setSession, setSource, setStatus, setTopic]);
 

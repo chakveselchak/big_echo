@@ -14,6 +14,7 @@ import { YandexSyncSettings } from "../../components/settings/YandexSyncSettings
 import { TodoistSyncSettings } from "../../components/settings/TodoistSyncSettings";
 import { BrainSyncSettings } from "../../components/settings/BrainSyncSettings";
 import { LoadingPlaceholder } from "../../components/LoadingPlaceholder";
+import { useI18n } from "../../i18n";
 
 type SyncSessionsResult = {
   added: number;
@@ -21,6 +22,7 @@ type SyncSessionsResult = {
 };
 
 export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}) {
+  const { t } = useI18n();
   const [status, setStatus] = useState("idle");
   const [isSyncingSessions, setIsSyncingSessions] = useState(false);
 
@@ -77,8 +79,8 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
     return (
       <LoadingPlaceholder
         className="settings-loading"
-        label="Loading settings…"
-        ariaLabel="Loading settings"
+        label={t("settings.loading")}
+        ariaLabel={t("settings.loading")}
       />
     );
   }
@@ -125,6 +127,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       isDirty("todoist_auto_add"),
     brain:
       isDirty("brain_sync_enabled") ||
+      isDirty("brain_sync_summary_auto_upload_enabled") ||
       isDirty("brain_sync_url"),
   };
 
@@ -148,7 +151,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       key: "generals" as SettingsTab,
       label: (
         <>
-          Generals{dirtyByTab.generals && dirtyDot}
+          {t("settings.tabs.generals")}{dirtyByTab.generals && dirtyDot}
         </>
       ),
       children: (
@@ -167,7 +170,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       key: "audiototext" as SettingsTab,
       label: (
         <>
-          AudioToText{dirtyByTab.audiototext && dirtyDot}
+          {t("settings.tabs.audioToText")}{dirtyByTab.audiototext && dirtyDot}
         </>
       ),
       children: (
@@ -194,7 +197,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       key: "audio" as SettingsTab,
       label: (
         <>
-          Audio{dirtyByTab.audio && dirtyDot}
+          {t("settings.tabs.audio")}{dirtyByTab.audio && dirtyDot}
         </>
       ),
       children: (
@@ -214,7 +217,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       key: "yandex" as SettingsTab,
       label: (
         <>
-          Sync Yandex.Disk{dirtyByTab.yandex && dirtyDot}
+          {t("settings.tabs.yandex")}{dirtyByTab.yandex && dirtyDot}
         </>
       ),
       children: (
@@ -230,7 +233,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
       key: "todoist" as SettingsTab,
       label: (
         <>
-          Todoist sync{dirtyByTab.todoist && dirtyDot}
+          {t("settings.tabs.todoist")}{dirtyByTab.todoist && dirtyDot}
         </>
       ),
       children: (
@@ -248,7 +251,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
             key: "brain" as SettingsTab,
             label: (
               <>
-                Brain sync{dirtyByTab.brain && dirtyDot}
+                {t("settings.tabs.brain")}{dirtyByTab.brain && dirtyDot}
               </>
             ),
             children: (
@@ -267,7 +270,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
     <div style={{ padding: 20, overflowY: "auto" }}>
       <Tabs
         activeKey={settingsTab}
-        aria-label="Settings sections"
+        aria-label={t("settings.title")}
         items={tabItems}
         onChange={(key) => setSettingsTab(key as SettingsTab)}
       />
@@ -290,7 +293,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
 
       <Flex gap={8}>
         <Button type="primary" onClick={() => void saveSettings()} disabled={!canSaveSettings}>
-          Save settings
+          {t("settings.actions.save")}
         </Button>
         {settingsTab === "yandex" && (
           <Button
@@ -298,7 +301,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
             loading={yandexSync.status.is_running}
             disabled={!yandexSync.hasToken || yandexSync.status.is_running}
           >
-            Sync now
+            {t("settings.actions.syncNow")}
           </Button>
         )}
       </Flex>

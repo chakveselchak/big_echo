@@ -28,6 +28,30 @@ export function tauriListen(
   return listen(event, handler as Parameters<typeof listen>[1]);
 }
 
+export function tauriListenSafely(
+  event: string,
+  handler: (event: unknown) => void | Promise<void>,
+  onError?: () => void,
+): () => void {
+  let disposed = false;
+  let unlisten: (() => void) | null = null;
+  void tauriListen(event, handler)
+    .then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten();
+        return;
+      }
+      unlisten = nextUnlisten;
+    })
+    .catch(() => {
+      if (!disposed) onError?.();
+    });
+  return () => {
+    disposed = true;
+    if (unlisten) unlisten();
+  };
+}
+
 export function getCurrentWindowLabel(): string {
   return getCurrentWindow().label;
 }

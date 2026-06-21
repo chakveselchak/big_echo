@@ -118,76 +118,148 @@ fn sanitize_error(raw: String, token: &str) -> String {
         .join(" ")
 }
 
-fn record_failed_event(
+fn record_failed_upload_event(
     app_data_dir: &Path,
     session_id: &str,
+    event_type: &str,
     error: &BrainUploadPublicError,
 ) -> BrainUploadPublicError {
-    let _ = add_event(
-        app_data_dir,
-        session_id,
-        "brain_upload_failed",
-        &error.message,
-    );
+    let _ = add_event(app_data_dir, session_id, event_type, &error.message);
     error.clone()
 }
 
 pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient + Sync>(
     app_data_dir: PathBuf,
-    _session_dir: PathBuf,
+    session_dir: PathBuf,
     meta: SessionMeta,
     audio_path: PathBuf,
     settings: PublicSettings,
     client: &C,
     respect_enabled: bool,
 ) -> Result<BrainUploadResponse, BrainUploadPublicError> {
-    if respect_enabled && !settings.brain_sync_enabled {
+    upload_file_after_record_with_client(
+        app_data_dir,
+        session_dir,
+        meta,
+        audio_path,
+        settings,
+        client,
+        respect_enabled,
+        |settings| settings.brain_sync_enabled,
+        "brain_upload_started",
+        "brain_upload_succeeded",
+        "brain_upload_failed",
+        "Uploading audio to Brain",
+    )
+    .await
+}
+
+pub(crate) async fn upload_summary_after_record_with_client<C: UploadAudioClient + Sync>(
+    app_data_dir: PathBuf,
+    session_dir: PathBuf,
+    meta: SessionMeta,
+    summary_path: PathBuf,
+    settings: PublicSettings,
+    client: &C,
+    respect_enabled: bool,
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
+    if summary_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("md"))
+        != Some(true)
+    {
+        return Err(record_failed_upload_event(
+            &app_data_dir,
+            &meta.session_id,
+            "brain_summary_upload_failed",
+            &BrainUploadPublicError::configuration(
+                "Автозагрузка summary в Brain поддерживает только .md файлы.",
+            ),
+        ));
+    }
+
+    upload_file_after_record_with_client(
+        app_data_dir,
+        session_dir,
+        meta,
+        summary_path,
+        settings,
+        client,
+        respect_enabled,
+        |settings| settings.brain_sync_summary_auto_upload_enabled,
+        "brain_summary_upload_started",
+        "brain_summary_upload_succeeded",
+        "brain_summary_upload_failed",
+        "Uploading summary to Brain",
+    )
+    .await
+}
+
+async fn upload_file_after_record_with_client<C: UploadAudioClient + Sync>(
+    app_data_dir: PathBuf,
+    _session_dir: PathBuf,
+    meta: SessionMeta,
+    file_path: PathBuf,
+    settings: PublicSettings,
+    client: &C,
+    respect_enabled: bool,
+    is_enabled: impl FnOnce(&PublicSettings) -> bool,
+    started_event_type: &str,
+    succeeded_event_type: &str,
+    failed_event_type: &str,
+    started_detail: &str,
+) -> Result<BrainUploadResponse, BrainUploadPublicError> {
+    if respect_enabled && !is_enabled(&settings) {
         return Ok(skipped_response());
     }
 
     let url = validate_upload_url(&settings.brain_sync_url).map_err(|_| {
-        record_failed_event(
+        record_failed_upload_event(
             &app_data_dir,
             &meta.session_id,
+            failed_event_type,
             &BrainUploadPublicError::invalid_url(),
         )
     })?;
     let _ = url;
     let token = get_secret(&app_data_dir, TOKEN_KEY).map_err(|_| {
-        record_failed_event(
+        record_failed_upload_event(
             &app_data_dir,
             &meta.session_id,
+            failed_event_type,
             &BrainUploadPublicError::token_missing(),
         )
     })?;
     if token.trim().is_empty() {
-        return Err(record_failed_event(
+        return Err(record_failed_upload_event(
             &app_data_dir,
             &meta.session_id,
+            failed_event_type,
             &BrainUploadPublicError::token_missing(),
         ));
     }
 
-    let metadata = upload_metadata(&meta, &audio_path, &settings);
+    let metadata = upload_metadata(&meta, &file_path, &settings);
     add_event(
         &app_data_dir,
         &meta.session_id,
-        "brain_upload_started",
-        "Uploading audio to Brain",
+        started_event_type,
+        started_detail,
     )
     .map_err(|_| {
         BrainUploadPublicError::configuration("Не удалось сохранить статус загрузки Brain.")
     })?;
 
     match client
-        .upload_audio(&url, token.trim(), &audio_path, &metadata)
+        .upload_audio(&url, token.trim(), &file_path, &metadata)
         .await
     {
         Ok(response) => {
             add_event(
                 &app_data_dir,
                 &meta.session_id,
-                "brain_upload_succeeded",
+                succeeded_event_type,
                 "Brain upload accepted",
             )
             .map_err(|_| {
@@ -195,9 +267,10 @@ pub(crate) async fn upload_session_after_record_with_client<C: UploadAudioClient
             })?;
             Ok(response)
         }
-        Err(err) => Err(record_failed_event(
+        Err(err) => Err(record_failed_upload_event(
             &app_data_dir,
             &meta.session_id,
+            failed_event_type,
             &BrainUploadPublicError::from_brain_upload_error(&err),
         )),
     }
@@ -275,7 +348,9 @@ mod tests {
     use crate::services::brain_server::TOKEN_KEY;
     use crate::settings::public_settings::PublicSettings;
     use crate::settings::secret_store::set_secret;
-    use crate::storage::sqlite_repo::list_session_events;
+    use crate::storage::sqlite_repo::{
+        derive_brain_upload_state, list_session_events, BrainUploadStatus,
+    };
     use async_trait::async_trait;
     use std::path::Path;
     use std::sync::{Arc, Mutex};
@@ -324,6 +399,16 @@ mod tests {
     fn enabled_settings(url: String) -> PublicSettings {
         PublicSettings {
             brain_sync_enabled: true,
+            brain_sync_url: url,
+            audio_format: "opus".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn summary_auto_upload_settings(url: String) -> PublicSettings {
+        PublicSettings {
+            brain_sync_enabled: false,
+            brain_sync_summary_auto_upload_enabled: true,
             brain_sync_url: url,
             audio_format: "opus".to_string(),
             ..Default::default()
@@ -399,6 +484,103 @@ mod tests {
             event_types,
             vec!["brain_upload_started", "brain_upload_succeeded"]
         );
+    }
+
+    #[tokio::test]
+    async fn summary_upload_sends_only_markdown_file_when_enabled() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("session");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let summary_path = session_dir.join("summary.md");
+        std::fs::write(&summary_path, b"# Summary").expect("write summary");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingUploadClient {
+            calls: Arc::clone(&calls),
+            result: Some(Ok(BrainUploadResponse {
+                ok: true,
+                job_id: Some(88),
+                status: Some("queued".to_string()),
+                principal_id: None,
+                workspace_id: None,
+                workspace_slug: None,
+                inbox_path: None,
+                meta_path: None,
+                duplicate: None,
+                error: None,
+            })),
+        };
+
+        let response = super::upload_summary_after_record_with_client(
+            app_data_dir.clone(),
+            session_dir,
+            sample_meta(),
+            summary_path.clone(),
+            summary_auto_upload_settings("https://brain.example/upload".to_string()),
+            &client,
+            true,
+        )
+        .await
+        .expect("summary upload succeeds");
+
+        assert_eq!(response.job_id, Some(88));
+        let calls = calls.lock().expect("calls lock");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].2, summary_path.to_string_lossy().to_string());
+        assert_eq!(calls[0].3.audio_format, "md");
+        let events =
+            list_session_events(&app_data_dir, "session-upload").expect("load session events");
+        assert_eq!(events[0].event_type, "brain_summary_upload_started");
+        assert_eq!(events[0].detail, "Uploading summary to Brain");
+        let brain_upload_state = derive_brain_upload_state(&events);
+        assert_eq!(brain_upload_state.status, BrainUploadStatus::NotUploaded);
+        assert!(!brain_upload_state.server_ingested_once);
+    }
+
+    #[tokio::test]
+    async fn summary_upload_rejects_non_markdown_files() {
+        let tmp = tempdir().expect("tempdir");
+        let app_data_dir = tmp.path().join("app-data");
+        let session_dir = tmp.path().join("session");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let txt_path = session_dir.join("summary.txt");
+        std::fs::write(&txt_path, b"# Summary").expect("write summary");
+        set_secret(&app_data_dir, TOKEN_KEY, "secret-token").expect("set token");
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let client = RecordingUploadClient {
+            calls: Arc::clone(&calls),
+            result: Some(Ok(BrainUploadResponse {
+                ok: true,
+                job_id: None,
+                status: None,
+                principal_id: None,
+                workspace_id: None,
+                workspace_slug: None,
+                inbox_path: None,
+                meta_path: None,
+                duplicate: None,
+                error: None,
+            })),
+        };
+
+        let err = super::upload_summary_after_record_with_client(
+            app_data_dir.clone(),
+            session_dir,
+            sample_meta(),
+            txt_path,
+            summary_auto_upload_settings("https://brain.example/upload".to_string()),
+            &client,
+            true,
+        )
+        .await
+        .expect_err("non-md summary should fail");
+
+        assert_eq!(err.code, BrainUploadErrorCode::ConfigurationError);
+        assert!(calls.lock().expect("calls lock").is_empty());
+        let events =
+            list_session_events(&app_data_dir, "session-upload").expect("load session events");
+        assert_eq!(events[0].event_type, "brain_summary_upload_failed");
     }
 
     #[tokio::test]

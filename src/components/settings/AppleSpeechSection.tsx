@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Col, Form, Input, Progress, Tag } from "antd";
-import { listen } from "@tauri-apps/api/event";
 import type {
   AppleSpeechCheckResult,
   AppleSpeechDownloadProgress,
   PublicSettings,
 } from "../../types";
-import { tauriInvoke } from "../../lib/tauri";
+import { parseEventPayload } from "../../lib/appUtils";
+import { tauriInvoke, tauriListenSafely } from "../../lib/tauri";
 
 type AppleSpeechSectionProps = {
   settings: PublicSettings;
@@ -66,20 +66,12 @@ export function AppleSpeechSection({
   }, [refreshCheck]);
 
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    void (async () => {
-      unlisten = await listen<AppleSpeechDownloadProgress>(
-        "apple-speech://download-progress",
-        (event) => {
-          if (event.payload.locale === locale) {
-            setDownloadProgress(event.payload.progress);
-          }
-        }
-      );
-    })();
-    return () => {
-      if (unlisten) unlisten();
-    };
+    return tauriListenSafely("apple-speech://download-progress", (event) => {
+      const payload = parseEventPayload<AppleSpeechDownloadProgress>(event);
+      if (payload?.locale === locale) {
+        setDownloadProgress(payload.progress);
+      }
+    });
   }, [locale]);
 
   async function handleDownload() {

@@ -54,6 +54,7 @@ function baseSettings(overrides: Partial<PublicSettings> = {}): PublicSettings {
     yandex_sync_interval: "24h",
     yandex_sync_remote_folder: "BigEcho",
     brain_sync_enabled: false,
+    brain_sync_summary_auto_upload_enabled: false,
     brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
     show_minitray_overlay: false,
     ...overrides,
@@ -110,6 +111,27 @@ describe("BrainSyncSettings", () => {
     expect(screen.getByLabelText("URL загрузки в Brain")).toBeEnabled();
     expect(screen.getByLabelText("Персональный токен Brain")).toBeEnabled();
     expect(await screen.findByText("Токен не сохранён")).toBeInTheDocument();
+  });
+
+  it("toggles automatic summary upload separately from record upload", async () => {
+    const setSettings = vi.fn();
+    renderComponent(
+      baseSettings({
+        brain_sync_enabled: false,
+        brain_sync_summary_auto_upload_enabled: false,
+      }),
+      setSettings,
+    );
+
+    expect(await screen.findByText("Токен не сохранён")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Автоматически выгружать саммари сессий"));
+
+    expect(setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brain_sync_enabled: false,
+        brain_sync_summary_auto_upload_enabled: true,
+      }),
+    );
   });
 
   it("saves trimmed token and clears the token input", async () => {

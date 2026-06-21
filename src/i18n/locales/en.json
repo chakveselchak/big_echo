@@ -1,0 +1,116 @@
+{
+  "common": {
+    "cancel": "Cancel"
+  },
+  "domText": {
+    "Sessions": "Sessions",
+    "Settings": "Settings",
+    "New version": "New version",
+    "Main sections": "Main sections",
+    "No sessions yet": "No sessions yet",
+    "New recordings will appear here with search, transcript, summary, and audio actions.": "New recordings will appear here with search, transcript, summary, and audio actions.",
+    "Search sessions": "Search sessions",
+    "Refresh sessions": "Refresh sessions",
+    "Import audio": "Import audio",
+    "Topic": "Topic",
+    "Source": "Source",
+    "Tags": "Tags",
+    "Notes": "Notes",
+    "Save": "Save",
+    "Cancel": "Cancel",
+    "Delete": "Delete",
+    "Close": "Close",
+    "Open": "Open",
+    "Text": "Text",
+    "Summary": "Summary",
+    "No transcript yet": "No transcript yet",
+    "No summary yet": "No summary yet",
+    "Start": "Start",
+    "Stop": "Stop",
+    "Pause": "Pause",
+    "Resume": "Resume",
+    "Status": "Status",
+    "Open System Settings": "Open System Settings",
+    "Mic": "Mic",
+    "Mic activity": "Mic activity",
+    "Mic device": "Mic device",
+    "System": "System",
+    "System activity": "System activity",
+    "System device": "System device",
+    "Auto": "Auto",
+    "Transcription provider": "Transcription provider",
+    "Loading settings...": "Loading settings...",
+    "Loading settings…": "Loading settings..."
+  },
+  "sessions": {
+    "status": "Status: {status}",
+    "loadingText": "Loading text",
+    "loadingSummary": "Loading summary",
+    "actions": {
+      "getText": "Get text",
+      "gettingText": "Getting text...",
+      "getSummary": "Get Summary",
+      "gettingSummary": "Getting summary...",
+      "exportTodoist": "Export action items to Todoist"
+    }
+  },
+  "todoistExport": {
+    "title": "Export action items to Todoist",
+    "addSelected": "Add selected",
+    "addAll": "Add all",
+    "empty": "No action items found in this summary.",
+    "selectTask": "Select {title}",
+    "synced": "Synced",
+    "due": "Due",
+    "assignee": "Assignee"
+  },
+  "tray": {
+    "status": "Status: {status}",
+    "source": "Source",
+    "topicOptional": "Topic (optional)",
+    "record": "Rec",
+    "stop": "Stop",
+    "openSystemSettings": "Open System Settings"
+  },
+  "settings": {
+    "title": "Settings",
+    "tabs": {
+      "generals": "Generals",
+      "audioToText": "AudioToText",
+      "audio": "Audio",
+      "yandex": "Sync Yandex.Disk",
+      "todoist": "Todoist sync",
+      "brain": "Brain sync"
+    },
+    "actions": {
+      "save": "Save settings",
+      "syncNow": "Sync now"
+    },
+    "loading": "Loading settings...",
+    "language": {
+      "label": "Interface language",
+      "ru": "Русский",
+      "en": "English"
+    },
+    "recordingRoot": {
+      "label": "Recording root",
+      "choose": "Choose recording root folder",
+      "sync": "Sync sessions with recording root folder"
+    },
+    "artifactOpener": {
+      "label": "Artifact opener app (optional)",
+      "systemDefault": "System default"
+    },
+    "autoDelete": {
+      "label": "Auto-delete audio files for sessions older than",
+      "days": "{count} days",
+      "daysLabel": "days",
+      "inputLabel": "Days before audio auto-delete",
+      "tooltip": "Runs at app startup"
+    },
+    "autoRunPipeline": "Auto-run pipeline on Stop",
+    "autoTranscribe": "Auto-transcribe when recording stops",
+    "apiLogging": "Enable API call logging",
+    "minitrayOverlay": "Show minitray on top of all windows"
+  }
+}

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { SessionList } from "./SessionList";
 import type { SessionListItem } from "../../types";
+import { I18N_LANGUAGE_STORAGE_KEY, I18nProvider } from "../../i18n";
 
 vi.mock("./SessionCard", () => ({
   SessionCard: ({
@@ -64,11 +65,13 @@ class MockIntersectionObserver {
 
 beforeEach(() => {
   ioInstances.length = 0;
+  window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "en");
   vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 function makeSession(i: number): SessionListItem {
@@ -135,7 +138,11 @@ function renderList(
     setStatus: noop,
     ...overrides,
   };
-  return render(<SessionList {...props} />);
+  return render(
+    <I18nProvider>
+      <SessionList {...props} />
+    </I18nProvider>,
+  );
 }
 
 describe("SessionList lazy loading", () => {
@@ -222,45 +229,47 @@ describe("SessionList lazy loading", () => {
     const noopAsync = async () => undefined;
     const shrunk = sessions.slice(0, 30);
     rerender(
-      <SessionList
-        sessions={sessions}
-        filteredSessions={shrunk}
-        sessionDetails={{}}
-        setSessionDetails={noop}
-        sessionSearchQuery=""
-        sessionArtifactSearchHits={{}}
-        textPendingBySession={{}}
-        summaryPendingBySession={{}}
-        brainUploadPendingBySession={{}}
-        pipelineStateBySession={{}}
-        deleteTarget={null}
-        deletePendingSessionId={null}
-        audioDeleteTargetSessionId={null}
-        audioDeletePendingSessionId={null}
-        isSearching={false}
-        isInitialLoading={false}
-        artifactPreview={null}
-        knownTags={[]}
-        settings={null}
-        brainSyncReady={true}
-        setDeleteTarget={noop}
-        setAudioDeleteTargetSessionId={noop}
-        confirmDeleteSession={noopAsync}
-        confirmDeleteAudio={noopAsync}
-        closeArtifactPreview={noop}
-        openSessionFolder={noop}
-        openSessionArtifact={noop}
-        getText={noop}
-        getSummary={noop}
-        saveSessionDetails={async () => true}
-        flushSessionDetails={noop}
-        requestDeleteSession={noop}
-        requestDeleteAudio={noop}
-        onUploadToBrain={noop}
-        onShareAudio={noop}
-        syncedSessionIds={new Set<string>()}
-        setStatus={noop}
-      />,
+      <I18nProvider>
+        <SessionList
+          sessions={sessions}
+          filteredSessions={shrunk}
+          sessionDetails={{}}
+          setSessionDetails={noop}
+          sessionSearchQuery=""
+          sessionArtifactSearchHits={{}}
+          textPendingBySession={{}}
+          summaryPendingBySession={{}}
+          brainUploadPendingBySession={{}}
+          pipelineStateBySession={{}}
+          deleteTarget={null}
+          deletePendingSessionId={null}
+          audioDeleteTargetSessionId={null}
+          audioDeletePendingSessionId={null}
+          isSearching={false}
+          isInitialLoading={false}
+          artifactPreview={null}
+          knownTags={[]}
+          settings={null}
+          brainSyncReady={true}
+          setDeleteTarget={noop}
+          setAudioDeleteTargetSessionId={noop}
+          confirmDeleteSession={noopAsync}
+          confirmDeleteAudio={noopAsync}
+          closeArtifactPreview={noop}
+          openSessionFolder={noop}
+          openSessionArtifact={noop}
+          getText={noop}
+          getSummary={noop}
+          saveSessionDetails={async () => true}
+          flushSessionDetails={noop}
+          requestDeleteSession={noop}
+          requestDeleteAudio={noop}
+          onUploadToBrain={noop}
+          onShareAudio={noop}
+          syncedSessionIds={new Set<string>()}
+          setStatus={noop}
+        />
+      </I18nProvider>,
     );
 
     expect(screen.getAllByTestId("session-card")).toHaveLength(30);

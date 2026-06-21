@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type InvokeMock = (cmd: string, args?: unknown) => Promise<unknown>;
 
@@ -75,6 +75,7 @@ async function defaultInvokeImplementation(cmd: string, _args?: unknown): Promis
       yandex_sync_interval: "24h",
       yandex_sync_remote_folder: "BigEcho",
       brain_sync_enabled: false,
+      brain_sync_summary_auto_upload_enabled: false,
       brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
       show_minitray_overlay: false,
     };
@@ -121,6 +122,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 import { App } from "./App";
 
+const I18N_LANGUAGE_STORAGE_KEY = "bigecho.ui.language";
+
 function getTraySourceSelect() {
   const select = screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement;
   expect(select).not.toBeNull();
@@ -132,12 +135,39 @@ function expectTraySourceValue(value: string) {
 }
 
 describe("Tray window", () => {
+  beforeEach(() => {
+    window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "en");
+  });
+
   afterEach(() => {
     listeners.clear();
     invokeMock.mockClear();
     invokeMock.mockReset();
     invokeMock.mockImplementation(defaultInvokeImplementation);
     vi.useRealTimers();
+    window.localStorage.clear();
+  });
+
+  it("localizes the tray status prefix in Russian", async () => {
+    window.localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, "ru");
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Статус: ожидание")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Тема (опционально)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Запись" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Микрофон")).toHaveStyle({
+        width: "84px",
+        whiteSpace: "nowrap",
+      });
+      expect(screen.getByText("Система")).toHaveStyle({
+        width: "84px",
+        whiteSpace: "nowrap",
+      });
+    });
   });
 
   it("applies shared ui sync updates", async () => {
@@ -292,6 +322,7 @@ describe("Tray window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -337,6 +368,7 @@ describe("Tray window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
@@ -429,6 +461,7 @@ describe("Tray window", () => {
           yandex_sync_interval: "24h",
           yandex_sync_remote_folder: "BigEcho",
           brain_sync_enabled: false,
+          brain_sync_summary_auto_upload_enabled: false,
           brain_sync_url: "https://admin.my2brain.ru/api/v1/meetings/upload",
           show_minitray_overlay: false,
         };
