@@ -47,6 +47,10 @@ pub struct SessionListItem {
     pub started_at_iso: String,
     pub session_dir: String,
     pub audio_file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_adjusted_audio_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_speed_multiplier: Option<f32>,
     pub audio_format: String,
     pub audio_duration_hms: String,
     pub has_transcript_text: bool,
@@ -200,6 +204,20 @@ pub(crate) fn audio_duration_hms(meta: &SessionMeta) -> String {
         None => return "00:00:00".to_string(),
     };
     format_hms(ended.signed_duration_since(started).num_seconds())
+}
+
+pub(crate) fn effective_audio_file_for_session(
+    session_dir: &Path,
+    meta: &SessionMeta,
+) -> String {
+    let speed_file = meta.artifacts.speed_adjusted_audio_file.trim();
+    if !speed_file.is_empty()
+        && meta.artifacts.audio_speed_multiplier.is_some()
+        && session_dir.join(speed_file).is_file()
+    {
+        return speed_file.to_string();
+    }
+    meta.artifacts.audio_file.clone()
 }
 
 fn open(app_data_dir: &Path) -> Result<Connection, String> {
@@ -536,6 +554,8 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                 started_at_iso: row.get(5)?,
                 session_dir: row.get(6)?,
                 audio_file: String::new(),
+                speed_adjusted_audio_file: None,
+                audio_speed_multiplier: None,
                 audio_format: "unknown".to_string(),
                 audio_duration_hms: "00:00:00".to_string(),
                 has_transcript_text: false,
@@ -577,6 +597,11 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     let summary_ok =
                         file_has_non_empty_text(&session_dir.join(&meta.artifacts.summary_file));
                     item.audio_file = meta.artifacts.audio_file.clone();
+                    let effective_audio_file = effective_audio_file_for_session(&session_dir, &meta);
+                    if effective_audio_file != meta.artifacts.audio_file {
+                        item.speed_adjusted_audio_file = Some(effective_audio_file);
+                        item.audio_speed_multiplier = meta.artifacts.audio_speed_multiplier;
+                    }
                     item.audio_format = audio_format_from_file_name(&meta.artifacts.audio_file);
                     item.audio_duration_hms = audio_duration_hms(&meta);
                     item.has_transcript_text = transcript_ok
@@ -973,6 +998,36 @@ mod tests {
         assert_eq!(sessions[0].audio_duration_hms, "00:01:30");
         assert!(sessions[0].has_transcript_text);
         assert!(sessions[0].has_summary_text);
+    }
+
+    #[test]
+    fn list_sessions_exposes_speed_adjusted_audio_when_file_exists() {
+        let dir = temp_dir();
+        let session_dir = dir.path().join("sessions").join("s-speed");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let meta_path = session_dir.join("meta.json");
+
+        let mut meta = SessionMeta::new(
+            "s-speed".to_string(),
+            "zoom".to_string(),
+            vec!["zoom".to_string()],
+            "Speed test".to_string(),
+            "".to_string(),
+        );
+        meta.status = SessionStatus::Recorded;
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        meta.artifacts.speed_adjusted_audio_file = "audio_1.5x.opus".to_string();
+        meta.artifacts.audio_speed_multiplier = Some(1.5);
+
+        save_meta(&meta_path, &meta).expect("save meta");
+        std::fs::write(session_dir.join("audio.opus"), b"original").expect("write original");
+        std::fs::write(session_dir.join("audio_1.5x.opus"), b"speed").expect("write speed");
+        upsert_session(dir.path(), &meta, &session_dir, &meta_path).expect("upsert session");
+
+        let sessions = list_sessions(dir.path()).expect("list sessions");
+
+        assert_eq!(sessions[0].speed_adjusted_audio_file.as_deref(), Some("audio_1.5x.opus"));
+        assert_eq!(sessions[0].audio_speed_multiplier, Some(1.5));
     }
 
     #[test]

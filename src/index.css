@@ -1318,6 +1318,24 @@ select {
   font-size: 13px;
 }
 
+.session-speed-label {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.6;
+  padding: 0 3px;
+}
+
+.session-speed-duration-delta {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .session-duration-label {
   display: inline-flex;
   align-items: center;

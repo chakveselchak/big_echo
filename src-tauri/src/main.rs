@@ -54,9 +54,7 @@ use commands::yandex_sync::{
     yandex_list_synced_sessions, yandex_share_audio, yandex_sync_clear_token,
     yandex_sync_has_token, yandex_sync_now, yandex_sync_set_token, yandex_sync_status,
 };
-#[cfg(test)]
-use domain::session::SessionMeta;
-use domain::session::SessionStatus;
+use domain::session::{SessionMeta, SessionStatus};
 use services::brain_server::state::try_begin_session_upload;
 use services::brain_server::upload::{
     upload_session_after_record_with_shared_client, validate_upload_url,
@@ -333,9 +331,19 @@ pub(crate) fn stop_active_recording_internal(
         return Err(err);
     }
 
+    let speed_adjustment_event = create_speed_adjusted_audio_if_enabled(
+        &settings,
+        &abs_dir,
+        &audio_output_path,
+        &mut meta,
+    );
+
     meta.status = SessionStatus::Recorded;
     if let Some(warning) = &finalize_warning {
         meta.errors.push(warning.clone());
+    }
+    if let Some(Err(err)) = &speed_adjustment_event {
+        meta.errors.push(err.clone());
     }
     save_meta(&abs_dir.join("meta.json"), &meta)?;
     upsert_session(&data_dir, &meta, &abs_dir, &abs_dir.join("meta.json"))?;
@@ -352,6 +360,12 @@ pub(crate) fn stop_active_recording_internal(
             "recording_finalize_warning",
             warning,
         )?;
+    }
+    if let Some(result) = &speed_adjustment_event {
+        match result {
+            Ok(detail) => add_event(&data_dir, &meta.session_id, "audio_speed_adjusted", detail)?,
+            Err(err) => add_event(&data_dir, &meta.session_id, "audio_speed_adjust_failed", err)?,
+        }
     }
 
     if should_upload_brain_after_stop(&settings) {
@@ -417,6 +431,46 @@ pub(crate) fn stop_active_recording_internal(
     }
 
     Ok("recorded".to_string())
+}
+
+fn create_speed_adjusted_audio_if_enabled(
+    settings: &settings::public_settings::PublicSettings,
+    session_dir: &Path,
+    original_audio_path: &Path,
+    meta: &mut SessionMeta,
+) -> Option<Result<String, String>> {
+    let speed = settings.audio_speed_multiplier?;
+    if speed <= 1.0 {
+        return None;
+    }
+    let audio_file = meta.artifacts.audio_file.trim();
+    if audio_file.is_empty() {
+        return Some(Err("Audio speed-up failed: audio file name is empty".to_string()));
+    }
+    let Some(speed_file) = audio::file_writer::speed_adjusted_audio_file_name(audio_file, speed)
+    else {
+        return Some(Err(format!(
+            "Audio speed-up failed: cannot build speed-adjusted file name for {audio_file}"
+        )));
+    };
+    let speed_path = session_dir.join(&speed_file);
+    match audio::file_writer::write_speed_adjusted_audio_file(
+        original_audio_path,
+        &speed_path,
+        &settings.audio_format,
+        settings.opus_bitrate_kbps,
+        speed,
+    ) {
+        Ok(()) => {
+            meta.artifacts.speed_adjusted_audio_file = speed_file;
+            meta.artifacts.audio_speed_multiplier = Some(speed);
+            Some(Ok(format!(
+                "Created speed-adjusted audio at {}",
+                meta.artifacts.speed_adjusted_audio_file
+            )))
+        }
+        Err(err) => Some(Err(format!("Audio speed-up failed: {err}"))),
+    }
 }
 
 // ── Test-only helpers ────────────────────────────────────────────────────────
@@ -784,6 +838,34 @@ mod ipc_runtime_tests {
             ..Default::default()
         };
         assert!(should_auto_run_pipeline_after_stop(&ready));
+    }
+
+    #[test]
+    fn one_x_audio_speed_does_not_create_speed_adjusted_audio() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut meta = SessionMeta::new(
+            "s-one-x".to_string(),
+            "zoom".to_string(),
+            vec![],
+            "Topic".to_string(),
+            String::new(),
+        );
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        let settings = PublicSettings {
+            audio_speed_multiplier: Some(1.0),
+            ..Default::default()
+        };
+
+        let result = create_speed_adjusted_audio_if_enabled(
+            &settings,
+            temp.path(),
+            &temp.path().join("audio.opus"),
+            &mut meta,
+        );
+
+        assert!(result.is_none());
+        assert_eq!(meta.artifacts.speed_adjusted_audio_file, "");
+        assert_eq!(meta.artifacts.audio_speed_multiplier, None);
     }
 
     #[test]

@@ -203,6 +203,8 @@ fn start_recording_impl(
     let mut meta = meta;
     meta.artifacts = SessionArtifacts {
         audio_file: crate::audio::file_writer::audio_file_name(&settings.audio_format),
+        speed_adjusted_audio_file: String::new(),
+        audio_speed_multiplier: None,
         transcript_file: transcript_name(started_at),
         summary_file: summary_name(started_at),
         meta_file: "meta.json".to_string(),
