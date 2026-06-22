@@ -80,6 +80,17 @@ jobs:
         if: startsWith(matrix.runner, 'macos-')
         run: brew install opus
 
+      - name: Select Xcode 26 (macOS Apple Silicon)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          set -euo pipefail
+          if [ -d /Applications/Xcode_26.5.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          fi
+          xcodebuild -version
+          swift --version
+          xcrun --sdk macosx --show-sdk-version
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -91,6 +102,19 @@ jobs:
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
+
+      - name: Verify Apple Speech sidecar bundled
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          set -euo pipefail
+          APP_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/macos/BigEcho.app"
+          SIDECAR="$APP_DIR/Contents/MacOS/apple-speech"
+          if [ ! -x "$SIDECAR" ]; then
+            echo "Apple Speech sidecar is missing or not executable: $SIDECAR" >&2
+            find "$APP_DIR/Contents/MacOS" -maxdepth 1 -type f -print >&2
+            exit 1
+          fi
+          "$SIDECAR" check --locale ru_RU
 
       - name: Repack DMG with README.txt and re-upload
         if: startsWith(matrix.runner, 'macos-')

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -48,26 +48,67 @@ pub fn sidecar_path() -> Option<PathBuf> {
     if SIDECAR_TRIPLE.is_empty() {
         return None;
     }
-    let bin_name = format!("apple-speech-{}", SIDECAR_TRIPLE);
 
-    // Bundled .app: sibling of the main exe in Contents/MacOS/.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(&bin_name);
-            if candidate.exists() {
-                return Some(candidate);
-            }
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let exe = std::env::current_exe().ok();
+    for candidate in sidecar_candidates(exe.as_deref(), &PathBuf::from(manifest), SIDECAR_TRIPLE) {
+        if candidate.exists() {
+            return Some(candidate);
         }
     }
 
-    // Dev mode: src-tauri/binaries/, where build.rs writes the binary.
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let candidate = PathBuf::from(manifest).join("binaries").join(&bin_name);
-    if candidate.exists() {
-        return Some(candidate);
+    None
+}
+
+fn sidecar_candidates(
+    exe: Option<&Path>,
+    manifest_dir: &Path,
+    target_triple: &str,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let source_name = format!("apple-speech-{target_triple}");
+
+    if let Some(exe_dir) = exe.and_then(Path::parent) {
+        // Tauri strips the target triple when bundling externalBin sidecars.
+        candidates.push(exe_dir.join("apple-speech"));
+        candidates.push(exe_dir.join(&source_name));
     }
 
-    None
+    // Dev/build mode: src-tauri/binaries/, where build.rs writes the source sidecar.
+    candidates.push(manifest_dir.join("binaries").join(source_name));
+
+    candidates
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn bundled_sidecar_candidate_uses_tauri_runtime_name_without_target_triple() {
+        let exe = Path::new("/Applications/BigEcho.app/Contents/MacOS/bigecho");
+        let manifest = Path::new("/repo/src-tauri");
+
+        let candidates = sidecar_candidates(Some(exe), manifest, "aarch64-apple-darwin");
+
+        assert_eq!(
+            candidates.first().unwrap(),
+            Path::new("/Applications/BigEcho.app/Contents/MacOS/apple-speech")
+        );
+    }
+
+    #[test]
+    fn dev_sidecar_candidate_uses_external_bin_source_name_with_target_triple() {
+        let exe = Path::new("/repo/src-tauri/target/debug/bigecho");
+        let manifest = Path::new("/repo/src-tauri");
+
+        let candidates = sidecar_candidates(Some(exe), manifest, "aarch64-apple-darwin");
+
+        assert!(candidates.contains(&PathBuf::from(
+            "/repo/src-tauri/binaries/apple-speech-aarch64-apple-darwin"
+        )));
+    }
 }
 
 pub fn availability() -> Availability {
