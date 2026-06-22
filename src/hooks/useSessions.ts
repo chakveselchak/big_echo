@@ -154,6 +154,8 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
             existing.started_at_iso === fresh.started_at_iso &&
             existing.session_dir === fresh.session_dir &&
             existing.audio_file === fresh.audio_file &&
+            existing.speed_adjusted_audio_file === fresh.speed_adjusted_audio_file &&
+            existing.audio_speed_multiplier === fresh.audio_speed_multiplier &&
             existing.audio_format === fresh.audio_format &&
             existing.audio_duration_hms === fresh.audio_duration_hms &&
             existing.has_transcript_text === fresh.has_transcript_text &&

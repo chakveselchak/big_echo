@@ -8,6 +8,26 @@ pub fn audio_file_name(audio_format: &str) -> String {
     format!("audio.{}", extension_for_format(audio_format))
 }
 
+pub fn speed_adjusted_audio_file_name(audio_file: &str, speed: f32) -> Option<String> {
+    let path = Path::new(audio_file);
+    let stem = path.file_stem()?.to_str()?.trim();
+    let extension = path.extension()?.to_str()?.trim();
+    if stem.is_empty() || extension.is_empty() {
+        return None;
+    }
+    Some(format!("{stem}_{}.{extension}", audio_speed_label(speed)))
+}
+
+pub fn audio_speed_label(speed: f32) -> String {
+    if (speed - speed.round()).abs() < f32::EPSILON {
+        format!("{:.0}x", speed)
+    } else if ((speed * 10.0).round() - speed * 10.0).abs() < f32::EPSILON {
+        format!("{:.1}x", speed)
+    } else {
+        format!("{:.2}x", speed)
+    }
+}
+
 pub fn extension_for_format(audio_format: &str) -> &'static str {
     match audio_format {
         "mp3" => "mp3",
@@ -116,6 +136,37 @@ pub fn write_silence_audio_file(
     run_ffmpeg(command)
 }
 
+pub fn write_speed_adjusted_audio_file(
+    input_path: &Path,
+    output_path: &Path,
+    audio_format: &str,
+    opus_bitrate_kbps: u32,
+    speed: f32,
+) -> Result<(), String> {
+    let mut command = Command::new("ffmpeg");
+    command
+        .arg("-y")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-i")
+        .arg(input_path)
+        .arg("-filter:a")
+        .arg(format!("atempo={}", audio_speed_filter_value(speed)));
+    append_output_args(&mut command, audio_format, opus_bitrate_kbps);
+    command.arg(output_path);
+    run_ffmpeg(command)
+}
+
+fn audio_speed_filter_value(speed: f32) -> String {
+    if (speed - speed.round()).abs() < f32::EPSILON {
+        format!("{:.0}", speed)
+    } else if ((speed * 10.0).round() - speed * 10.0).abs() < f32::EPSILON {
+        format!("{:.1}", speed)
+    } else {
+        format!("{:.2}", speed)
+    }
+}
+
 fn append_output_args(command: &mut Command, audio_format: &str, opus_bitrate_kbps: u32) {
     match audio_format {
         "mp3" => {
@@ -170,6 +221,22 @@ mod tests {
         assert_eq!(audio_file_name("m4a"), "audio.m4a");
         assert_eq!(audio_file_name("ogg"), "audio.ogg");
         assert_eq!(audio_file_name("wav"), "audio.wav");
+    }
+
+    #[test]
+    fn builds_speed_adjusted_audio_file_names() {
+        assert_eq!(
+            speed_adjusted_audio_file_name("audio.opus", 1.25).as_deref(),
+            Some("audio_1.25x.opus")
+        );
+        assert_eq!(
+            speed_adjusted_audio_file_name("audio.mp3", 1.5).as_deref(),
+            Some("audio_1.5x.mp3")
+        );
+        assert_eq!(
+            speed_adjusted_audio_file_name("audio.m4a", 2.0).as_deref(),
+            Some("audio_2x.m4a")
+        );
     }
 
     #[test]

@@ -5,11 +5,26 @@ import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, DeploymentUnitOutli
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
 import { fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
-import { extractStartTimeHm, resolveSessionAudioPath } from "../../lib/appUtils";
+import { extractStartTimeHm, parseDurationHms, resolveSessionAudioPath } from "../../lib/appUtils";
 import { AudioPlayer } from "./AudioPlayer";
 import { useI18n } from "../../i18n";
 
 const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
+
+function formatDurationHms(totalSeconds: number): string {
+  const safe = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const seconds = safe % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function speedDurationDeltaLabel(durationHms: string, speed: number | null | undefined): string {
+  if (!speed || speed <= 1) return "";
+  const originalSeconds = parseDurationHms(durationHms);
+  if (originalSeconds <= 0) return "";
+  return `-${formatDurationHms(originalSeconds - originalSeconds / speed)}`;
+}
 
 function sameDraftDetail(left: SessionMetaView, right: SessionMetaView) {
   return (
@@ -152,6 +167,13 @@ function SessionCardImpl({
   const statusMatch = query !== "" && item.status.toLowerCase().includes(query);
 
   const startTimeHm = extractStartTimeHm(item.started_at_iso);
+  const speedLabel =
+    item.speed_adjusted_audio_file?.trim() && item.audio_speed_multiplier
+      ? `${Number(item.audio_speed_multiplier).toString()}x`
+      : "";
+  const speedDurationDelta = speedLabel
+    ? speedDurationDeltaLabel(item.audio_duration_hms, item.audio_speed_multiplier)
+    : "";
   const sessionTitleMeta = startTimeHm
     ? `(${item.audio_format}) - ${item.display_date_ru} ${startTimeHm}`
     : `(${item.audio_format}) - ${item.display_date_ru}`;
@@ -182,6 +204,19 @@ function SessionCardImpl({
           <div className="session-title-line">
             <h3 className="session-title-heading">{detail.topic || "Без темы"}</h3>
             <span className="session-title-meta">{sessionTitleMeta}</span>
+            {speedLabel && (
+              <span className="session-speed-label" title="ускоренное аудио">
+                {speedLabel}
+              </span>
+            )}
+            {speedDurationDelta && (
+              <span
+                className="session-speed-duration-delta"
+                title="сохранено время для транскрибации"
+              >
+                {speedDurationDelta}
+              </span>
+            )}
           </div>
           <div className={statusMatch ? "session-status match-hit" : "session-status"}>
             {t("sessions.status", { status: formatSessionStatus(item.status) })}

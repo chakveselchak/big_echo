@@ -16,6 +16,7 @@ export type PublicSettings = {
   openai_model: string;
   audio_format: string;
   opus_bitrate_kbps: number;
+  audio_speed_multiplier?: number | null;
   mic_device_name: string;
   system_device_name: string;
   auto_run_pipeline_on_stop: boolean;
@@ -77,6 +78,8 @@ export type SessionListItem = {
   started_at_iso: string;
   session_dir: string;
   audio_file?: string;
+  speed_adjusted_audio_file?: string | null;
+  audio_speed_multiplier?: number | null;
   audio_format: string;
   audio_duration_hms: string;
   has_transcript_text: boolean;
@@ -190,6 +193,7 @@ export type AppleSpeechDownloadProgress = {
 export const transcriptionTaskOptions = ["transcribe", "diarize"];
 export const diarizationSettingOptions = ["general", "meeting", "telephonic"];
 export const audioFormatOptions = ["opus", "mp3", "m4a", "ogg", "wav"];
+export const audioSpeedMultiplierOptions = [1, 1.25, 1.5, 1.75, 2] as const;
 export const saluteSpeechScopeOptions = [
   "SALUTE_SPEECH_PERS",
   "SALUTE_SPEECH_CORP",

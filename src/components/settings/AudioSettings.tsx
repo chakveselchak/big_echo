@@ -2,7 +2,7 @@ import React from "react";
 import { Button, Card, Flex, Form, InputNumber, Select } from "antd";
 import { Input } from "antd";
 import type { MacosSystemAudioPermissionStatus, PublicSettings } from "../../types";
-import { audioFormatOptions } from "../../types";
+import { audioFormatOptions, audioSpeedMultiplierOptions } from "../../types";
 
 type AudioSettingsProps = {
   settings: PublicSettings;
@@ -62,6 +62,40 @@ export function AudioSettings({
           options={audioFormatOptions.map((value) => ({ value, label: value }))}
           onChange={(value) => setSettings((prev) => (prev ? { ...prev, audio_format: value } : prev))}
         />
+      </Form.Item>
+
+      <Form.Item
+        label={
+          <span>
+            Ускорять аудио на{isDirty("audio_speed_multiplier") && dirtyDot}
+          </span>
+        }
+      >
+        <Flex wrap="wrap" gap={8}>
+          {audioSpeedMultiplierOptions.map((speed) => {
+            const selected = settings.audio_speed_multiplier === speed;
+            return (
+              <Button
+                key={speed}
+                htmlType="button"
+                type={selected ? "primary" : "default"}
+                aria-pressed={selected}
+                onClick={() =>
+                  setSettings((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          audio_speed_multiplier: speed,
+                        }
+                      : prev
+                  )
+                }
+              >
+                {speed}x
+              </Button>
+            );
+          })}
+        </Flex>
       </Form.Item>
 
       <Form.Item

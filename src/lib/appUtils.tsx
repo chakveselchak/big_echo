@@ -103,7 +103,8 @@ export function joinSessionAudioPath(sessionDir: string, audioFile: string): str
 export function resolveSessionAudioPath(item: SessionListItem): string | null {
   const fallbackAudioFile =
     item.audio_format && item.audio_format !== "unknown" ? `audio.${item.audio_format}` : "";
-  const audioFile = (item.audio_file ?? fallbackAudioFile).trim();
+  const speedAdjustedAudioFile = (item.speed_adjusted_audio_file ?? "").trim();
+  const audioFile = speedAdjustedAudioFile || (item.audio_file ?? fallbackAudioFile).trim();
   if (!audioFile) return null;
   return joinSessionAudioPath(item.session_dir, audioFile);
 }

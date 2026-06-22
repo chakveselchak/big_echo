@@ -113,6 +113,22 @@ function renderCard(
 }
 
 describe("SessionCard Brain upload status", () => {
+  it("renders speed label next to session date when speed-adjusted audio exists", () => {
+    renderCard(
+      makeItem("uploaded", {
+        speed_adjusted_audio_file: "audio_1.5x.mp3",
+        audio_speed_multiplier: 1.5,
+        audio_duration_hms: "00:01:00",
+      }),
+    );
+
+    expect(screen.getByText("1.5x")).toHaveAttribute("title", "ускоренное аудио");
+    expect(screen.getByText("-00:00:20")).toHaveAttribute(
+      "title",
+      "сохранено время для транскрибации",
+    );
+  });
+
   it("keeps unsaved Topic, Tags and Notes edits when a pipeline refresh updates the session", async () => {
     const user = userEvent.setup();
     const initialProps = makeProps({

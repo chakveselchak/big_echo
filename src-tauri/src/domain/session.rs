@@ -15,6 +15,10 @@ pub enum SessionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionArtifacts {
     pub audio_file: String,
+    #[serde(default)]
+    pub speed_adjusted_audio_file: String,
+    #[serde(default)]
+    pub audio_speed_multiplier: Option<f32>,
     pub transcript_file: String,
     pub summary_file: String,
     pub meta_file: String,
@@ -30,6 +34,8 @@ impl Default for SessionArtifacts {
     fn default() -> Self {
         Self {
             audio_file: "audio.opus".to_string(),
+            speed_adjusted_audio_file: String::new(),
+            audio_speed_multiplier: None,
             transcript_file: "transcript.md".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
@@ -134,6 +140,29 @@ mod tests {
     fn session_artifacts_default_includes_tasks_sync_file() {
         let artifacts = SessionArtifacts::default();
         assert_eq!(artifacts.tasks_sync_file, "tasks_sync.json");
+    }
+
+    #[test]
+    fn session_artifacts_default_has_no_speed_adjusted_audio() {
+        let artifacts = SessionArtifacts::default();
+        assert_eq!(artifacts.speed_adjusted_audio_file, "");
+        assert_eq!(artifacts.audio_speed_multiplier, None);
+    }
+
+    #[test]
+    fn session_artifacts_deserializes_legacy_json_without_speed_audio_fields() {
+        let raw = r#"{
+        "audio_file": "audio.opus",
+        "transcript_file": "transcript.md",
+        "summary_file": "summary.md",
+        "meta_file": "meta.json",
+        "tasks_sync_file": "tasks_sync.json"
+    }"#;
+
+        let artifacts: SessionArtifacts = serde_json::from_str(raw).expect("legacy artifacts");
+
+        assert_eq!(artifacts.speed_adjusted_audio_file, "");
+        assert_eq!(artifacts.audio_speed_multiplier, None);
     }
 
     #[test]

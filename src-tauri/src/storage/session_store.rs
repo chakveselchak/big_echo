@@ -63,6 +63,8 @@ mod tests {
         );
         meta.artifacts = SessionArtifacts {
             audio_file: "audio.opus".to_string(),
+            speed_adjusted_audio_file: String::new(),
+            audio_speed_multiplier: None,
             transcript_file: "transcript.txt".to_string(),
             summary_file: "summary_10.03.2026.md".to_string(),
             meta_file: "meta.json".to_string(),
@@ -87,6 +89,8 @@ mod tests {
         );
         meta.artifacts = SessionArtifacts {
             audio_file: "audio.opus".to_string(),
+            speed_adjusted_audio_file: String::new(),
+            audio_speed_multiplier: None,
             transcript_file: "transcript.txt".to_string(),
             summary_file: "summary_10.03.2026.txt".to_string(),
             meta_file: "meta.json".to_string(),

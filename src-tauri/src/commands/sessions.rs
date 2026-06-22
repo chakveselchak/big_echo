@@ -209,6 +209,8 @@ fn import_audio_session_from_path(
     meta.display_date_ru = format_ru_date(now);
     meta.artifacts = SessionArtifacts {
         audio_file: format!("audio.{audio_extension}"),
+        speed_adjusted_audio_file: String::new(),
+        audio_speed_multiplier: None,
         transcript_file: transcript_name(now),
         summary_file: summary_name(now),
         meta_file: "meta.json".to_string(),
@@ -554,10 +556,10 @@ pub struct AutoDeleteSummary {
     pub scanned: u32,
 }
 
-/// Removes the audio file for a session and clears `meta.artifacts.audio_file`
-/// so the frontend hides the audio player on next list refresh. Pure file +
-/// metadata work — does NOT check whether the session is currently being
-/// recorded; the caller is responsible for that guard.
+/// Removes audio files for a session and clears audio artifact metadata so the
+/// frontend hides the audio player on next list refresh. Pure file + metadata
+/// work — does NOT check whether the session is currently being recorded; the
+/// caller is responsible for that guard.
 pub fn wipe_session_audio_file(app_data_dir: &Path, session_id: &str) -> Result<(), String> {
     let session_dir = get_session_dir(app_data_dir, session_id)?
         .ok_or_else(|| "Session not found".to_string())?;
@@ -572,8 +574,17 @@ pub fn wipe_session_audio_file(app_data_dir: &Path, session_id: &str) -> Result<
             fs::remove_file(&audio_path).map_err(|e| e.to_string())?;
         }
     }
+    let speed_audio_file_name = meta.artifacts.speed_adjusted_audio_file.trim().to_string();
+    if !speed_audio_file_name.is_empty() {
+        let speed_audio_path = session_dir.join(&speed_audio_file_name);
+        if speed_audio_path.exists() {
+            fs::remove_file(&speed_audio_path).map_err(|e| e.to_string())?;
+        }
+    }
 
     meta.artifacts.audio_file = String::new();
+    meta.artifacts.speed_adjusted_audio_file = String::new();
+    meta.artifacts.audio_speed_multiplier = None;
     save_meta(&meta_path, &meta)?;
     Ok(())
 }
@@ -1027,6 +1038,8 @@ mod tests {
         );
         meta.artifacts = SessionArtifacts {
             audio_file: "audio.opus".to_string(),
+            speed_adjusted_audio_file: String::new(),
+            audio_speed_multiplier: None,
             transcript_file: "transcript.txt".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
@@ -1355,6 +1368,8 @@ mod tests {
         meta.ended_at_iso = ended_at.map(|dt| dt.to_rfc3339());
         meta.artifacts = SessionArtifacts {
             audio_file: audio_file.to_string(),
+            speed_adjusted_audio_file: String::new(),
+            audio_speed_multiplier: None,
             transcript_file: "transcript.md".to_string(),
             summary_file: "summary.md".to_string(),
             meta_file: "meta.json".to_string(),
