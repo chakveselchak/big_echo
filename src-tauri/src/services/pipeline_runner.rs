@@ -14,8 +14,8 @@ use crate::settings::secret_store::get_secret;
 use crate::storage::markdown_artifact::{strip_frontmatter, write_markdown_artifact};
 use crate::storage::session_store::{load_meta, save_meta};
 use crate::storage::sqlite_repo::{
-    add_event, clear_retry_job, fetch_due_retry_jobs, get_meta_path, get_summary_prompt,
-    schedule_retry_job, upsert_session,
+    add_event, clear_retry_job, effective_audio_file_for_session, fetch_due_retry_jobs,
+    get_meta_path, get_summary_prompt, schedule_retry_job, upsert_session,
 };
 use std::fs;
 use std::io::Write;
@@ -175,7 +175,7 @@ pub async fn run_pipeline_core(
         pipeline::ExternalApiLogger::disabled()
     };
 
-    let audio_path = session_dir.join(&meta.artifacts.audio_file);
+    let audio_path = session_dir.join(effective_audio_file_for_session(session_dir, &meta));
     if !audio_path.exists() {
         let detail = mark_pipeline_audio_missing(&mut meta);
         save_meta(&meta_path, &meta)?;

@@ -16,6 +16,10 @@ const SALUTE_SPEECH_ALLOWED_SCOPES: &[&str] = &[
 ];
 const SALUTE_SPEECH_ALLOWED_MODELS: &[&str] = &["general", "callcenter"];
 
+fn default_audio_speed_multiplier() -> Option<f32> {
+    Some(1.0)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PublicSettings {
@@ -36,6 +40,8 @@ pub struct PublicSettings {
     pub openai_model: String,
     pub audio_format: String,
     pub opus_bitrate_kbps: u32,
+    #[serde(default = "default_audio_speed_multiplier")]
+    pub audio_speed_multiplier: Option<f32>,
     pub mic_device_name: String,
     pub system_device_name: String,
     pub artifact_opener_app: String,
@@ -75,6 +81,7 @@ impl Default for PublicSettings {
             openai_model: "gpt-5.1-codex-mini".to_string(),
             audio_format: "opus".to_string(),
             opus_bitrate_kbps: 24,
+            audio_speed_multiplier: default_audio_speed_multiplier(),
             mic_device_name: String::new(),
             system_device_name: String::new(),
             artifact_opener_app: default_text_editor_id().unwrap_or_default().to_string(),
@@ -166,6 +173,15 @@ impl PublicSettings {
         if self.opus_bitrate_kbps < 12 || self.opus_bitrate_kbps > 128 {
             return Err("Opus bitrate must be between 12 and 128 kbps".to_string());
         }
+        if let Some(speed) = self.audio_speed_multiplier {
+            const ALLOWED_AUDIO_SPEEDS: &[f32] = &[1.0, 1.25, 1.5, 1.75, 2.0];
+            if !ALLOWED_AUDIO_SPEEDS
+                .iter()
+                .any(|allowed| (speed - allowed).abs() < f32::EPSILON)
+            {
+                return Err("Invalid audio speed multiplier".to_string());
+            }
+        }
         if self.transcription_provider == "salute_speech" {
             if !SALUTE_SPEECH_ALLOWED_SCOPES.contains(&self.salute_speech_scope.as_str()) {
                 return Err("Invalid SalutSpeech scope".to_string());
@@ -245,6 +261,54 @@ mod tests {
     #[test]
     fn auto_run_pipeline_on_stop_is_disabled_by_default() {
         assert!(!PublicSettings::default().auto_run_pipeline_on_stop);
+    }
+
+    #[test]
+    fn audio_speed_multiplier_defaults_to_one_x() {
+        assert_eq!(PublicSettings::default().audio_speed_multiplier, Some(1.0));
+    }
+
+    #[test]
+    fn accepts_allowed_audio_speed_multipliers() {
+        for speed in [1.0, 1.25, 1.5, 1.75, 2.0] {
+            let settings = PublicSettings {
+                audio_speed_multiplier: Some(speed),
+                ..Default::default()
+            };
+
+            assert_eq!(settings.validate(), Ok(()), "speed {speed}");
+        }
+    }
+
+    #[test]
+    fn rejects_unsupported_audio_speed_multiplier() {
+        let settings = PublicSettings {
+            audio_speed_multiplier: Some(1.1),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            settings.validate(),
+            Err("Invalid audio speed multiplier".to_string())
+        );
+    }
+
+    #[test]
+    fn missing_audio_speed_multiplier_uses_one_x_default() {
+        let body = r#"{
+            "recording_root":"./recordings",
+            "artifact_open_app":"",
+            "transcription_provider":"nexara",
+            "transcription_url":"",
+            "summary_url":"",
+            "openai_model":"gpt-4.1-mini",
+            "audio_format":"opus",
+            "opus_bitrate_kbps":24,
+            "mic_device_name":"",
+            "system_device_name":""
+        }"#;
+        let parsed: PublicSettings = serde_json::from_str(body).expect("settings should parse");
+        assert_eq!(parsed.audio_speed_multiplier, Some(1.0));
     }
 
     #[test]

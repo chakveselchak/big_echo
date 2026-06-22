@@ -331,6 +331,8 @@ mod tests {
             started_at_iso: "2026-04-10T10:00:00+03:00".into(),
             session_dir: "/r/s".into(),
             audio_file: "audio.opus".into(),
+            speed_adjusted_audio_file: None,
+            audio_speed_multiplier: None,
             audio_format: "opus".into(),
             audio_duration_hms: "00:00:01".into(),
             has_transcript_text: false,

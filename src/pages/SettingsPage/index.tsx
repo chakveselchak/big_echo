@@ -116,6 +116,7 @@ export function SettingsPage({ brainUnlocked }: { brainUnlocked?: boolean } = {}
     audio:
       isDirty("audio_format") ||
       isDirty("opus_bitrate_kbps") ||
+      isDirty("audio_speed_multiplier") ||
       isDirty("mic_device_name") ||
       isDirty("system_device_name"),
     yandex:

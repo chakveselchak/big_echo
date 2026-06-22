@@ -1,6 +1,7 @@
 import { PublicSettings } from "../types";
 
 const allowedAudioFormats = new Set(["opus", "mp3", "m4a", "ogg", "wav"]);
+const allowedAudioSpeedMultipliers = new Set([1, 1.25, 1.5, 1.75, 2]);
 const allowedTranscriptionProviders = new Set(["nexara", "salute_speech", "apple_speech"]);
 const saluteSpeechSupportedAudioFormats = new Set(["opus", "mp3", "wav"]);
 const saluteSpeechAllowedScopes = new Set([
@@ -49,6 +50,13 @@ export function validateSettings(settings: PublicSettings | null): string[] {
   }
   if (settings.audio_format === "opus" && (settings.opus_bitrate_kbps < 12 || settings.opus_bitrate_kbps > 128)) {
     errors.push("Битрейт Opus должен быть от 12 до 128 kbps");
+  }
+  if (
+    settings.audio_speed_multiplier !== null &&
+    settings.audio_speed_multiplier !== undefined &&
+    !allowedAudioSpeedMultipliers.has(settings.audio_speed_multiplier)
+  ) {
+    errors.push("Неверная скорость аудио");
   }
   if (settings.transcription_provider === "salute_speech") {
     if (!saluteSpeechAllowedScopes.has(settings.salute_speech_scope)) {
