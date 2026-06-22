@@ -348,13 +348,37 @@ pub(crate) fn position_tray_popover(
     anchor: PhysicalPosition<f64>,
 ) -> Result<(), String> {
     let size = window.outer_size().map_err(|e| e.to_string())?;
-    let x = (anchor.x.round() as i32) - (size.width as i32 / 2);
-    // 5px gap between the menu bar and the top of the tray popover
-    let y = (anchor.y.round() as i32) + 5;
+    let position = calculate_tray_popover_position(
+        std::env::consts::OS,
+        anchor.x,
+        anchor.y,
+        size.width,
+        size.height,
+    );
     window
-        .set_position(Position::Physical(PhysicalPosition::new(x, y)))
+        .set_position(Position::Physical(position))
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub(crate) fn calculate_tray_popover_position(
+    platform: &str,
+    anchor_x: f64,
+    anchor_y: f64,
+    window_width: u32,
+    window_height: u32,
+) -> PhysicalPosition<i32> {
+    const TRAY_POPOVER_GAP_PX: i32 = 5;
+
+    let x = (anchor_x.round() as i32) - (window_width as i32 / 2);
+    let anchor_y = anchor_y.round() as i32;
+    let y = if platform == "windows" {
+        anchor_y - window_height as i32 - TRAY_POPOVER_GAP_PX
+    } else {
+        anchor_y + TRAY_POPOVER_GAP_PX
+    };
+
+    PhysicalPosition::new(x, y)
 }
 
 // ── Event payload parsing ────────────────────────────────────────────────────
@@ -461,5 +485,21 @@ mod tests {
     fn tray_hover_timer_does_not_fire_on_non_macos() {
         assert!(!should_fire_main_open_after_tray_hover("windows", 7, 7));
         assert!(!should_fire_main_open_after_tray_hover("linux", 7, 7));
+    }
+
+    #[test]
+    fn tray_popover_position_is_below_anchor_on_macos() {
+        let position = calculate_tray_popover_position("macos", 400.0, 24.0, 280, 360);
+
+        assert_eq!(position.x, 260);
+        assert_eq!(position.y, 29);
+    }
+
+    #[test]
+    fn tray_popover_position_is_above_anchor_on_windows() {
+        let position = calculate_tray_popover_position("windows", 400.0, 1040.0, 280, 360);
+
+        assert_eq!(position.x, 260);
+        assert_eq!(position.y, 675);
     }
 }
