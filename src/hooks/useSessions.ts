@@ -115,6 +115,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
   const artifactSearchRequestIdRef = useRef(0);
   const knownTagsRequestIdRef = useRef(0);
+  const speedRequestTokenBySessionRef = useRef<Record<string, number>>({});
 
   async function loadKnownTags() {
     const requestId = knownTagsRequestIdRef.current + 1;
@@ -304,14 +305,22 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   }
 
   async function setSessionTranscriptionSpeed(sessionId: string, speed: number) {
+    const token = (speedRequestTokenBySessionRef.current[sessionId] ?? 0) + 1;
+    speedRequestTokenBySessionRef.current[sessionId] = token;
+    const isLatestRequest = () => speedRequestTokenBySessionRef.current[sessionId] === token;
+
     setSpeedPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
     try {
       await tauriInvoke<string>("set_session_transcription_audio_speed", { sessionId, speed });
-      setStatus("session_speed_updated");
+      if (!isLatestRequest()) return;
       await loadSessions();
+      if (!isLatestRequest()) return;
+      setStatus("session_speed_updated");
     } catch (err) {
+      if (!isLatestRequest()) return;
       setStatus(`error: ${getErrorMessage(err)}`);
     } finally {
+      if (!isLatestRequest()) return;
       setSpeedPendingBySession((prev) => ({ ...prev, [sessionId]: false }));
     }
   }
@@ -519,6 +528,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         delete next[sessionId];
         return next;
       });
+      delete speedRequestTokenBySessionRef.current[sessionId];
       setPipelineStateBySession((prev) => {
         const next = { ...prev };
         delete next[sessionId];
@@ -735,6 +745,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     for (const id of Object.keys(pendingAutosaveSignatureRef.current)) {
       if (!validIds.has(id)) {
         delete pendingAutosaveSignatureRef.current[id];
+      }
+    }
+    for (const id of Object.keys(speedRequestTokenBySessionRef.current)) {
+      if (!validIds.has(id)) {
+        delete speedRequestTokenBySessionRef.current[id];
       }
     }
   }, [sessions]);

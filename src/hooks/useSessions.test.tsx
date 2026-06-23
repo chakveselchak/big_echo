@@ -701,4 +701,97 @@ describe("useSessions", () => {
     expect(result.current.speedPendingBySession["s-speed"]).toBe(false);
     expect(setStatus).toHaveBeenCalledWith("error: speed unavailable");
   });
+
+  it("keeps session transcription speed pending for a newer overlapping request", async () => {
+    let listCalls = 0;
+    const speedResolvers = new Map<number, (value: string) => void>();
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") {
+        listCalls += 1;
+        return [
+          {
+            session_id: "s-speed",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Speed options",
+            display_date_ru: "12.03.2026",
+            started_at_iso: "2026-03-12T10:00:00+03:00",
+            session_dir: "/tmp/s-speed",
+            audio_file: "audio.opus",
+            audio_speed_multiplier: listCalls === 1 ? 1 : 1.75,
+            available_audio_speed_multipliers: [1, 1.25, 1.75],
+            audio_duration_hms: "00:10:00",
+            has_transcript_text: true,
+            has_summary_text: false,
+            meta: {
+              session_id: "s-speed",
+              source: "zoom",
+              notes: "",
+              topic: "Speed options",
+              tags: [],
+            },
+          },
+        ];
+      }
+      if (cmd === "set_session_transcription_audio_speed") {
+        const speed = (args as { speed: number }).speed;
+        return new Promise<string>((resolve) => {
+          speedResolvers.set(speed, resolve);
+        });
+      }
+      if (cmd === "list_known_tags") {
+        return [];
+      }
+      return args ?? null;
+    });
+
+    const setStatus = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    let firstRequest!: Promise<void>;
+    act(() => {
+      firstRequest = result.current.setSessionTranscriptionSpeed("s-speed", 1.25);
+    });
+
+    await waitFor(() => {
+      expect(result.current.speedPendingBySession["s-speed"]).toBe(true);
+      expect(speedResolvers.has(1.25)).toBe(true);
+    });
+
+    let secondRequest!: Promise<void>;
+    act(() => {
+      secondRequest = result.current.setSessionTranscriptionSpeed("s-speed", 1.75);
+    });
+
+    await waitFor(() => {
+      expect(result.current.speedPendingBySession["s-speed"]).toBe(true);
+      expect(speedResolvers.has(1.75)).toBe(true);
+    });
+
+    await act(async () => {
+      speedResolvers.get(1.25)?.("ok");
+      await firstRequest;
+    });
+
+    expect(result.current.speedPendingBySession["s-speed"]).toBe(true);
+    expect(listCalls).toBe(1);
+    expect(setStatus).not.toHaveBeenCalledWith("session_speed_updated");
+
+    await act(async () => {
+      speedResolvers.get(1.75)?.("ok");
+      await secondRequest;
+    });
+
+    expect(result.current.speedPendingBySession["s-speed"]).toBe(false);
+    expect(listCalls).toBe(2);
+    expect(result.current.sessions[0].audio_speed_multiplier).toBe(1.75);
+    expect(setStatus).toHaveBeenCalledTimes(1);
+    expect(setStatus).toHaveBeenCalledWith("session_speed_updated");
+  });
 });
