@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration as StdDuration;
 
+const NON_ORIGINAL_AUDIO_SPEED_MULTIPLIERS: &[f32] = &[1.25, 1.5, 1.75, 2.0];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BrainUploadStatus {
@@ -51,6 +53,7 @@ pub struct SessionListItem {
     pub speed_adjusted_audio_file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_speed_multiplier: Option<f32>,
+    pub available_audio_speed_multipliers: Vec<f32>,
     pub audio_format: String,
     pub audio_duration_hms: String,
     pub has_transcript_text: bool,
@@ -218,6 +221,33 @@ pub(crate) fn effective_audio_file_for_session(
         return speed_file.to_string();
     }
     meta.artifacts.audio_file.clone()
+}
+
+pub(crate) fn available_audio_speed_multipliers(
+    session_dir: &Path,
+    meta: &SessionMeta,
+) -> Vec<f32> {
+    let audio_file = meta.artifacts.audio_file.trim();
+    if audio_file.is_empty() {
+        return Vec::new();
+    }
+
+    let mut multipliers = Vec::new();
+    if session_dir.join(audio_file).is_file() {
+        multipliers.push(1.0);
+    }
+
+    for speed in NON_ORIGINAL_AUDIO_SPEED_MULTIPLIERS {
+        let Some(speed_file) =
+            crate::audio::file_writer::speed_adjusted_audio_file_name(audio_file, *speed)
+        else {
+            continue;
+        };
+        if session_dir.join(speed_file).is_file() {
+            multipliers.push(*speed);
+        }
+    }
+    multipliers
 }
 
 fn open(app_data_dir: &Path) -> Result<Connection, String> {
@@ -556,6 +586,7 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                 audio_file: String::new(),
                 speed_adjusted_audio_file: None,
                 audio_speed_multiplier: None,
+                available_audio_speed_multipliers: Vec::new(),
                 audio_format: "unknown".to_string(),
                 audio_duration_hms: "00:00:00".to_string(),
                 has_transcript_text: false,
@@ -602,6 +633,8 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                         item.speed_adjusted_audio_file = Some(effective_audio_file);
                         item.audio_speed_multiplier = meta.artifacts.audio_speed_multiplier;
                     }
+                    item.available_audio_speed_multipliers =
+                        available_audio_speed_multipliers(&session_dir, &meta);
                     item.audio_format = audio_format_from_file_name(&meta.artifacts.audio_file);
                     item.audio_duration_hms = audio_duration_hms(&meta);
                     item.has_transcript_text = transcript_ok
@@ -1028,6 +1061,44 @@ mod tests {
 
         assert_eq!(sessions[0].speed_adjusted_audio_file.as_deref(), Some("audio_1.5x.opus"));
         assert_eq!(sessions[0].audio_speed_multiplier, Some(1.5));
+    }
+
+    #[test]
+    fn list_sessions_exposes_available_audio_speed_multipliers() {
+        let dir = temp_dir();
+        let session_dir = dir.path().join("sessions").join("s-speed-files");
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let meta_path = session_dir.join("meta.json");
+
+        let mut meta = SessionMeta::new(
+            "s-speed-files".to_string(),
+            "zoom".to_string(),
+            vec!["zoom".to_string()],
+            "Speed files".to_string(),
+            "".to_string(),
+        );
+        meta.status = SessionStatus::Recorded;
+        meta.artifacts.audio_file = "audio.opus".to_string();
+
+        let speed_125 =
+            crate::audio::file_writer::speed_adjusted_audio_file_name("audio.opus", 1.25)
+                .expect("1.25x file name");
+        let speed_175 =
+            crate::audio::file_writer::speed_adjusted_audio_file_name("audio.opus", 1.75)
+                .expect("1.75x file name");
+
+        save_meta(&meta_path, &meta).expect("save meta");
+        std::fs::write(session_dir.join("audio.opus"), b"original").expect("write original");
+        std::fs::write(session_dir.join(speed_125), b"speed").expect("write 1.25 speed");
+        std::fs::write(session_dir.join(speed_175), b"speed").expect("write 1.75 speed");
+        upsert_session(dir.path(), &meta, &session_dir, &meta_path).expect("upsert session");
+
+        let sessions = list_sessions(dir.path()).expect("list sessions");
+
+        assert_eq!(
+            sessions[0].available_audio_speed_multipliers,
+            vec![1.0, 1.25, 1.75]
+        );
     }
 
     #[test]

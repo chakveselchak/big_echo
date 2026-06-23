@@ -80,6 +80,7 @@ export type SessionListItem = {
   audio_file?: string;
   speed_adjusted_audio_file?: string | null;
   audio_speed_multiplier?: number | null;
+  available_audio_speed_multipliers?: number[];
   audio_format: string;
   audio_duration_hms: string;
   has_transcript_text: boolean;

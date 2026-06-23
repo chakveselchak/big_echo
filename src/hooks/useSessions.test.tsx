@@ -138,6 +138,55 @@ describe("useSessions", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("get_session_meta", { sessionId: "s-inline" });
   });
 
+  it("refreshes session identity when available audio speed multipliers change", async () => {
+    let listCalls = 0;
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_sessions") {
+        listCalls += 1;
+        return [
+          {
+            session_id: "s-speed",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Speed options",
+            display_date_ru: "12.03.2026",
+            started_at_iso: "2026-03-12T10:00:00+03:00",
+            session_dir: "/tmp/s-speed",
+            audio_file: "audio.opus",
+            available_audio_speed_multipliers: listCalls === 1 ? [1, 1.25] : [1, 1.25, 1.5],
+            audio_duration_hms: "00:10:00",
+            has_transcript_text: true,
+            has_summary_text: false,
+            meta: {
+              session_id: "s-speed",
+              source: "zoom",
+              notes: "",
+              topic: "Speed options",
+              tags: [],
+            },
+          },
+        ];
+      }
+      return null;
+    });
+
+    const { result } = renderHook(() =>
+      useSessions({ setStatus: vi.fn(), lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+    const firstSession = result.current.sessions[0];
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    expect(result.current.sessions[0]).not.toBe(firstSession);
+    expect(result.current.sessions[0].available_audio_speed_multipliers).toEqual([1, 1.25, 1.5]);
+  });
+
   it("loads known tags for autocomplete", async () => {
     invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "list_sessions") return [];

@@ -32,6 +32,12 @@ function sameTags(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function sameNumberArray(left: number[] | undefined, right: number[] | undefined) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 const NUM_SPEAKERS_MIN = 1;
 const NUM_SPEAKERS_MAX = 20;
 
@@ -156,6 +162,10 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
             existing.audio_file === fresh.audio_file &&
             existing.speed_adjusted_audio_file === fresh.speed_adjusted_audio_file &&
             existing.audio_speed_multiplier === fresh.audio_speed_multiplier &&
+            sameNumberArray(
+              existing.available_audio_speed_multipliers,
+              fresh.available_audio_speed_multipliers,
+            ) &&
             existing.audio_format === fresh.audio_format &&
             existing.audio_duration_hms === fresh.audio_duration_hms &&
             existing.has_transcript_text === fresh.has_transcript_text &&
