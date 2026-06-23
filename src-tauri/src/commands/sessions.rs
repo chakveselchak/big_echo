@@ -589,6 +589,94 @@ pub fn wipe_session_audio_file(app_data_dir: &Path, session_id: &str) -> Result<
     Ok(())
 }
 
+fn validate_session_audio_speed(speed: f32) -> Result<f32, String> {
+    const ALLOWED_SPEEDS: &[f32] = &[1.0, 1.25, 1.5, 1.75, 2.0];
+    if ALLOWED_SPEEDS
+        .iter()
+        .any(|allowed| (speed - allowed).abs() < 0.001)
+    {
+        Ok(speed)
+    } else {
+        Err("Invalid audio speed multiplier".to_string())
+    }
+}
+
+pub(crate) fn set_session_transcription_audio_speed_core(
+    app_data_dir: &Path,
+    session_id: &str,
+    speed: f32,
+) -> Result<(), String> {
+    let speed = validate_session_audio_speed(speed)?;
+    let session_dir = get_session_dir(app_data_dir, session_id)?
+        .ok_or_else(|| "Session not found".to_string())?;
+    let meta_path = get_meta_path(app_data_dir, session_id)?
+        .ok_or_else(|| "Session metadata not found".to_string())?;
+    let mut meta = load_meta(&meta_path)?;
+
+    let audio_file = meta.artifacts.audio_file.trim();
+    if audio_file.is_empty() {
+        return Err("Audio file not found".to_string());
+    }
+    let original_audio_path = session_dir.join(audio_file);
+    if !original_audio_path.is_file() {
+        return Err("Audio file not found".to_string());
+    }
+
+    if speed <= 1.0 {
+        meta.artifacts.speed_adjusted_audio_file = String::new();
+        meta.artifacts.audio_speed_multiplier = None;
+        save_meta(&meta_path, &meta)?;
+        upsert_session(app_data_dir, &meta, &session_dir, &meta_path)?;
+        add_event(
+            app_data_dir,
+            session_id,
+            "audio_speed_selected",
+            "Selected original audio for manual transcription",
+        )?;
+        return Ok(());
+    }
+
+    let speed_file = crate::audio::file_writer::speed_adjusted_audio_file_name(audio_file, speed)
+        .ok_or_else(|| {
+            "Audio speed-up failed: cannot build speed-adjusted file name".to_string()
+        })?;
+    let speed_path = session_dir.join(&speed_file);
+    if !speed_path.is_file() {
+        let dirs = AppDirs {
+            app_data_dir: app_data_dir.to_path_buf(),
+        };
+        let settings = get_settings_from_dirs(&dirs)?;
+        crate::audio::file_writer::write_speed_adjusted_audio_file(
+            &original_audio_path,
+            &speed_path,
+            &settings.audio_format,
+            settings.opus_bitrate_kbps,
+            speed,
+        )?;
+    }
+
+    meta.artifacts.speed_adjusted_audio_file = speed_file;
+    meta.artifacts.audio_speed_multiplier = Some(speed);
+    save_meta(&meta_path, &meta)?;
+    upsert_session(app_data_dir, &meta, &session_dir, &meta_path)?;
+    add_event(
+        app_data_dir,
+        session_id,
+        "audio_speed_selected",
+        &format!("Selected {speed}x audio for manual transcription"),
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_session_transcription_audio_speed(
+    dirs: tauri::State<'_, AppDirs>,
+    session_id: String,
+    speed: f32,
+) -> Result<(), String> {
+    set_session_transcription_audio_speed_core(&dirs.app_data_dir, &session_id, speed)
+}
+
 /// Delete just the audio file for a session, without removing the session
 /// itself. Used by the "Удалить аудио" button in the session card. After
 /// success the session remains in the list but its artifacts.audio_file is
@@ -1386,6 +1474,125 @@ mod tests {
         fs::create_dir_all(&app_data_dir).expect("mkdir app-data");
         let recording_root = tmp.path().join("recordings");
         (tmp, app_data_dir, recording_root)
+    }
+
+    #[test]
+    fn set_session_transcription_audio_speed_one_x_clears_selected_speed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app_data_dir = temp.path().join("app");
+        let session_dir = temp.path().join("recordings").join("s-speed");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+        std::fs::write(session_dir.join("audio.opus"), b"original").expect("original audio");
+        std::fs::write(session_dir.join("audio_1.5x.opus"), b"speed").expect("speed audio");
+
+        let mut meta = crate::domain::session::SessionMeta::new(
+            "s-speed".to_string(),
+            "general".to_string(),
+            vec![],
+            "Speed".to_string(),
+            String::new(),
+        );
+        meta.status = crate::domain::session::SessionStatus::Recorded;
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        meta.artifacts.speed_adjusted_audio_file = "audio_1.5x.opus".to_string();
+        meta.artifacts.audio_speed_multiplier = Some(1.5);
+        let meta_path = session_dir.join("meta.json");
+        crate::storage::session_store::save_meta(&meta_path, &meta).expect("save meta");
+        crate::storage::sqlite_repo::upsert_session(&app_data_dir, &meta, &session_dir, &meta_path)
+            .expect("upsert");
+
+        set_session_transcription_audio_speed_core(&app_data_dir, "s-speed", 1.0)
+            .expect("select 1x");
+
+        let loaded = crate::storage::session_store::load_meta(&meta_path).expect("load meta");
+        assert_eq!(loaded.artifacts.speed_adjusted_audio_file, "");
+        assert_eq!(loaded.artifacts.audio_speed_multiplier, None);
+        assert_eq!(
+            crate::storage::sqlite_repo::effective_audio_file_for_session(&session_dir, &loaded),
+            "audio.opus"
+        );
+    }
+
+    #[test]
+    fn set_session_transcription_audio_speed_reuses_existing_speed_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app_data_dir = temp.path().join("app");
+        let session_dir = temp.path().join("recordings").join("s-speed");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+        std::fs::write(session_dir.join("audio.opus"), b"original").expect("original audio");
+        std::fs::write(session_dir.join("audio_1.5x.opus"), b"speed").expect("speed audio");
+
+        let mut meta = crate::domain::session::SessionMeta::new(
+            "s-speed".to_string(),
+            "general".to_string(),
+            vec![],
+            "Speed".to_string(),
+            String::new(),
+        );
+        meta.status = crate::domain::session::SessionStatus::Recorded;
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        let meta_path = session_dir.join("meta.json");
+        crate::storage::session_store::save_meta(&meta_path, &meta).expect("save meta");
+        crate::storage::sqlite_repo::upsert_session(&app_data_dir, &meta, &session_dir, &meta_path)
+            .expect("upsert");
+
+        set_session_transcription_audio_speed_core(&app_data_dir, "s-speed", 1.5)
+            .expect("select 1.5x");
+
+        let loaded = crate::storage::session_store::load_meta(&meta_path).expect("load meta");
+        assert_eq!(
+            loaded.artifacts.speed_adjusted_audio_file,
+            "audio_1.5x.opus"
+        );
+        assert_eq!(loaded.artifacts.audio_speed_multiplier, Some(1.5));
+        assert_eq!(
+            crate::storage::sqlite_repo::effective_audio_file_for_session(&session_dir, &loaded),
+            "audio_1.5x.opus"
+        );
+    }
+
+    #[test]
+    fn set_session_transcription_audio_speed_generates_missing_speed_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app_data_dir = temp.path().join("app");
+        let session_dir = temp.path().join("recordings").join("s-speed");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+        crate::audio::opus_writer::write_silence_opus(&session_dir.join("audio.opus"), 1000, 24)
+            .expect("original audio");
+
+        let mut meta = crate::domain::session::SessionMeta::new(
+            "s-speed".to_string(),
+            "general".to_string(),
+            vec![],
+            "Speed".to_string(),
+            String::new(),
+        );
+        meta.status = crate::domain::session::SessionStatus::Recorded;
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        let meta_path = session_dir.join("meta.json");
+        crate::storage::session_store::save_meta(&meta_path, &meta).expect("save meta");
+        crate::storage::sqlite_repo::upsert_session(&app_data_dir, &meta, &session_dir, &meta_path)
+            .expect("upsert");
+
+        set_session_transcription_audio_speed_core(&app_data_dir, "s-speed", 1.25)
+            .expect("select 1.25x");
+
+        assert!(session_dir.join("audio_1.25x.opus").is_file());
+        let loaded = crate::storage::session_store::load_meta(&meta_path).expect("load meta");
+        assert_eq!(
+            loaded.artifacts.speed_adjusted_audio_file,
+            "audio_1.25x.opus"
+        );
+        assert_eq!(loaded.artifacts.audio_speed_multiplier, Some(1.25));
+    }
+
+    #[test]
+    fn set_session_transcription_audio_speed_rejects_unsupported_speed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = set_session_transcription_audio_speed_core(temp.path(), "s-speed", 1.1)
+            .expect_err("unsupported speed should fail");
+
+        assert_eq!(err, "Invalid audio speed multiplier");
     }
 
     #[test]
