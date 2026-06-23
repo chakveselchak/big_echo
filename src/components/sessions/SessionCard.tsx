@@ -192,7 +192,7 @@ function SessionCardImpl({
       ? `${Number(item.audio_speed_multiplier).toString()}x`
       : "";
   const selectedSpeed = speedLabel ? item.audio_speed_multiplier ?? 1 : 1;
-  const availableSpeeds = new Set(item.available_audio_speed_multipliers ?? (hasAudio ? [1] : []));
+  const availableSpeeds = new Set(item.available_audio_speed_multipliers ?? []);
   const speedMenuItems: MenuProps["items"] = sessionSpeedOptions.map((speed) => ({
     key: String(speed),
     disabled: speedPending,
@@ -203,8 +203,10 @@ function SessionCardImpl({
         </span>
         <span className="session-speed-value">{speed}x</span>
         <span className="session-speed-dot-slot">
-          {availableSpeeds.has(speed) && <span className="session-speed-available-dot" />}
+          {availableSpeeds.has(speed) && <span className="session-speed-available-dot" aria-hidden="true" />}
         </span>
+        {selectedSpeed === speed && <span className="visually-hidden"> selected</span>}
+        {availableSpeeds.has(speed) && <span className="visually-hidden"> recording available</span>}
       </span>
     ),
   }));
@@ -322,6 +324,7 @@ function SessionCardImpl({
               <Dropdown
                 menu={{
                   items: speedMenuItems,
+                  selectedKeys: [String(selectedSpeed)],
                   onClick: ({ key }) => {
                     if (speedPending) return;
                     onSetTranscriptionSpeed(item.session_id, Number(key));

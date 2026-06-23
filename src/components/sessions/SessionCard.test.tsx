@@ -234,37 +234,12 @@ describe("SessionCard Brain upload status", () => {
   });
 
   it("uses local pending state to disable upload before backend refresh", () => {
-    const noop = () => undefined;
     renderWithI18n(
       <SessionCard
-        item={makeItem("not_uploaded")}
-        detail={makeDetail()}
-        textPending={false}
-        summaryPending={false}
-        pipelineState={undefined}
-        searchQuery=""
-        knownTagOptions={[]}
-        transcriptMatch={false}
-        summaryMatch={false}
-        showNumSpeakers={false}
-        brainUploadPending={true}
-        brainSyncReady={true}
-        onContextMenu={noop}
-        onDetailChange={noop}
-        onOpenArtifact={noop}
-        onGetText={noop}
-        onGetSummary={noop}
-        onOpenSummaryPrompt={noop}
-        onDelete={noop}
-        onDeleteAudio={noop}
-        onFieldBlur={noop}
-        onOpenFolder={noop}
-        onUploadToBrain={noop}
-        onShare={noop}
-        canShare={false}
-        onExportTodoist={noop}
-        setStatus={noop}
-        todoistPending={false}
+        {...makeProps({
+          item: makeItem("not_uploaded"),
+          brainUploadPending: true,
+        })}
       />,
     );
 
@@ -336,7 +311,7 @@ describe("SessionCard share button", () => {
 });
 
 describe("SessionCard speed dropdown", () => {
-  it("renders speed choices with selected check and availability dots", async () => {
+  it("renders speed choices with accessible selected and availability state", async () => {
     const user = userEvent.setup();
     const onSetSpeed = vi.fn();
     renderWithI18n(
@@ -356,10 +331,9 @@ describe("SessionCard speed dropdown", () => {
     await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
 
     expect(screen.getByRole("menuitem", { name: /1x/ })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /1\.5x/ })).toHaveTextContent("1.5x");
-    expect(screen.getByRole("menuitem", { name: /1\.5x/ }).querySelector(".anticon-check")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /1\.25x/ }).querySelector(".session-speed-available-dot")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /2x/ }).querySelector(".session-speed-available-dot")).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1\.5x selected recording available/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1\.25x recording available/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^2x$/ })).toBeInTheDocument();
   });
 
   it("defaults the selected speed to 1x when no selected speed audio is active", async () => {
@@ -378,8 +352,30 @@ describe("SessionCard speed dropdown", () => {
 
     await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
 
-    expect(screen.getByRole("menuitem", { name: /1x/ }).querySelector(".anticon-check")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /1\.75x/ }).querySelector(".anticon-check")).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1x selected recording available/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^1\.75x recording available$/ })).toBeInTheDocument();
+  });
+
+  it("does not mark 1x as available when speed availability metadata is missing", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            audio_file: "",
+            speed_adjusted_audio_file: "audio_1.5x.opus",
+            audio_speed_multiplier: 1.5,
+            available_audio_speed_multipliers: undefined,
+          }),
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+
+    const oneX = screen.getByRole("menuitem", { name: /^1x$/ });
+    expect(oneX).toBeInTheDocument();
+    expect(oneX.querySelector(".session-speed-available-dot")).not.toBeInTheDocument();
   });
 
   it("calls speed selection when a dropdown speed is clicked", async () => {
