@@ -79,6 +79,8 @@ function makeProps(overrides: Partial<SessionCardProps> = {}): SessionCardProps 
     canShare: false,
     onExportTodoist: noop,
     todoistPending: false,
+    onSetTranscriptionSpeed: noop,
+    speedPending: false,
     setStatus: noop,
     ...overrides,
   };
@@ -330,5 +332,88 @@ describe("SessionCard share button", () => {
     expect(
       screen.queryByRole("button", { name: "Поделиться ссылкой на аудио" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionCard speed dropdown", () => {
+  it("renders speed choices with selected check and availability dots", async () => {
+    const user = userEvent.setup();
+    const onSetSpeed = vi.fn();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            audio_file: "audio.opus",
+            speed_adjusted_audio_file: "audio_1.5x.opus",
+            audio_speed_multiplier: 1.5,
+            available_audio_speed_multipliers: [1, 1.25, 1.5],
+          }),
+          onSetTranscriptionSpeed: onSetSpeed,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+
+    expect(screen.getByRole("menuitem", { name: /1x/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1\.5x/ })).toHaveTextContent("1.5x");
+    expect(screen.getByRole("menuitem", { name: /1\.5x/ }).querySelector(".anticon-check")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1\.25x/ }).querySelector(".session-speed-available-dot")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /2x/ }).querySelector(".session-speed-available-dot")).not.toBeInTheDocument();
+  });
+
+  it("defaults the selected speed to 1x when no selected speed audio is active", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            audio_file: "audio.opus",
+            audio_speed_multiplier: 1.75,
+            available_audio_speed_multipliers: [1, 1.75],
+          }),
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+
+    expect(screen.getByRole("menuitem", { name: /1x/ }).querySelector(".anticon-check")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1\.75x/ }).querySelector(".anticon-check")).not.toBeInTheDocument();
+  });
+
+  it("calls speed selection when a dropdown speed is clicked", async () => {
+    const user = userEvent.setup();
+    const onSetSpeed = vi.fn();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            session_id: "s-brain",
+            audio_file: "audio.opus",
+            available_audio_speed_multipliers: [1],
+          }),
+          onSetTranscriptionSpeed: onSetSpeed,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+    await user.click(screen.getByRole("menuitem", { name: /2x/ }));
+
+    expect(onSetSpeed).toHaveBeenCalledWith("s-brain", 2);
+  });
+
+  it("disables the speed button while speed selection is pending", () => {
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", { audio_file: "audio.opus" }),
+          speedPending: true,
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Выбрать скорость транскрибации" })).toBeDisabled();
   });
 });

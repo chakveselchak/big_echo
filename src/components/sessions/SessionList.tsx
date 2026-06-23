@@ -40,6 +40,7 @@ type SessionListProps = {
   sessionArtifactSearchHits: Record<string, { transcript_match?: boolean; summary_match?: boolean }>;
   textPendingBySession: Record<string, boolean>;
   summaryPendingBySession: Record<string, boolean>;
+  speedPendingBySession: Record<string, boolean>;
   brainUploadPendingBySession: Record<string, boolean>;
   pipelineStateBySession: Record<string, PipelineUiState>;
   deleteTarget: DeleteTarget | null;
@@ -69,6 +70,7 @@ type SessionListProps = {
   requestDeleteAudio: (sessionId: string) => void;
   onUploadToBrain: (sessionId: string) => void;
   onShareAudio: (sessionId: string) => void;
+  onSetTranscriptionSpeed: (sessionId: string, speed: number) => void;
   syncedSessionIds: Set<string>;
   setStatus: (status: string) => void;
 };
@@ -82,6 +84,7 @@ export function SessionList({
   sessionArtifactSearchHits,
   textPendingBySession,
   summaryPendingBySession,
+  speedPendingBySession,
   brainUploadPendingBySession,
   pipelineStateBySession,
   deleteTarget,
@@ -111,6 +114,7 @@ export function SessionList({
   requestDeleteAudio,
   onUploadToBrain,
   onShareAudio,
+  onSetTranscriptionSpeed,
   syncedSessionIds,
   setStatus,
 }: SessionListProps) {
@@ -537,6 +541,7 @@ export function SessionList({
               const detail = getSessionDetail(item);
               const textPending = Boolean(textPendingBySession[item.session_id]);
               const summaryPending = Boolean(summaryPendingBySession[item.session_id]);
+              const speedPending = Boolean(speedPendingBySession[item.session_id]);
               const brainUploadPending = Boolean(brainUploadPendingBySession[item.session_id]);
               const pipelineState = pipelineStateBySession[item.session_id];
               const query = sessionSearchQuery.trim().toLowerCase();
@@ -576,6 +581,8 @@ export function SessionList({
                   canShare={syncedSessionIds.has(item.session_id)}
                   onExportTodoist={(sessionId) => void openTodoistExport(sessionId)}
                   todoistPending={todoistPendingSessionId === item.session_id}
+                  onSetTranscriptionSpeed={onSetTranscriptionSpeed}
+                  speedPending={speedPending}
                   setStatus={setStatus}
                 />
               );

@@ -9,13 +9,20 @@ vi.mock("./SessionCard", () => ({
   SessionCard: ({
     item,
     onUploadToBrain,
+    onSetTranscriptionSpeed,
+    speedPending,
   }: {
     item: SessionListItem;
     onUploadToBrain: (sessionId: string) => void;
+    onSetTranscriptionSpeed: (sessionId: string, speed: number) => void;
+    speedPending: boolean;
   }) => (
-    <div data-testid="session-card" data-session-id={item.session_id}>
+    <div data-testid="session-card" data-session-id={item.session_id} data-speed-pending={String(speedPending)}>
       <button type="button" onClick={() => onUploadToBrain(item.session_id)}>
         upload {item.session_id}
+      </button>
+      <button type="button" onClick={() => onSetTranscriptionSpeed(item.session_id, 1.5)}>
+        speed {item.session_id}
       </button>
     </div>
   ),
@@ -107,6 +114,7 @@ function renderList(
     sessionArtifactSearchHits: {},
     textPendingBySession: {},
     summaryPendingBySession: {},
+    speedPendingBySession: {},
     brainUploadPendingBySession: {},
     pipelineStateBySession: {},
     deleteTarget: null,
@@ -134,6 +142,7 @@ function renderList(
     requestDeleteAudio: noop,
     onUploadToBrain: noop,
     onShareAudio: noop,
+    onSetTranscriptionSpeed: noop,
     syncedSessionIds: new Set<string>(),
     setStatus: noop,
     ...overrides,
@@ -153,6 +162,20 @@ describe("SessionList lazy loading", () => {
     fireEvent.click(screen.getByRole("button", { name: "upload s-1" }));
 
     expect(onUploadToBrain).toHaveBeenCalledWith("s-1");
+  });
+
+  it("passes speed selection callback and pending state to session cards", () => {
+    const onSetTranscriptionSpeed = vi.fn();
+    renderList([makeSession(1)], {
+      onSetTranscriptionSpeed,
+      speedPendingBySession: { "s-1": true },
+    });
+
+    expect(screen.getByTestId("session-card")).toHaveAttribute("data-speed-pending", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "speed s-1" }));
+
+    expect(onSetTranscriptionSpeed).toHaveBeenCalledWith("s-1", 1.5);
   });
 
   it("renders only the first 20 cards when there are more than 20 sessions", () => {
@@ -239,6 +262,7 @@ describe("SessionList lazy loading", () => {
           sessionArtifactSearchHits={{}}
           textPendingBySession={{}}
           summaryPendingBySession={{}}
+          speedPendingBySession={{}}
           brainUploadPendingBySession={{}}
           pipelineStateBySession={{}}
           deleteTarget={null}
@@ -266,6 +290,7 @@ describe("SessionList lazy loading", () => {
           requestDeleteAudio={noop}
           onUploadToBrain={noop}
           onShareAudio={noop}
+          onSetTranscriptionSpeed={noop}
           syncedSessionIds={new Set<string>()}
           setStatus={noop}
         />
