@@ -393,6 +393,24 @@ mod tests {
     }
 
     #[test]
+    fn mixed_raw_writer_outputs_playable_silence_when_inputs_are_empty() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mic = temp.path().join("mic.raw");
+        let path = temp.path().join("audio.opus");
+        std::fs::write(&mic, []).expect("write empty mic raw");
+
+        write_mixed_raw_i16_to_opus(&path, &mic, SAMPLE_RATE, None, 0, 24).expect("write opus");
+
+        let bytes = std::fs::read(&path).expect("read file");
+        assert!(
+            bytes.len() > 98,
+            "expected an audio packet after Opus headers, got {} bytes",
+            bytes.len()
+        );
+        assert_eq!(&bytes[..4], b"OggS");
+    }
+
+    #[test]
     fn writes_opus_with_non_zero_pre_skip() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("audio_preskip.opus");

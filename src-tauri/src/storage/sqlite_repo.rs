@@ -209,10 +209,7 @@ pub(crate) fn audio_duration_hms(meta: &SessionMeta) -> String {
     format_hms(ended.signed_duration_since(started).num_seconds())
 }
 
-pub(crate) fn effective_audio_file_for_session(
-    session_dir: &Path,
-    meta: &SessionMeta,
-) -> String {
+pub(crate) fn effective_audio_file_for_session(session_dir: &Path, meta: &SessionMeta) -> String {
     let speed_file = meta.artifacts.speed_adjusted_audio_file.trim();
     if !speed_file.is_empty()
         && meta.artifacts.audio_speed_multiplier.is_some()
@@ -628,7 +625,8 @@ pub fn list_sessions(app_data_dir: &Path) -> Result<Vec<SessionListItem>, String
                     let summary_ok =
                         file_has_non_empty_text(&session_dir.join(&meta.artifacts.summary_file));
                     item.audio_file = meta.artifacts.audio_file.clone();
-                    let effective_audio_file = effective_audio_file_for_session(&session_dir, &meta);
+                    let effective_audio_file =
+                        effective_audio_file_for_session(&session_dir, &meta);
                     if effective_audio_file != meta.artifacts.audio_file {
                         item.speed_adjusted_audio_file = Some(effective_audio_file);
                         item.audio_speed_multiplier = meta.artifacts.audio_speed_multiplier;
@@ -1059,7 +1057,10 @@ mod tests {
 
         let sessions = list_sessions(dir.path()).expect("list sessions");
 
-        assert_eq!(sessions[0].speed_adjusted_audio_file.as_deref(), Some("audio_1.5x.opus"));
+        assert_eq!(
+            sessions[0].speed_adjusted_audio_file.as_deref(),
+            Some("audio_1.5x.opus")
+        );
         assert_eq!(sessions[0].audio_speed_multiplier, Some(1.5));
     }
 
