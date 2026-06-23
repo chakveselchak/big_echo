@@ -253,6 +253,87 @@ describe("useSessions", () => {
     expect(result.current.knownTags).toEqual(["new"]);
   });
 
+  it("keeps newer known tags when an older session reload tag refresh resolves later", async () => {
+    const knownTagResolvers: Array<(tags: string[]) => void> = [];
+    const baseSession = {
+      session_id: "s1",
+      status: "recorded",
+      primary_tag: "zoom",
+      topic: "Weekly sync",
+      display_date_ru: "11.03.2026",
+      started_at_iso: "2026-03-11T10:00:00+03:00",
+      session_dir: "/tmp/s1",
+      audio_duration_hms: "00:15:20",
+      has_transcript_text: true,
+      has_summary_text: false,
+      meta: {
+        session_id: "s1",
+        source: "zoom",
+        notes: "",
+        custom_summary_prompt: "",
+        topic: "Weekly sync",
+        tags: [],
+      },
+    };
+
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") return [baseSession];
+      if (cmd === "update_session_details") return "updated";
+      if (cmd === "list_known_tags") {
+        return new Promise<string[]>((resolve) => {
+          knownTagResolvers.push(resolve);
+        });
+      }
+      return args ?? null;
+    });
+
+    const { result } = renderHook(() =>
+      useSessions({ setStatus: vi.fn(), lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    let initialLoad!: Promise<void>;
+    await act(async () => {
+      initialLoad = result.current.loadSessions();
+    });
+    await act(async () => {
+      knownTagResolvers[0](["initial"]);
+      await initialLoad;
+    });
+
+    let olderReload!: Promise<void>;
+    await act(async () => {
+      olderReload = result.current.loadSessions();
+    });
+    await waitFor(() => {
+      expect(knownTagResolvers).toHaveLength(2);
+    });
+
+    let savePromise!: Promise<boolean>;
+    await act(async () => {
+      savePromise = result.current.saveSessionDetails("s1", {
+        ...result.current.sessionDetails.s1!,
+        tags: ["new"],
+      });
+    });
+    await waitFor(() => {
+      expect(knownTagResolvers).toHaveLength(3);
+    });
+
+    await act(async () => {
+      knownTagResolvers[2](["new"]);
+      await savePromise;
+    });
+
+    expect(result.current.knownTags).toEqual(["new"]);
+
+    await act(async () => {
+      knownTagResolvers[1](["old"]);
+      await olderReload;
+    });
+
+    expect(result.current.knownTags).toEqual(["new"]);
+  });
+
   it("imports an audio file as a native session and reloads the list", async () => {
     let listCalls = 0;
     invokeMock.mockImplementation(async (cmd: string) => {

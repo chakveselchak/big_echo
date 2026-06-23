@@ -122,12 +122,12 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const loadSessionsRequestIdRef = useRef(0);
   const speedRequestTokenBySessionRef = useRef<Record<string, number>>({});
 
-  async function fetchKnownTags() {
+  async function loadKnownTags() {
+    const requestId = knownTagsRequestIdRef.current + 1;
+    knownTagsRequestIdRef.current = requestId;
     const tags = await tauriInvoke<string[]>("list_known_tags");
-    return normalizeTags(tags ?? []);
-  }
-
-  function applyKnownTags(normalized: string[]) {
+    if (knownTagsRequestIdRef.current !== requestId) return;
+    const normalized = normalizeTags(tags ?? []);
     // Preserve reference when content is unchanged — downstream
     // `knownTagOptions` useMemo in SessionList depends on this array.
     setKnownTags((prev) =>
@@ -135,14 +135,6 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         ? prev
         : normalized,
     );
-  }
-
-  async function loadKnownTags() {
-    const requestId = knownTagsRequestIdRef.current + 1;
-    knownTagsRequestIdRef.current = requestId;
-    const normalized = await fetchKnownTags();
-    if (knownTagsRequestIdRef.current !== requestId) return;
-    applyKnownTags(normalized);
   }
 
   async function loadSessions(options: LoadSessionsOptions = {}) {
@@ -173,7 +165,6 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         }
       })
     );
-    const normalizedKnownTags = await fetchKnownTags().catch(() => null);
     if (!shouldApply()) return;
 
     // Preserve item identity when fields match the previous snapshot so that
@@ -253,10 +244,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     };
     setSessionDetails(mergeDetails);
     setSavedSessionDetails(mergeDetails);
-    if (normalizedKnownTags) {
-      knownTagsRequestIdRef.current += 1;
-      applyKnownTags(normalizedKnownTags);
-    }
+    if (shouldApply()) void loadKnownTags().catch(() => undefined);
   }
 
   async function getText(sessionId: string) {
