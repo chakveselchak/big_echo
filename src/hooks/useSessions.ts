@@ -119,14 +119,15 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
   const artifactSearchRequestIdRef = useRef(0);
   const knownTagsRequestIdRef = useRef(0);
+  const loadSessionsRequestIdRef = useRef(0);
   const speedRequestTokenBySessionRef = useRef<Record<string, number>>({});
 
-  async function loadKnownTags() {
-    const requestId = knownTagsRequestIdRef.current + 1;
-    knownTagsRequestIdRef.current = requestId;
+  async function fetchKnownTags() {
     const tags = await tauriInvoke<string[]>("list_known_tags");
-    if (knownTagsRequestIdRef.current !== requestId) return;
-    const normalized = normalizeTags(tags ?? []);
+    return normalizeTags(tags ?? []);
+  }
+
+  function applyKnownTags(normalized: string[]) {
     // Preserve reference when content is unchanged — downstream
     // `knownTagOptions` useMemo in SessionList depends on this array.
     setKnownTags((prev) =>
@@ -136,8 +137,19 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     );
   }
 
+  async function loadKnownTags() {
+    const requestId = knownTagsRequestIdRef.current + 1;
+    knownTagsRequestIdRef.current = requestId;
+    const normalized = await fetchKnownTags();
+    if (knownTagsRequestIdRef.current !== requestId) return;
+    applyKnownTags(normalized);
+  }
+
   async function loadSessions(options: LoadSessionsOptions = {}) {
-    const shouldApply = options.shouldApply ?? (() => true);
+    const requestId = loadSessionsRequestIdRef.current + 1;
+    loadSessionsRequestIdRef.current = requestId;
+    const callerShouldApply = options.shouldApply ?? (() => true);
+    const shouldApply = () => loadSessionsRequestIdRef.current === requestId && callerShouldApply();
     try {
       await loadSessionsInner({ shouldApply });
     } finally {
@@ -148,6 +160,22 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   async function loadSessionsInner({ shouldApply = () => true }: LoadSessionsOptions = {}) {
     const data = await tauriInvoke<SessionListItem[]>("list_sessions");
     if (!shouldApply()) return;
+    const details = await Promise.all(
+      data.map(async (item) => {
+        if (item.meta) {
+          return [item.session_id, normalizeSessionMeta(item.meta)] as const;
+        }
+        try {
+          const meta = await tauriInvoke<SessionMetaView>("get_session_meta", { sessionId: item.session_id });
+          return [item.session_id, normalizeSessionMeta(meta)] as const;
+        } catch {
+          return [item.session_id, fallbackSessionMeta(item)] as const;
+        }
+      })
+    );
+    const normalizedKnownTags = await fetchKnownTags().catch(() => null);
+    if (!shouldApply()) return;
+
     // Preserve item identity when fields match the previous snapshot so that
     // SessionCard (wrapped in React.memo) can skip re-render for unchanged
     // rows after Refresh. Shallow-compares the relevant fields.
@@ -194,20 +222,6 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       }
       return data;
     });
-    const details = await Promise.all(
-      data.map(async (item) => {
-        if (item.meta) {
-          return [item.session_id, normalizeSessionMeta(item.meta)] as const;
-        }
-        try {
-          const meta = await tauriInvoke<SessionMetaView>("get_session_meta", { sessionId: item.session_id });
-          return [item.session_id, normalizeSessionMeta(meta)] as const;
-        } catch {
-          return [item.session_id, fallbackSessionMeta(item)] as const;
-        }
-      })
-    );
-    if (!shouldApply()) return;
     // Preserve object identity for unchanged entries so React.memo on
     // SessionCard can skip re-render for sessions whose metadata didn't
     // actually change. Without this, every Refresh click produces a fresh
@@ -239,8 +253,10 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     };
     setSessionDetails(mergeDetails);
     setSavedSessionDetails(mergeDetails);
-    if (!shouldApply()) return;
-    await loadKnownTags().catch(() => undefined);
+    if (normalizedKnownTags) {
+      knownTagsRequestIdRef.current += 1;
+      applyKnownTags(normalizedKnownTags);
+    }
   }
 
   async function getText(sessionId: string) {
@@ -325,6 +341,8 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       if (!isLatestRequest()) return;
       setStatus("session_speed_updated");
     } catch (err) {
+      if (!isLatestRequest()) return;
+      await loadSessions({ shouldApply: isLatestRequest }).catch(() => undefined);
       if (!isLatestRequest()) return;
       setStatus(`error: ${getErrorMessage(err)}`);
     } finally {
