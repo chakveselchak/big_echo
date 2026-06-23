@@ -28,6 +28,10 @@ type UseSessionsOptions = {
   setLastSessionId: (sessionId: string | null) => void;
 };
 
+type LoadSessionsOptions = {
+  shouldApply?: () => boolean;
+};
+
 function sameTags(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -132,16 +136,18 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     );
   }
 
-  async function loadSessions() {
+  async function loadSessions(options: LoadSessionsOptions = {}) {
+    const shouldApply = options.shouldApply ?? (() => true);
     try {
-      await loadSessionsInner();
+      await loadSessionsInner({ shouldApply });
     } finally {
-      setIsInitialLoading(false);
+      if (shouldApply()) setIsInitialLoading(false);
     }
   }
 
-  async function loadSessionsInner() {
+  async function loadSessionsInner({ shouldApply = () => true }: LoadSessionsOptions = {}) {
     const data = await tauriInvoke<SessionListItem[]>("list_sessions");
+    if (!shouldApply()) return;
     // Preserve item identity when fields match the previous snapshot so that
     // SessionCard (wrapped in React.memo) can skip re-render for unchanged
     // rows after Refresh. Shallow-compares the relevant fields.
@@ -201,6 +207,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         }
       })
     );
+    if (!shouldApply()) return;
     // Preserve object identity for unchanged entries so React.memo on
     // SessionCard can skip re-render for sessions whose metadata didn't
     // actually change. Without this, every Refresh click produces a fresh
@@ -232,6 +239,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     };
     setSessionDetails(mergeDetails);
     setSavedSessionDetails(mergeDetails);
+    if (!shouldApply()) return;
     await loadKnownTags().catch(() => undefined);
   }
 
@@ -313,7 +321,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     try {
       await tauriInvoke<string>("set_session_transcription_audio_speed", { sessionId, speed });
       if (!isLatestRequest()) return;
-      await loadSessions();
+      await loadSessions({ shouldApply: isLatestRequest });
       if (!isLatestRequest()) return;
       setStatus("session_speed_updated");
     } catch (err) {
