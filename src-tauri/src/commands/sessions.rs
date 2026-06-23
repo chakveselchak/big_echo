@@ -1583,6 +1583,36 @@ mod tests {
     }
 
     #[test]
+    fn set_session_transcription_audio_speed_missing_original_audio_leaves_metadata_unchanged() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app_data_dir = temp.path().join("app");
+        let session_dir = temp.path().join("recordings").join("s-speed");
+        std::fs::create_dir_all(&session_dir).expect("session dir");
+
+        let mut meta = crate::domain::session::SessionMeta::new(
+            "s-speed".to_string(),
+            "general".to_string(),
+            vec![],
+            "Speed".to_string(),
+            String::new(),
+        );
+        meta.status = crate::domain::session::SessionStatus::Recorded;
+        meta.artifacts.audio_file = "audio.opus".to_string();
+        let meta_path = session_dir.join("meta.json");
+        crate::storage::session_store::save_meta(&meta_path, &meta).expect("save meta");
+        crate::storage::sqlite_repo::upsert_session(&app_data_dir, &meta, &session_dir, &meta_path)
+            .expect("upsert");
+
+        let err = set_session_transcription_audio_speed_core(&app_data_dir, "s-speed", 1.25)
+            .expect_err("missing original audio should fail");
+
+        assert_eq!(err, "Audio file not found");
+        let loaded = crate::storage::session_store::load_meta(&meta_path).expect("load meta");
+        assert_eq!(loaded.artifacts.speed_adjusted_audio_file, "");
+        assert_eq!(loaded.artifacts.audio_speed_multiplier, None);
+    }
+
+    #[test]
     fn set_session_transcription_audio_speed_rejects_unsupported_speed() {
         let temp = tempfile::tempdir().expect("tempdir");
         let err = set_session_transcription_audio_speed_core(temp.path(), "s-speed", 1.1)
