@@ -613,4 +613,92 @@ describe("useSessions", () => {
     });
     expect(invokeMock).toHaveBeenCalledWith("run_transcription", { sessionId: "s1" });
   });
+
+  it("sets session transcription speed and reloads sessions after success", async () => {
+    let listCalls = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "list_sessions") {
+        listCalls += 1;
+        return [
+          {
+            session_id: "s-speed",
+            status: "recorded",
+            primary_tag: "zoom",
+            topic: "Speed options",
+            display_date_ru: "12.03.2026",
+            started_at_iso: "2026-03-12T10:00:00+03:00",
+            session_dir: "/tmp/s-speed",
+            audio_file: "audio.opus",
+            audio_speed_multiplier: listCalls === 1 ? 1 : 1.5,
+            available_audio_speed_multipliers: [1, 1.5],
+            audio_duration_hms: "00:10:00",
+            has_transcript_text: true,
+            has_summary_text: false,
+            meta: {
+              session_id: "s-speed",
+              source: "zoom",
+              notes: "",
+              topic: "Speed options",
+              tags: [],
+            },
+          },
+        ];
+      }
+      if (cmd === "set_session_transcription_audio_speed") {
+        return "ok";
+      }
+      if (cmd === "list_known_tags") {
+        return [];
+      }
+      return args ?? null;
+    });
+
+    const setStatus = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    await act(async () => {
+      await result.current.loadSessions();
+    });
+
+    await act(async () => {
+      await result.current.setSessionTranscriptionSpeed("s-speed", 1.5);
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_session_transcription_audio_speed", {
+      sessionId: "s-speed",
+      speed: 1.5,
+    });
+    expect(listCalls).toBe(2);
+    expect(result.current.sessions[0].audio_speed_multiplier).toBe(1.5);
+    expect(result.current.speedPendingBySession["s-speed"]).toBe(false);
+    expect(setStatus).toHaveBeenCalledWith("session_speed_updated");
+  });
+
+  it("clears session transcription speed pending state after failure", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "set_session_transcription_audio_speed") {
+        throw new Error("speed unavailable");
+      }
+      return [];
+    });
+
+    const setStatus = vi.fn();
+    const { result } = renderHook(() =>
+      useSessions({ setStatus, lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    await act(async () => {
+      await result.current.setSessionTranscriptionSpeed("s-speed", 1.75);
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_session_transcription_audio_speed", {
+      sessionId: "s-speed",
+      speed: 1.75,
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("list_sessions");
+    expect(result.current.speedPendingBySession["s-speed"]).toBe(false);
+    expect(setStatus).toHaveBeenCalledWith("error: speed unavailable");
+  });
 });

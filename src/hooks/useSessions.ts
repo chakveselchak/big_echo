@@ -103,6 +103,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [textPendingBySession, setTextPendingBySession] = useState<Record<string, boolean>>({});
   const [summaryPendingBySession, setSummaryPendingBySession] = useState<Record<string, boolean>>({});
+  const [speedPendingBySession, setSpeedPendingBySession] = useState<Record<string, boolean>>({});
   const [pipelineStateBySession, setPipelineStateBySession] = useState<Record<string, PipelineUiState>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deletePendingSessionId, setDeletePendingSessionId] = useState<string | null>(null);
@@ -302,6 +303,19 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     }
   }
 
+  async function setSessionTranscriptionSpeed(sessionId: string, speed: number) {
+    setSpeedPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
+    try {
+      await tauriInvoke<string>("set_session_transcription_audio_speed", { sessionId, speed });
+      setStatus("session_speed_updated");
+      await loadSessions();
+    } catch (err) {
+      setStatus(`error: ${getErrorMessage(err)}`);
+    } finally {
+      setSpeedPendingBySession((prev) => ({ ...prev, [sessionId]: false }));
+    }
+  }
+
   async function persistSessionDetails(sessionId: string, detail: SessionMetaView) {
     await tauriInvoke<string>("update_session_details", {
       payload: {
@@ -496,6 +510,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         return next;
       });
       setSummaryPendingBySession((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+      setSpeedPendingBySession((prev) => {
         const next = { ...prev };
         delete next[sessionId];
         return next;
@@ -702,6 +721,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     setSessionArtifactSearchHits((prev) => prune(prev) ?? prev);
     setTextPendingBySession((prev) => prune(prev) ?? prev);
     setSummaryPendingBySession((prev) => prune(prev) ?? prev);
+    setSpeedPendingBySession((prev) => prune(prev) ?? prev);
     setPipelineStateBySession((prev) => prune(prev) ?? prev);
 
     // Refs don't trigger re-renders, but still hold memory. Clear any
@@ -780,7 +800,9 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     setPipelineStateBySession,
     setSessionDetails,
     setSessionSearchQuery,
+    setSessionTranscriptionSpeed,
     shareSessionAudio,
+    speedPendingBySession,
     summaryPendingBySession,
     syncedSessionIds,
     textPendingBySession,
