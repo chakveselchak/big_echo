@@ -65,6 +65,7 @@ describe("useSessions", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("loads sessions and meta details through the tauri adapter", async () => {
@@ -755,6 +756,55 @@ describe("useSessions", () => {
     expect(result.current.sessions[0].audio_speed_multiplier).toBe(1.5);
     expect(result.current.speedPendingBySession["s-speed"]).toBe(false);
     expect(setStatus).toHaveBeenCalledWith("session_speed_updated");
+  });
+
+  it("lets the speed pending loader render before invoking speed generation", async () => {
+    let frameCallback: FrameRequestCallback | null = null;
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frameCallback = callback;
+        return 1;
+      });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "set_session_transcription_audio_speed") {
+        return "ok";
+      }
+      if (cmd === "list_sessions") {
+        return [];
+      }
+      if (cmd === "list_known_tags") {
+        return [];
+      }
+      return args ?? null;
+    });
+
+    const { result } = renderHook(() =>
+      useSessions({ setStatus: vi.fn(), lastSessionId: null, setLastSessionId: vi.fn() })
+    );
+
+    let speedPromise!: Promise<void>;
+    act(() => {
+      speedPromise = result.current.setSessionTranscriptionSpeed("s-speed", 1.5);
+    });
+
+    expect(result.current.speedPendingBySession["s-speed"]).toBe(true);
+    expect(invokeMock).not.toHaveBeenCalledWith("set_session_transcription_audio_speed", {
+      sessionId: "s-speed",
+      speed: 1.5,
+    });
+
+    await act(async () => {
+      frameCallback?.(performance.now());
+      await speedPromise;
+    });
+
+    expect(requestAnimationFrameSpy).toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("set_session_transcription_audio_speed", {
+      sessionId: "s-speed",
+      speed: 1.5,
+    });
   });
 
   it("clears session transcription speed pending state after failure", async () => {

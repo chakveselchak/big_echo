@@ -666,12 +666,17 @@ pub(crate) fn set_session_transcription_audio_speed_core(
 }
 
 #[tauri::command]
-pub fn set_session_transcription_audio_speed(
+pub async fn set_session_transcription_audio_speed(
     dirs: tauri::State<'_, AppDirs>,
     session_id: String,
     speed: f32,
 ) -> Result<(), String> {
-    set_session_transcription_audio_speed_core(&dirs.app_data_dir, &session_id, speed)
+    let app_data_dir = dirs.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        set_session_transcription_audio_speed_core(&app_data_dir, &session_id, speed)
+    })
+    .await
+    .map_err(|err| format!("Audio speed-up task failed: {err}"))?
 }
 
 /// Delete just the audio file for a session, without removing the session

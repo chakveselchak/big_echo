@@ -32,6 +32,16 @@ type LoadSessionsOptions = {
   shouldApply?: () => boolean;
 };
 
+function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+      globalThis.setTimeout(resolve, 0);
+      return;
+    }
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 function sameTags(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -323,6 +333,8 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
 
     setSpeedPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
     try {
+      await waitForNextPaint();
+      if (!isLatestRequest()) return;
       await tauriInvoke<string>("set_session_transcription_audio_speed", { sessionId, speed });
       if (!isLatestRequest()) return;
       await loadSessions({ shouldApply: isLatestRequest });
