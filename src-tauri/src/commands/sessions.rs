@@ -591,10 +591,7 @@ pub fn wipe_session_audio_file(app_data_dir: &Path, session_id: &str) -> Result<
 
 fn validate_session_audio_speed(speed: f32) -> Result<f32, String> {
     const ALLOWED_SPEEDS: &[f32] = &[1.0, 1.25, 1.5, 1.75, 2.0];
-    if ALLOWED_SPEEDS
-        .iter()
-        .any(|allowed| (speed - allowed).abs() < 0.001)
-    {
+    if ALLOWED_SPEEDS.contains(&speed) {
         Ok(speed)
     } else {
         Err("Invalid audio speed multiplier".to_string())
@@ -614,14 +611,6 @@ pub(crate) fn set_session_transcription_audio_speed_core(
     let mut meta = load_meta(&meta_path)?;
 
     let audio_file = meta.artifacts.audio_file.trim();
-    if audio_file.is_empty() {
-        return Err("Audio file not found".to_string());
-    }
-    let original_audio_path = session_dir.join(audio_file);
-    if !original_audio_path.is_file() {
-        return Err("Audio file not found".to_string());
-    }
-
     if speed <= 1.0 {
         meta.artifacts.speed_adjusted_audio_file = String::new();
         meta.artifacts.audio_speed_multiplier = None;
@@ -634,6 +623,14 @@ pub(crate) fn set_session_transcription_audio_speed_core(
             "Selected original audio for manual transcription",
         )?;
         return Ok(());
+    }
+
+    if audio_file.is_empty() {
+        return Err("Audio file not found".to_string());
+    }
+    let original_audio_path = session_dir.join(audio_file);
+    if !original_audio_path.is_file() {
+        return Err("Audio file not found".to_string());
     }
 
     let speed_file = crate::audio::file_writer::speed_adjusted_audio_file_name(audio_file, speed)
@@ -1482,7 +1479,6 @@ mod tests {
         let app_data_dir = temp.path().join("app");
         let session_dir = temp.path().join("recordings").join("s-speed");
         std::fs::create_dir_all(&session_dir).expect("session dir");
-        std::fs::write(session_dir.join("audio.opus"), b"original").expect("original audio");
         std::fs::write(session_dir.join("audio_1.5x.opus"), b"speed").expect("speed audio");
 
         let mut meta = crate::domain::session::SessionMeta::new(
@@ -1591,6 +1587,15 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let err = set_session_transcription_audio_speed_core(temp.path(), "s-speed", 1.1)
             .expect_err("unsupported speed should fail");
+
+        assert_eq!(err, "Invalid audio speed multiplier");
+    }
+
+    #[test]
+    fn set_session_transcription_audio_speed_rejects_near_unsupported_speed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = set_session_transcription_audio_speed_core(temp.path(), "s-speed", 1.0005)
+            .expect_err("near unsupported speed should fail");
 
         assert_eq!(err, "Invalid audio speed multiplier");
     }
