@@ -36,8 +36,9 @@ use commands::sessions::{
     auto_delete_old_session_audio, delete_session, delete_session_audio, delete_summary_prompt,
     get_live_input_levels, get_session_meta, get_ui_sync_state, import_audio_session,
     list_known_tags, list_sessions, list_summary_prompts, open_session_artifact,
-    open_session_folder, read_session_artifact, search_session_artifacts, set_ui_sync_state,
-    sync_sessions, update_session_details, upsert_summary_prompt,
+    open_session_folder, read_session_artifact, search_session_artifacts,
+    set_session_transcription_audio_speed, set_ui_sync_state, sync_sessions,
+    update_session_details, upsert_summary_prompt,
 };
 use commands::settings::{
     detect_system_source_device, get_computer_name, get_macos_system_audio_permission_status,
@@ -721,6 +722,7 @@ fn main() {
             read_session_artifact,
             delete_session,
             delete_session_audio,
+            set_session_transcription_audio_speed,
             auto_delete_old_session_audio,
             list_sessions,
             list_known_tags,
@@ -1042,6 +1044,7 @@ mod ipc_runtime_tests {
                 read_session_artifact,
                 delete_session,
                 delete_session_audio,
+                set_session_transcription_audio_speed,
                 auto_delete_old_session_audio,
                 list_known_tags,
                 get_session_meta,

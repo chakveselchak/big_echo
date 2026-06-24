@@ -1419,6 +1419,43 @@ select {
   border-color: rgba(141, 154, 170, 0.12);
 }
 
+.session-speed-button {
+  color: gray;
+}
+
+.session-speed-button svg {
+  display: block;
+}
+
+.session-speed-menu-item {
+  display: grid;
+  grid-template-columns: 18px minmax(48px, 1fr) 14px;
+  align-items: center;
+  gap: 8px;
+  min-width: 112px;
+}
+
+.session-speed-value {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-speed-check-slot,
+.session-speed-dot-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.session-speed-available-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success, #27ae60);
+}
+
 .session-summary-prompt-button {
   width: 36px;
   height: 36px;

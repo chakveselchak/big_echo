@@ -28,7 +28,27 @@ type UseSessionsOptions = {
   setLastSessionId: (sessionId: string | null) => void;
 };
 
+type LoadSessionsOptions = {
+  shouldApply?: () => boolean;
+};
+
+function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+      globalThis.setTimeout(resolve, 0);
+      return;
+    }
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 function sameTags(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameNumberArray(left: number[] | undefined, right: number[] | undefined) {
+  if (left === right) return true;
+  if (!left || !right) return false;
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
@@ -97,6 +117,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [textPendingBySession, setTextPendingBySession] = useState<Record<string, boolean>>({});
   const [summaryPendingBySession, setSummaryPendingBySession] = useState<Record<string, boolean>>({});
+  const [speedPendingBySession, setSpeedPendingBySession] = useState<Record<string, boolean>>({});
   const [pipelineStateBySession, setPipelineStateBySession] = useState<Record<string, PipelineUiState>>({});
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deletePendingSessionId, setDeletePendingSessionId] = useState<string | null>(null);
@@ -108,6 +129,8 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
   const pendingAutosaveSignatureRef = useRef<Record<string, string>>({});
   const artifactSearchRequestIdRef = useRef(0);
   const knownTagsRequestIdRef = useRef(0);
+  const loadSessionsRequestIdRef = useRef(0);
+  const speedRequestTokenBySessionRef = useRef<Record<string, number>>({});
 
   async function loadKnownTags() {
     const requestId = knownTagsRequestIdRef.current + 1;
@@ -124,16 +147,36 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     );
   }
 
-  async function loadSessions() {
+  async function loadSessions(options: LoadSessionsOptions = {}) {
+    const requestId = loadSessionsRequestIdRef.current + 1;
+    loadSessionsRequestIdRef.current = requestId;
+    const callerShouldApply = options.shouldApply ?? (() => true);
+    const shouldApply = () => loadSessionsRequestIdRef.current === requestId && callerShouldApply();
     try {
-      await loadSessionsInner();
+      await loadSessionsInner({ shouldApply });
     } finally {
-      setIsInitialLoading(false);
+      if (shouldApply()) setIsInitialLoading(false);
     }
   }
 
-  async function loadSessionsInner() {
+  async function loadSessionsInner({ shouldApply = () => true }: LoadSessionsOptions = {}) {
     const data = await tauriInvoke<SessionListItem[]>("list_sessions");
+    if (!shouldApply()) return;
+    const details = await Promise.all(
+      data.map(async (item) => {
+        if (item.meta) {
+          return [item.session_id, normalizeSessionMeta(item.meta)] as const;
+        }
+        try {
+          const meta = await tauriInvoke<SessionMetaView>("get_session_meta", { sessionId: item.session_id });
+          return [item.session_id, normalizeSessionMeta(meta)] as const;
+        } catch {
+          return [item.session_id, fallbackSessionMeta(item)] as const;
+        }
+      })
+    );
+    if (!shouldApply()) return;
+
     // Preserve item identity when fields match the previous snapshot so that
     // SessionCard (wrapped in React.memo) can skip re-render for unchanged
     // rows after Refresh. Shallow-compares the relevant fields.
@@ -156,6 +199,10 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
             existing.audio_file === fresh.audio_file &&
             existing.speed_adjusted_audio_file === fresh.speed_adjusted_audio_file &&
             existing.audio_speed_multiplier === fresh.audio_speed_multiplier &&
+            sameNumberArray(
+              existing.available_audio_speed_multipliers,
+              fresh.available_audio_speed_multipliers,
+            ) &&
             existing.audio_format === fresh.audio_format &&
             existing.audio_duration_hms === fresh.audio_duration_hms &&
             existing.has_transcript_text === fresh.has_transcript_text &&
@@ -176,19 +223,6 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       }
       return data;
     });
-    const details = await Promise.all(
-      data.map(async (item) => {
-        if (item.meta) {
-          return [item.session_id, normalizeSessionMeta(item.meta)] as const;
-        }
-        try {
-          const meta = await tauriInvoke<SessionMetaView>("get_session_meta", { sessionId: item.session_id });
-          return [item.session_id, normalizeSessionMeta(meta)] as const;
-        } catch {
-          return [item.session_id, fallbackSessionMeta(item)] as const;
-        }
-      })
-    );
     // Preserve object identity for unchanged entries so React.memo on
     // SessionCard can skip re-render for sessions whose metadata didn't
     // actually change. Without this, every Refresh click produces a fresh
@@ -220,7 +254,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     };
     setSessionDetails(mergeDetails);
     setSavedSessionDetails(mergeDetails);
-    await loadKnownTags().catch(() => undefined);
+    if (shouldApply()) void loadKnownTags().catch(() => undefined);
   }
 
   async function getText(sessionId: string) {
@@ -289,6 +323,31 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
       setStatus(`error: ${message}`);
     } finally {
       setSummaryPendingBySession((prev) => ({ ...prev, [sessionId]: false }));
+    }
+  }
+
+  async function setSessionTranscriptionSpeed(sessionId: string, speed: number) {
+    const token = (speedRequestTokenBySessionRef.current[sessionId] ?? 0) + 1;
+    speedRequestTokenBySessionRef.current[sessionId] = token;
+    const isLatestRequest = () => speedRequestTokenBySessionRef.current[sessionId] === token;
+
+    setSpeedPendingBySession((prev) => ({ ...prev, [sessionId]: true }));
+    try {
+      await waitForNextPaint();
+      if (!isLatestRequest()) return;
+      await tauriInvoke<string>("set_session_transcription_audio_speed", { sessionId, speed });
+      if (!isLatestRequest()) return;
+      await loadSessions({ shouldApply: isLatestRequest });
+      if (!isLatestRequest()) return;
+      setStatus("session_speed_updated");
+    } catch (err) {
+      if (!isLatestRequest()) return;
+      await loadSessions({ shouldApply: isLatestRequest }).catch(() => undefined);
+      if (!isLatestRequest()) return;
+      setStatus(`error: ${getErrorMessage(err)}`);
+    } finally {
+      if (!isLatestRequest()) return;
+      setSpeedPendingBySession((prev) => ({ ...prev, [sessionId]: false }));
     }
   }
 
@@ -490,6 +549,12 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
         delete next[sessionId];
         return next;
       });
+      setSpeedPendingBySession((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+      delete speedRequestTokenBySessionRef.current[sessionId];
       setPipelineStateBySession((prev) => {
         const next = { ...prev };
         delete next[sessionId];
@@ -692,6 +757,7 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     setSessionArtifactSearchHits((prev) => prune(prev) ?? prev);
     setTextPendingBySession((prev) => prune(prev) ?? prev);
     setSummaryPendingBySession((prev) => prune(prev) ?? prev);
+    setSpeedPendingBySession((prev) => prune(prev) ?? prev);
     setPipelineStateBySession((prev) => prune(prev) ?? prev);
 
     // Refs don't trigger re-renders, but still hold memory. Clear any
@@ -705,6 +771,11 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     for (const id of Object.keys(pendingAutosaveSignatureRef.current)) {
       if (!validIds.has(id)) {
         delete pendingAutosaveSignatureRef.current[id];
+      }
+    }
+    for (const id of Object.keys(speedRequestTokenBySessionRef.current)) {
+      if (!validIds.has(id)) {
+        delete speedRequestTokenBySessionRef.current[id];
       }
     }
   }, [sessions]);
@@ -770,7 +841,9 @@ export function useSessions({ setStatus, lastSessionId, setLastSessionId }: UseS
     setPipelineStateBySession,
     setSessionDetails,
     setSessionSearchQuery,
+    setSessionTranscriptionSpeed,
     shareSessionAudio,
+    speedPendingBySession,
     summaryPendingBySession,
     syncedSessionIds,
     textPendingBySession,

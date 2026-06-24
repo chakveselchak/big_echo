@@ -102,7 +102,9 @@ export function MainPage() {
     setDeleteTarget,
     setSessionDetails,
     setSessionSearchQuery,
+    setSessionTranscriptionSpeed,
     shareSessionAudio,
+    speedPendingBySession,
     summaryPendingBySession,
     syncedSessionIds,
     textPendingBySession,
@@ -295,6 +297,7 @@ export function MainPage() {
           sessionArtifactSearchHits={sessionArtifactSearchHits}
           textPendingBySession={textPendingBySession}
           summaryPendingBySession={summaryPendingBySession}
+          speedPendingBySession={speedPendingBySession}
           brainUploadPendingBySession={brainUploadPendingBySession}
           pipelineStateBySession={pipelineStateBySession}
           deleteTarget={deleteTarget}
@@ -327,6 +330,7 @@ export function MainPage() {
           requestDeleteAudio={requestDeleteAudio}
           onUploadToBrain={(sessionId) => void uploadSessionToBrain(sessionId)}
           onShareAudio={(sessionId) => void shareSessionAudio(sessionId)}
+          onSetTranscriptionSpeed={setSessionTranscriptionSpeed}
           syncedSessionIds={syncedSessionIds}
           setStatus={setStatus}
         />

@@ -333,6 +333,7 @@ mod tests {
             audio_file: "audio.opus".into(),
             speed_adjusted_audio_file: None,
             audio_speed_multiplier: None,
+            available_audio_speed_multipliers: vec![1.0],
             audio_format: "opus".into(),
             audio_duration_hms: "00:00:01".into(),
             has_transcript_text: false,

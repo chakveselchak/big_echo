@@ -1,15 +1,31 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Badge, Button, Col, ConfigProvider, Form, Input, InputNumber, Row, Select } from "antd";
-import { CheckSquareOutlined, ClearOutlined, DeleteOutlined, DeploymentUnitOutlined, ExportOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
+import { Badge, Button, Col, ConfigProvider, Dropdown, Form, Input, InputNumber, Row, Select } from "antd";
+import type { MenuProps } from "antd";
+import { CheckOutlined, CheckSquareOutlined, ClearOutlined, DeleteOutlined, DeploymentUnitOutlined, ExportOutlined, FolderOpenOutlined, MessageOutlined } from "@ant-design/icons";
 import type { BrainUploadStatus, PipelineUiState, SessionListItem, SessionMetaView } from "../../types";
-import { fixedSources } from "../../types";
+import { audioSpeedMultiplierOptions, fixedSources } from "../../types";
 import { formatSessionStatus } from "../../lib/status";
 import { extractStartTimeHm, parseDurationHms, resolveSessionAudioPath } from "../../lib/appUtils";
 import { AudioPlayer } from "./AudioPlayer";
 import { useI18n } from "../../i18n";
 
 const fixedSourceOptions = fixedSources.map((s) => ({ value: s, label: s }));
+const sessionSpeedOptions = audioSpeedMultiplierOptions;
+
+function SpeedometerIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 46 45" aria-hidden="true" focusable="false">
+      <g transform="translate(0.338000, 0.000000)" fill="currentColor" fillRule="nonzero">
+        <path d="M41.318,14.422 L44.464,10.672 C44.771,10.308 44.722,9.764 44.359,9.458 L41.822,7.328 C41.457,7.024 40.914,7.071 40.609,7.436 L37.679,10.927 C35.257,9.157 32.4,7.965 29.29,7.538 L29.29,4.444 L33.032,4.444 C33.452,4.444 33.792,4.103 33.792,3.682 L33.792,0.76 C33.792,0.339 33.452,0 33.032,0 L20.498,0 C20.078,0 19.738,0.339 19.738,0.76 L19.738,3.682 C19.738,4.103 20.078,4.444 20.498,4.444 L24.24,4.444 L24.24,7.526 C21.16,7.946 18.285,9.126 15.838,10.91 L12.924,7.437 C12.617,7.072 12.076,7.025 11.711,7.329 L9.174,9.459 C8.809,9.765 8.762,10.309 9.067,10.673 L12.202,14.409 C11.188,15.696 10.327,17.122 9.669,18.68 C9.343,19.446 9.702,20.33 10.468,20.655 C11.236,20.981 12.118,20.62 12.443,19.854 C14.881,14.086 20.504,10.36 26.767,10.36 C35.339,10.36 42.314,17.333 42.314,25.907 C42.314,34.477 35.339,41.451 26.767,41.451 C24.261,41.451 21.871,40.874 19.66,39.737 C18.922,39.354 18.014,39.645 17.633,40.385 C17.25,41.124 17.541,42.031 18.281,42.413 C20.885,43.755 23.82,44.463 26.767,44.463 C36.999,44.463 45.326,36.139 45.326,25.906 C45.324,21.571 43.818,17.586 41.318,14.422 Z" />
+        <path d="M29.951,26.481 C35.025,20.445 35.328,18.7 34.984,18.356 C34.64,18.014 32.896,18.315 26.861,23.391 C23.988,25.805 24.892,27.19 25.521,27.819 C26.15,28.45 27.537,29.354 29.951,26.481 Z" />
+        <path d="M17.73,24.225 C17.73,23.512 17.154,22.934 16.439,22.934 L1.291,22.934 C0.576,22.934 0,23.512 0,24.225 C0,24.938 0.576,25.516 1.291,25.516 L16.439,25.516 C17.154,25.516 17.73,24.938 17.73,24.225 Z" />
+        <path d="M16.439,29.461 L7.666,29.461 C6.953,29.461 6.373,30.039 6.373,30.752 C6.373,31.465 6.953,32.043 7.666,32.043 L16.439,32.043 C17.154,32.043 17.73,31.465 17.73,30.752 C17.73,30.039 17.154,29.461 16.439,29.461 Z" />
+        <path d="M16.439,35.989 L3.793,35.989 C3.078,35.989 2.5,36.566 2.5,37.28 C2.5,37.993 3.078,38.571 3.793,38.571 L16.439,38.571 C17.154,38.571 17.73,37.993 17.73,37.28 C17.73,36.566 17.154,35.989 16.439,35.989 Z" />
+      </g>
+    </svg>
+  );
+}
 
 function formatDurationHms(totalSeconds: number): string {
   const safe = Math.max(0, Math.round(totalSeconds));
@@ -67,6 +83,8 @@ type SessionCardProps = {
   canShare: boolean;
   onExportTodoist: (sessionId: string) => void;
   todoistPending: boolean;
+  onSetTranscriptionSpeed: (sessionId: string, speed: number) => void;
+  speedPending: boolean;
   setStatus: (status: string) => void;
 };
 
@@ -98,6 +116,8 @@ function SessionCardImpl({
   canShare,
   onExportTodoist,
   todoistPending,
+  onSetTranscriptionSpeed,
+  speedPending,
   setStatus,
 }: SessionCardProps) {
   const { t } = useI18n();
@@ -171,6 +191,25 @@ function SessionCardImpl({
     item.speed_adjusted_audio_file?.trim() && item.audio_speed_multiplier
       ? `${Number(item.audio_speed_multiplier).toString()}x`
       : "";
+  const selectedSpeed = speedLabel ? item.audio_speed_multiplier ?? 1 : 1;
+  const availableSpeeds = new Set(item.available_audio_speed_multipliers ?? []);
+  const speedMenuItems: MenuProps["items"] = sessionSpeedOptions.map((speed) => ({
+    key: String(speed),
+    disabled: speedPending,
+    label: (
+      <span className="session-speed-menu-item">
+        <span className="session-speed-check-slot">
+          {selectedSpeed === speed && <CheckOutlined aria-hidden="true" />}
+        </span>
+        <span className="session-speed-value">{speed}x</span>
+        <span className="session-speed-dot-slot">
+          {availableSpeeds.has(speed) && <span className="session-speed-available-dot" aria-hidden="true" />}
+        </span>
+        {selectedSpeed === speed && <span className="visually-hidden"> selected</span>}
+        {availableSpeeds.has(speed) && <span className="visually-hidden"> recording available</span>}
+      </span>
+    ),
+  }));
   const speedDurationDelta = speedLabel
     ? speedDurationDeltaLabel(item.audio_duration_hms, item.audio_speed_multiplier)
     : "";
@@ -281,6 +320,33 @@ function SessionCardImpl({
             )}
           </div>
           <div className="session-card-icon-actions">
+            {hasAudio && (
+              <Dropdown
+                menu={{
+                  items: speedMenuItems,
+                  selectedKeys: [String(selectedSpeed)],
+                  onClick: ({ key }) => {
+                    if (speedPending) return;
+                    onSetTranscriptionSpeed(item.session_id, Number(key));
+                  },
+                }}
+                trigger={["click"]}
+                disabled={speedPending}
+              >
+                <Button
+                  htmlType="button"
+                  type="text"
+                  size="small"
+                  shape="circle"
+                  className="session-speed-button"
+                  aria-label="Выбрать скорость транскрибации"
+                  title="Выбрать скорость транскрибации"
+                  loading={speedPending}
+                  disabled={speedPending}
+                  icon={<SpeedometerIcon />}
+                />
+              </Dropdown>
+            )}
             <Button
               htmlType="button"
               type="text"

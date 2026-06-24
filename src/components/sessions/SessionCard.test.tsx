@@ -79,6 +79,8 @@ function makeProps(overrides: Partial<SessionCardProps> = {}): SessionCardProps 
     canShare: false,
     onExportTodoist: noop,
     todoistPending: false,
+    onSetTranscriptionSpeed: noop,
+    speedPending: false,
     setStatus: noop,
     ...overrides,
   };
@@ -232,37 +234,12 @@ describe("SessionCard Brain upload status", () => {
   });
 
   it("uses local pending state to disable upload before backend refresh", () => {
-    const noop = () => undefined;
     renderWithI18n(
       <SessionCard
-        item={makeItem("not_uploaded")}
-        detail={makeDetail()}
-        textPending={false}
-        summaryPending={false}
-        pipelineState={undefined}
-        searchQuery=""
-        knownTagOptions={[]}
-        transcriptMatch={false}
-        summaryMatch={false}
-        showNumSpeakers={false}
-        brainUploadPending={true}
-        brainSyncReady={true}
-        onContextMenu={noop}
-        onDetailChange={noop}
-        onOpenArtifact={noop}
-        onGetText={noop}
-        onGetSummary={noop}
-        onOpenSummaryPrompt={noop}
-        onDelete={noop}
-        onDeleteAudio={noop}
-        onFieldBlur={noop}
-        onOpenFolder={noop}
-        onUploadToBrain={noop}
-        onShare={noop}
-        canShare={false}
-        onExportTodoist={noop}
-        setStatus={noop}
-        todoistPending={false}
+        {...makeProps({
+          item: makeItem("not_uploaded"),
+          brainUploadPending: true,
+        })}
       />,
     );
 
@@ -330,5 +307,109 @@ describe("SessionCard share button", () => {
     expect(
       screen.queryByRole("button", { name: "Поделиться ссылкой на аудио" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionCard speed dropdown", () => {
+  it("renders speed choices with accessible selected and availability state", async () => {
+    const user = userEvent.setup();
+    const onSetSpeed = vi.fn();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            audio_file: "audio.opus",
+            speed_adjusted_audio_file: "audio_1.5x.opus",
+            audio_speed_multiplier: 1.5,
+            available_audio_speed_multipliers: [1, 1.25, 1.5],
+          }),
+          onSetTranscriptionSpeed: onSetSpeed,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+
+    expect(screen.getByRole("menuitem", { name: /1x/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1\.5x selected recording available/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /1\.25x recording available/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^2x$/ })).toBeInTheDocument();
+  });
+
+  it("defaults the selected speed to 1x when no selected speed audio is active", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            audio_file: "audio.opus",
+            audio_speed_multiplier: 1.75,
+            available_audio_speed_multipliers: [1, 1.75],
+          }),
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+
+    expect(screen.getByRole("menuitem", { name: /1x selected recording available/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^1\.75x recording available$/ })).toBeInTheDocument();
+  });
+
+  it("does not mark 1x as available when speed availability metadata is missing", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            audio_file: "",
+            speed_adjusted_audio_file: "audio_1.5x.opus",
+            audio_speed_multiplier: 1.5,
+            available_audio_speed_multipliers: undefined,
+          }),
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+
+    const oneX = screen.getByRole("menuitem", { name: /^1x$/ });
+    expect(oneX).toBeInTheDocument();
+    expect(oneX.querySelector(".session-speed-available-dot")).not.toBeInTheDocument();
+  });
+
+  it("calls speed selection when a dropdown speed is clicked", async () => {
+    const user = userEvent.setup();
+    const onSetSpeed = vi.fn();
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", {
+            session_id: "s-brain",
+            audio_file: "audio.opus",
+            available_audio_speed_multipliers: [1],
+          }),
+          onSetTranscriptionSpeed: onSetSpeed,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Выбрать скорость транскрибации" }));
+    await user.click(screen.getByRole("menuitem", { name: /2x/ }));
+
+    expect(onSetSpeed).toHaveBeenCalledWith("s-brain", 2);
+  });
+
+  it("disables the speed button while speed selection is pending", () => {
+    renderWithI18n(
+      <SessionCard
+        {...makeProps({
+          item: makeItem("uploaded", { audio_file: "audio.opus" }),
+          speedPending: true,
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Выбрать скорость транскрибации" })).toBeDisabled();
   });
 });
