@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const DEFAULT_SILENCE_SECONDS: &str = "0.02";
+const FFMPEG_SIDECAR_TRIPLE: &str = env!("FFMPEG_SIDECAR_TRIPLE");
 
 pub fn audio_file_name(audio_format: &str) -> String {
     format!("audio.{}", extension_for_format(audio_format))
@@ -211,11 +212,15 @@ fn ffmpeg_binary_candidates() -> Vec<PathBuf> {
     let ffmpeg_path = env::var("BIGECHO_FFMPEG_PATH").ok();
     let path_env = env::var("PATH").ok();
     let current_exe = env::current_exe().ok();
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
     ffmpeg_binary_candidates_for(
         ffmpeg_path.as_deref(),
         path_env.as_deref(),
         current_exe.as_deref(),
+        &manifest_dir,
+        FFMPEG_SIDECAR_TRIPLE,
+        ffmpeg_binary_name(),
     )
 }
 
@@ -223,8 +228,31 @@ fn ffmpeg_binary_candidates_for(
     ffmpeg_path: Option<&str>,
     path_env: Option<&str>,
     current_exe: Option<&Path>,
+    manifest_dir: &Path,
+    target_triple: &str,
+    binary_name: &str,
 ) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
+
+    if let Some(exe) = current_exe {
+        if let Some(exe_dir) = exe.parent() {
+            push_unique_candidate(&mut candidates, exe_dir.join(binary_name));
+            push_unique_candidate(&mut candidates, exe_dir.join("ffmpeg"));
+            if let Some(contents_dir) = exe_dir.parent() {
+                push_unique_candidate(
+                    &mut candidates,
+                    contents_dir.join("Resources").join(binary_name),
+                );
+            }
+        }
+    }
+
+    push_unique_candidate(
+        &mut candidates,
+        manifest_dir
+            .join("binaries")
+            .join(ffmpeg_source_name(target_triple, binary_name)),
+    );
 
     if let Some(path) = ffmpeg_path.map(str::trim).filter(|path| !path.is_empty()) {
         push_unique_candidate(&mut candidates, PathBuf::from(path));
@@ -236,22 +264,26 @@ fn ffmpeg_binary_candidates_for(
         }
     }
 
-    if let Some(exe) = current_exe {
-        if let Some(exe_dir) = exe.parent() {
-            push_unique_candidate(&mut candidates, exe_dir.join("ffmpeg"));
-            if let Some(contents_dir) = exe_dir.parent() {
-                push_unique_candidate(
-                    &mut candidates,
-                    contents_dir.join("Resources").join("ffmpeg"),
-                );
-            }
-        }
-    }
-
     push_unique_candidate(&mut candidates, PathBuf::from("/opt/homebrew/bin/ffmpeg"));
     push_unique_candidate(&mut candidates, PathBuf::from("/usr/local/bin/ffmpeg"));
 
     candidates
+}
+
+fn ffmpeg_source_name(target_triple: &str, binary_name: &str) -> String {
+    if binary_name.ends_with(".exe") {
+        format!("ffmpeg-{target_triple}.exe")
+    } else {
+        format!("ffmpeg-{target_triple}")
+    }
+}
+
+fn ffmpeg_binary_name() -> &'static str {
+    if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    }
 }
 
 fn push_unique_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
@@ -329,16 +361,47 @@ mod tests {
     }
 
     #[test]
-    fn ffmpeg_candidates_include_env_path_and_homebrew_locations() {
-        let candidates =
-            ffmpeg_binary_candidates_for(Some("/custom/ffmpeg"), Some("/tmp/bin:/usr/bin"), None);
+    fn ffmpeg_candidates_prefer_bundled_sidecar_before_env_and_path() {
+        let exe = Path::new("/Applications/BigEcho.app/Contents/MacOS/bigecho");
+        let manifest = Path::new("/repo/src-tauri");
+        let candidates = ffmpeg_binary_candidates_for(
+            Some("/custom/ffmpeg"),
+            Some("/tmp/bin:/usr/bin"),
+            Some(exe),
+            manifest,
+            "aarch64-apple-darwin",
+            "ffmpeg",
+        );
 
-        assert!(candidates.starts_with(&[
-            Path::new("/custom/ffmpeg").to_path_buf(),
-            Path::new("/tmp/bin/ffmpeg").to_path_buf(),
-            Path::new("/usr/bin/ffmpeg").to_path_buf(),
-        ]));
+        assert_eq!(
+            candidates.first().unwrap(),
+            &Path::new("/Applications/BigEcho.app/Contents/MacOS/ffmpeg").to_path_buf()
+        );
+        assert!(candidates.contains(
+            &Path::new("/repo/src-tauri/binaries/ffmpeg-aarch64-apple-darwin").to_path_buf()
+        ));
+        assert!(candidates.contains(&Path::new("/custom/ffmpeg").to_path_buf()));
         assert!(candidates.contains(&Path::new("/opt/homebrew/bin/ffmpeg").to_path_buf()));
         assert!(candidates.contains(&Path::new("/usr/local/bin/ffmpeg").to_path_buf()));
+    }
+
+    #[test]
+    fn ffmpeg_candidates_use_windows_sidecar_name() {
+        let exe = Path::new("C:\\Program Files\\BigEcho\\bigecho.exe");
+        let manifest = Path::new("C:\\repo\\src-tauri");
+        let candidates = ffmpeg_binary_candidates_for(
+            None,
+            None,
+            Some(exe),
+            manifest,
+            "x86_64-pc-windows-msvc",
+            "ffmpeg.exe",
+        );
+
+        assert!(candidates.contains(
+            &Path::new("C:\\repo\\src-tauri")
+                .join("binaries")
+                .join("ffmpeg-x86_64-pc-windows-msvc.exe")
+        ));
     }
 }

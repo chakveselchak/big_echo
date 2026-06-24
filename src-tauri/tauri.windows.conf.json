@@ -3,6 +3,8 @@
     "targets": [
       "nsis"
     ],
-    "externalBin": []
+    "externalBin": [
+      "binaries/ffmpeg"
+    ]
   }
 }
