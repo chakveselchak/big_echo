@@ -1,5 +1,6 @@
 use crate::audio::{capture::CaptureArtifacts, opus_writer};
-use std::path::Path;
+use std::env;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const DEFAULT_SILENCE_SECONDS: &str = "0.02";
@@ -76,7 +77,7 @@ pub fn write_capture_to_audio_file(
         return Err("System sample rate must be > 0".to_string());
     }
 
-    let mut command = Command::new("ffmpeg");
+    let mut command = ffmpeg_command();
     command
         .arg("-y")
         .arg("-loglevel")
@@ -120,7 +121,7 @@ pub fn write_silence_audio_file(
         return opus_writer::write_pcm_opus(output_path, 48_000, &[], opus_bitrate_kbps);
     }
 
-    let mut command = Command::new("ffmpeg");
+    let mut command = ffmpeg_command();
     command
         .arg("-y")
         .arg("-loglevel")
@@ -143,7 +144,7 @@ pub fn write_speed_adjusted_audio_file(
     opus_bitrate_kbps: u32,
     speed: f32,
 ) -> Result<(), String> {
-    let mut command = Command::new("ffmpeg");
+    let mut command = ffmpeg_command();
     command
         .arg("-y")
         .arg("-loglevel")
@@ -195,10 +196,74 @@ fn append_output_args(command: &mut Command, audio_format: &str, opus_bitrate_kb
     }
 }
 
+fn ffmpeg_command() -> Command {
+    Command::new(resolve_ffmpeg_binary())
+}
+
+fn resolve_ffmpeg_binary() -> PathBuf {
+    ffmpeg_binary_candidates()
+        .into_iter()
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("ffmpeg"))
+}
+
+fn ffmpeg_binary_candidates() -> Vec<PathBuf> {
+    let ffmpeg_path = env::var("BIGECHO_FFMPEG_PATH").ok();
+    let path_env = env::var("PATH").ok();
+    let current_exe = env::current_exe().ok();
+
+    ffmpeg_binary_candidates_for(
+        ffmpeg_path.as_deref(),
+        path_env.as_deref(),
+        current_exe.as_deref(),
+    )
+}
+
+fn ffmpeg_binary_candidates_for(
+    ffmpeg_path: Option<&str>,
+    path_env: Option<&str>,
+    current_exe: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = ffmpeg_path.map(str::trim).filter(|path| !path.is_empty()) {
+        push_unique_candidate(&mut candidates, PathBuf::from(path));
+    }
+
+    if let Some(path_env) = path_env {
+        for directory in env::split_paths(path_env) {
+            push_unique_candidate(&mut candidates, directory.join("ffmpeg"));
+        }
+    }
+
+    if let Some(exe) = current_exe {
+        if let Some(exe_dir) = exe.parent() {
+            push_unique_candidate(&mut candidates, exe_dir.join("ffmpeg"));
+            if let Some(contents_dir) = exe_dir.parent() {
+                push_unique_candidate(
+                    &mut candidates,
+                    contents_dir.join("Resources").join("ffmpeg"),
+                );
+            }
+        }
+    }
+
+    push_unique_candidate(&mut candidates, PathBuf::from("/opt/homebrew/bin/ffmpeg"));
+    push_unique_candidate(&mut candidates, PathBuf::from("/usr/local/bin/ffmpeg"));
+
+    candidates
+}
+
+fn push_unique_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
+    if !path.as_os_str().is_empty() && !candidates.contains(&path) {
+        candidates.push(path);
+    }
+}
+
 fn run_ffmpeg(mut command: Command) -> Result<(), String> {
     let output = command
         .output()
-        .map_err(|e| format!("failed to run ffmpeg: {e}"))?;
+        .map_err(|e| format!("failed to run ffmpeg: {e}. Install ffmpeg or set BIGECHO_FFMPEG_PATH to the ffmpeg binary path."))?;
     if output.status.success() {
         return Ok(());
     }
@@ -261,5 +326,19 @@ mod tests {
             mime_type_for_audio_path(Path::new("/tmp/audio.wav")),
             "audio/wav"
         );
+    }
+
+    #[test]
+    fn ffmpeg_candidates_include_env_path_and_homebrew_locations() {
+        let candidates =
+            ffmpeg_binary_candidates_for(Some("/custom/ffmpeg"), Some("/tmp/bin:/usr/bin"), None);
+
+        assert!(candidates.starts_with(&[
+            Path::new("/custom/ffmpeg").to_path_buf(),
+            Path::new("/tmp/bin/ffmpeg").to_path_buf(),
+            Path::new("/usr/bin/ffmpeg").to_path_buf(),
+        ]));
+        assert!(candidates.contains(&Path::new("/opt/homebrew/bin/ffmpeg").to_path_buf()));
+        assert!(candidates.contains(&Path::new("/usr/local/bin/ffmpeg").to_path_buf()));
     }
 }
